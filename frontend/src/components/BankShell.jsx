@@ -1,5 +1,5 @@
-import { Link, NavLink, useLocation, useParams } from "react-router-dom";
-import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, Home, Landmark, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
+import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowRight, ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, Home, Landmark, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 export const BankShell = ({ children }) => {
   const { bankId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   useEffect(() => {
@@ -35,6 +36,14 @@ export const BankShell = ({ children }) => {
     (canViewReports || canEnterDeposits || user?.permissions?.manage_reconciliations) && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
   ].filter(Boolean);
   const navItems = isReconciliationModule ? reconciliationNavItems : depositNavItems;
+
+  const requestNavigation = (action) => {
+    if (window.__bankAppConfirmNavigation) {
+      window.__bankAppConfirmNavigation(action);
+      return;
+    }
+    action();
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900" data-testid="bank-shell">
@@ -64,7 +73,10 @@ export const BankShell = ({ children }) => {
             <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="module-home-button">
               <Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link>
             </Button>
-            <Button onClick={logout} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="logout-button">
+            <Button onClick={() => requestNavigation(() => navigate(-1))} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="bank-shell-back-button">
+              <ArrowRight className="h-4 w-4" /> رجوع
+            </Button>
+            <Button onClick={() => requestNavigation(logout)} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="logout-button">
               <LogOut className="h-4 w-4" /> خروج
             </Button>
           </div>

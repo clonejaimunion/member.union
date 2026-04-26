@@ -1,11 +1,12 @@
-import { Link } from "react-router-dom";
-import { Building2, Landmark, LogOut, ShieldCheck, WalletCards } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Building2, Landmark, LogOut, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function ModuleSelection() {
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
   const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
@@ -45,6 +46,7 @@ export default function ModuleSelection() {
                 <Link to="/secure-admin-control-panel"><ShieldCheck className="h-4 w-4" /> لوحة الأدمن</Link>
               </Button>
             )}
+            <Button onClick={() => navigate(-1)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="module-selection-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="module-selection-logout-button"><LogOut className="h-4 w-4" /> خروج</Button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, Home, ShieldCheck, Trash2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRight, Home, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { bankPalette, fallbackBanks } from "@/lib/banks";
 const heroImage = "https://static.prod-images.emergentagent.com/jobs/4f04fbc5-156c-472b-951d-b7c652b3b7cc/images/36a05283766e2e65b334ee079225dde8ffc0c070fd433ac61be8d002f145fac0.png";
 
 export default function BankSelection({ mode = "deposits" }) {
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   const isReconciliation = mode === "reconciliations";
@@ -51,6 +52,7 @@ export default function BankSelection({ mode = "deposits" }) {
               <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-admin-button"><Link to="/secure-admin-control-panel">لوحة الأدمن</Link></Button>
             )}
             <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-modules-button"><Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link></Button>
+            <Button onClick={() => navigate(-1)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-logout-button">خروج</Button>
           </div>
         </div>

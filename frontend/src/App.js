@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { applyEasternArabicNumeralsToDocument } from "@/lib/format";
 import BankSelection from "@/pages/BankSelection";
 import DepositRegistration from "@/pages/DepositRegistration";
 import ReportPage from "@/pages/ReportPage";
@@ -18,6 +19,7 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
     document.documentElement.setAttribute("lang", "ar");
+    return applyEasternArabicNumeralsToDocument();
   }, []);
 
   return (

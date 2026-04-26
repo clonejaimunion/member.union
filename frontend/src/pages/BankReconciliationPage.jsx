@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,8 @@ const emptyCheck = () => ({ check_number: "", amount: "", check_date: currentMon
 
 export default function BankReconciliationPage() {
   const { bankId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   const [periodLabel, setPeriodLabel] = useState("");
@@ -34,8 +36,11 @@ export default function BankReconciliationPage() {
   const [reconciliations, setReconciliations] = useState([]);
   const [activeReconciliation, setActiveReconciliation] = useState(null);
   const [editingReconciliationId, setEditingReconciliationId] = useState(null);
-  const [selectedHistoryYear, setSelectedHistoryYear] = useState("all");
+  const [selectedHistoryYear, setSelectedHistoryYear] = useState("");
   const [saving, setSaving] = useState(false);
+  const [committedFormSnapshot, setCommittedFormSnapshot] = useState("");
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
@@ -66,15 +71,34 @@ export default function BankReconciliationPage() {
     return years;
   }, [reconciliations]);
 
+  const buildFormSnapshot = useCallback((data) => JSON.stringify({
+    periodLabel: data.periodLabel,
+    administration: data.administration,
+    bookBalance: data.bookBalance,
+    bankStatementBalance: data.bankStatementBalance,
+    outstandingChecks: data.outstandingChecks,
+    collectionChecks: data.collectionChecks,
+  }), []);
+
+  const currentFormSnapshot = useMemo(() => buildFormSnapshot({
+    periodLabel,
+    administration,
+    bookBalance,
+    bankStatementBalance,
+    outstandingChecks,
+    collectionChecks,
+  }), [administration, bankStatementBalance, bookBalance, buildFormSnapshot, collectionChecks, outstandingChecks, periodLabel]);
+
+  const hasUnsavedChanges = canEditReconciliation && Boolean(committedFormSnapshot) && currentFormSnapshot !== committedFormSnapshot;
+
   const filteredReconciliations = useMemo(() => {
-    if (selectedHistoryYear === "all") return reconciliations;
+    if (!selectedHistoryYear) return [];
     return reconciliations.filter((item) => getReconciliationYear(item) === selectedHistoryYear);
   }, [reconciliations, selectedHistoryYear]);
 
   const loadReconciliations = useCallback(() => {
     api.get(`/banks/${bankId}/reconciliations`).then((response) => {
       setReconciliations(response.data);
-      setActiveReconciliation(response.data[0] || null);
     }).catch(() => {
       setReconciliations([]);
       setActiveReconciliation(null);
@@ -85,6 +109,54 @@ export default function BankReconciliationPage() {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
     loadReconciliations();
   }, [bankId, loadReconciliations]);
+
+  useEffect(() => {
+    if (!committedFormSnapshot) setCommittedFormSnapshot(currentFormSnapshot);
+  }, [committedFormSnapshot, currentFormSnapshot]);
+
+  const requestNavigation = useCallback((action) => {
+    if (!hasUnsavedChanges) {
+      action();
+      return true;
+    }
+    setPendingNavigation(() => action);
+    setLeavePromptOpen(true);
+    return false;
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    window.__bankAppConfirmNavigation = requestNavigation;
+    return () => {
+      if (window.__bankAppConfirmNavigation === requestNavigation) delete window.__bankAppConfirmNavigation;
+    };
+  }, [requestNavigation]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    const handleDocumentClick = (event) => {
+      if (!hasUnsavedChanges || event.defaultPrevented) return;
+      const anchor = event.target.closest?.("a[href]");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#") || anchor.target === "_blank") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const url = new URL(anchor.href);
+      const nextPath = `${url.pathname}${url.search}${url.hash}`;
+      requestNavigation(() => navigate(nextPath));
+    };
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
+  }, [hasUnsavedChanges, location.pathname, navigate, requestNavigation]);
 
   const updateCheck = (type, index, field, value) => {
     const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
@@ -115,33 +187,53 @@ export default function BankReconciliationPage() {
     .map((item) => ({ check_number: item.check_number, amount: Number(item.amount || 0), check_date: normalizeMonthDayToDateTime(item.check_date) }));
 
   const fillFormFromReconciliation = (item) => {
+    const nextOutstandingChecks = (item.outstanding_checks?.length ? item.outstanding_checks : [emptyCheck()]).map((check) => ({
+      check_number: check.check_number || "",
+      amount: String(check.amount ?? ""),
+      check_date: formatCheckDate(check.check_date),
+    }));
+    const nextCollectionChecks = (item.collection_checks?.length ? item.collection_checks : [emptyCheck()]).map((check) => ({
+      check_number: check.check_number || "",
+      amount: String(check.amount ?? ""),
+      check_date: formatCheckDate(check.check_date),
+    }));
     setEditingReconciliationId(item.id);
     setActiveReconciliation(item);
     setPeriodLabel(item.period_label || "");
     setAdministration(item.administration || "النقابة العامة للعاملين بالزراعة والري");
     setBookBalance(String(item.book_balance ?? ""));
     setBankStatementBalance(String(item.bank_statement_balance ?? ""));
-    setOutstandingChecks((item.outstanding_checks?.length ? item.outstanding_checks : [emptyCheck()]).map((check) => ({
-      check_number: check.check_number || "",
-      amount: String(check.amount ?? ""),
-      check_date: formatCheckDate(check.check_date),
-    })));
-    setCollectionChecks((item.collection_checks?.length ? item.collection_checks : [emptyCheck()]).map((check) => ({
-      check_number: check.check_number || "",
-      amount: String(check.amount ?? ""),
-      check_date: formatCheckDate(check.check_date),
-    })));
+    setOutstandingChecks(nextOutstandingChecks);
+    setCollectionChecks(nextCollectionChecks);
+    setCommittedFormSnapshot(buildFormSnapshot({
+      periodLabel: item.period_label || "",
+      administration: item.administration || "النقابة العامة للعاملين بالزراعة والري",
+      bookBalance: String(item.book_balance ?? ""),
+      bankStatementBalance: String(item.bank_statement_balance ?? ""),
+      outstandingChecks: nextOutstandingChecks,
+      collectionChecks: nextCollectionChecks,
+    }));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const resetForm = () => {
+    const nextOutstandingChecks = [emptyCheck()];
+    const nextCollectionChecks = [emptyCheck()];
     setEditingReconciliationId(null);
     setPeriodLabel("");
     setAdministration("النقابة العامة للعاملين بالزراعة والري");
     setBookBalance("");
     setBankStatementBalance("");
-    setOutstandingChecks([emptyCheck()]);
-    setCollectionChecks([emptyCheck()]);
+    setOutstandingChecks(nextOutstandingChecks);
+    setCollectionChecks(nextCollectionChecks);
+    setCommittedFormSnapshot(buildFormSnapshot({
+      periodLabel: "",
+      administration: "النقابة العامة للعاملين بالزراعة والري",
+      bookBalance: "",
+      bankStatementBalance: "",
+      outstandingChecks: nextOutstandingChecks,
+      collectionChecks: nextCollectionChecks,
+    }));
   };
 
   const saveReconciliation = async (event) => {
@@ -160,6 +252,7 @@ export default function BankReconciliationPage() {
         ? await api.put(`/banks/${bankId}/reconciliations/${editingReconciliationId}`, payload)
         : await api.post(`/banks/${bankId}/reconciliations`, payload);
       setActiveReconciliation(response.data);
+      setCommittedFormSnapshot(currentFormSnapshot);
       toast.success(editingReconciliationId ? "تم تعديل مذكرة التسوية" : "تم حفظ مذكرة التسوية البنكية");
       setEditingReconciliationId(null);
       loadReconciliations();
@@ -201,6 +294,19 @@ export default function BankReconciliationPage() {
   const printReconciliation = (item) => {
     setActiveReconciliation(item);
     setTimeout(() => window.print(), 120);
+  };
+
+  const confirmLeaveWithoutSaving = () => {
+    setLeavePromptOpen(false);
+    setCommittedFormSnapshot(currentFormSnapshot);
+    const action = pendingNavigation;
+    setPendingNavigation(null);
+    if (action) action();
+  };
+
+  const cancelLeavePrompt = () => {
+    setLeavePromptOpen(false);
+    setPendingNavigation(null);
   };
 
   const CheckEditor = ({ title, type, checks }) => (
@@ -330,14 +436,24 @@ export default function BankReconciliationPage() {
           <div className="mb-5 max-w-xs" data-testid="reconciliations-year-filter-wrapper">
             <Label data-testid="reconciliations-year-filter-label">اختيار السنة</Label>
             <select value={selectedHistoryYear} onChange={(event) => setSelectedHistoryYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="reconciliations-year-filter-select">
-              <option value="all" data-testid="reconciliations-year-filter-all-option">كل السنوات</option>
+              <option value="" data-testid="reconciliations-year-filter-placeholder-option">اختر السنة لعرض المذكرات</option>
               {historyYears.map((year) => (
                 <option key={year} value={year} data-testid={`reconciliations-year-filter-option-${year}`}>{year}</option>
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="reconciliations-history-grid">
-            {filteredReconciliations.map((item) => (
+          {!selectedHistoryYear ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="reconciliations-history-year-required-state">
+              <p className="text-lg font-extrabold text-slate-950" data-testid="reconciliations-history-year-required-title">اختر السنة أولاً</p>
+              <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="reconciliations-history-year-required-description">لن تظهر المذكرات المحفوظة إلا بعد تحديد سنة من القائمة.</p>
+            </div>
+          ) : filteredReconciliations.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="reconciliations-history-empty-year-state">
+              <p className="text-lg font-extrabold text-slate-950" data-testid="reconciliations-history-empty-year-title">لا توجد مذكرات لهذه السنة</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="reconciliations-history-grid">
+              {filteredReconciliations.map((item) => (
               <div key={item.id} className={`rounded-xl border p-4 transition-transform hover:-translate-y-0.5 ${activeReconciliation?.id === item.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`reconciliation-history-card-${item.id}`}>
                 <button type="button" onClick={() => setActiveReconciliation(item)} className="w-full text-right" data-testid={`reconciliation-history-button-${item.id}`}>
                   <p className="text-xs font-bold opacity-70" data-testid={`reconciliation-history-button-${item.id}-period`}>{item.period_label || "بدون فترة"}</p>
@@ -363,8 +479,9 @@ export default function BankReconciliationPage() {
                   )}
                 </div>
               </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {activeReconciliation && (
@@ -386,6 +503,19 @@ export default function BankReconciliationPage() {
               <div className={`rounded-xl p-4 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xs font-bold opacity-80">الحالة</p><p className="text-xl font-extrabold">{activeReconciliation.status_text}</p></div>
             </div>
           </section>
+        )}
+
+        {leavePromptOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 print:hidden" data-testid="unsaved-reconciliation-modal-overlay">
+            <section className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-right shadow-2xl" role="dialog" aria-modal="true" data-testid="unsaved-reconciliation-modal">
+              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="unsaved-reconciliation-modal-title">لم يتم حفظ التغييرات</h3>
+              <p className="mt-3 text-sm font-semibold leading-7 text-slate-600" data-testid="unsaved-reconciliation-modal-description">يوجد تعديل داخل مذكرة التسوية لم يتم حفظه بعد.</p>
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="unsaved-reconciliation-modal-actions">
+                <Button type="button" onClick={confirmLeaveWithoutSaving} className="h-12 rounded-lg bg-red-700 text-white hover:bg-red-800" data-testid="confirm-leave-without-saving-button">موافق على عدم الحفظ</Button>
+                <Button type="button" onClick={cancelLeavePrompt} variant="outline" className="h-12 rounded-lg bg-white" data-testid="cancel-leave-and-save-button">تراجع للحفظ</Button>
+              </div>
+            </section>
+          </div>
         )}
       </div>
     </BankShell>
