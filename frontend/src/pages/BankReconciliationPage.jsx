@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
 import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
+import { BankLogo } from "@/components/BankLogo";
 
 const currentMonthDay = () => {
   const now = new Date();
@@ -25,6 +26,7 @@ export default function BankReconciliationPage() {
   const { user } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   const [periodLabel, setPeriodLabel] = useState("");
+  const [administration, setAdministration] = useState("النقابة العامة للعاملين بالزراعة والري");
   const [bookBalance, setBookBalance] = useState("");
   const [bankStatementBalance, setBankStatementBalance] = useState("");
   const [outstandingChecks, setOutstandingChecks] = useState([emptyCheck()]);
@@ -34,6 +36,7 @@ export default function BankReconciliationPage() {
   const [saving, setSaving] = useState(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
+  const organizationPrintName = (value) => value === "مشروع التكافل الاجتماعي" ? "النقابة العامة للزراعة والري - مشروع التكافل االجتماعي" : "النقابة العامة للعاملين بالزراعة والري";
 
   const totals = useMemo(() => {
     const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -98,6 +101,7 @@ export default function BankReconciliationPage() {
     try {
       const payload = {
         period_label: periodLabel,
+        administration,
         book_balance: Number(bookBalance || 0),
         bank_statement_balance: Number(bankStatementBalance || 0),
         outstanding_checks: cleanChecks(outstandingChecks),
@@ -169,7 +173,7 @@ export default function BankReconciliationPage() {
     </section>
   );
 
-  const ChecksTable = ({ title, rows, testId }) => (
+  const ChecksTable = ({ title, rows, testId, total }) => (
     <section className="space-y-3" data-testid={`${testId}-print-section`}>
       <h3 className="text-xl font-extrabold text-slate-950" data-testid={`${testId}-print-title`}>{title}</h3>
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid={`${testId}-table-wrapper`}>
@@ -189,6 +193,10 @@ export default function BankReconciliationPage() {
                 <TableCell data-testid={`${testId}-row-${index}-amount`}>{formatEgpText(row.amount)}</TableCell>
               </TableRow>
             ))}
+            <TableRow className="bg-slate-50 hover:bg-slate-50" data-testid={`${testId}-total-row`}>
+              <TableCell colSpan={2} className="font-extrabold text-slate-950" data-testid={`${testId}-total-label`}>الإجمالي</TableCell>
+              <TableCell className="font-extrabold text-slate-950" data-testid={`${testId}-total-amount`}>{formatEgpText(total)}</TableCell>
+            </TableRow>
           </TableBody>
         </Table>
       </div>
@@ -198,7 +206,7 @@ export default function BankReconciliationPage() {
   return (
     <BankShell>
       <div className="space-y-6" data-testid="bank-reconciliation-page">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8" data-testid="reconciliation-heading-section">
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8 print:hidden" data-testid="reconciliation-heading-section">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm font-extrabold text-emerald-700" data-testid="reconciliation-eyebrow">مذكرة تسوية</p>
@@ -212,6 +220,13 @@ export default function BankReconciliationPage() {
 
         <form onSubmit={saveReconciliation} className="space-y-6 print:hidden" data-testid="reconciliation-form">
           <section className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3" data-testid="reconciliation-balances-section">
+            <div className="space-y-2" data-testid="reconciliation-administration-wrapper">
+              <Label data-testid="reconciliation-administration-label">الإدارة</Label>
+              <select value={administration} onChange={(event) => setAdministration(event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="reconciliation-administration-select">
+                <option value="النقابة العامة للعاملين بالزراعة والري" data-testid="reconciliation-administration-option-union">النقابة العامة للعاملين بالزراعة والري</option>
+                <option value="مشروع التكافل الاجتماعي" data-testid="reconciliation-administration-option-social">مشروع التكافل الاجتماعي</option>
+              </select>
+            </div>
             <div className="space-y-2" data-testid="reconciliation-period-wrapper">
               <Label data-testid="reconciliation-period-label">الفترة / الشهر</Label>
               <Input value={periodLabel} onChange={(event) => setPeriodLabel(event.target.value)} placeholder="مثال: يناير 2025" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="reconciliation-period-input" />
@@ -263,19 +278,22 @@ export default function BankReconciliationPage() {
 
         {activeReconciliation && (
           <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
-            <div className="text-center" data-testid="reconciliation-print-header">
-              <p className="text-sm font-bold text-slate-500" data-testid="reconciliation-print-organization">النقابة العامة للزراعة والري - مشروع التكافل الاجتماعي</p>
-              <h2 className="mt-2 text-3xl font-extrabold text-slate-950" data-testid="reconciliation-print-title">مذكرة تسوية حساب - {bank.name}</h2>
+            <div className="relative text-center" data-testid="reconciliation-print-header">
+              <div className="absolute left-0 top-0" data-testid="reconciliation-print-bank-logo">
+                <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className="h-16 w-28" testId="reconciliation-print-bank-logo-mark" />
+              </div>
+              <p className="text-base font-extrabold text-slate-700" data-testid="reconciliation-print-organization">{organizationPrintName(activeReconciliation.administration)}</p>
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-print-kpis">
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد الدفتري</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-statement-balance"><p className="text-xs font-bold text-slate-500">رصيد كشف البنك</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.bank_statement_balance)}</p></div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="reconciliation-print-kpis">
+              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
               <div className="rounded-xl bg-slate-50 p-4" data-testid="print-calculated-balance"><p className="text-xs font-bold text-slate-500">الإجمالي</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>
+            </div>
+            {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
+            {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
+            <div className="flex justify-start pt-6" data-testid="print-status-wrapper">
               <div className={`rounded-xl p-4 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xs font-bold opacity-80">الحالة</p><p className="text-xl font-extrabold">{activeReconciliation.status_text}</p></div>
             </div>
-            <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" />
-            <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" />
           </section>
         )}
       </div>

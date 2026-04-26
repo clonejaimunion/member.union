@@ -276,6 +276,7 @@ class ReconciliationCheck(BaseModel):
 
 class BankReconciliationCreate(BaseModel):
     period_label: Optional[str] = None
+    administration: Optional[str] = "النقابة العامة للعاملين بالزراعة والري"
     book_balance: float
     bank_statement_balance: float
     outstanding_checks: List[ReconciliationCheck] = Field(default_factory=list)
