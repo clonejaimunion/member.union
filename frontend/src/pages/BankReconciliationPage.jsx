@@ -184,7 +184,7 @@ export default function BankReconciliationPage() {
               <Input type="number" step="0.01" value={bookBalance} onChange={(event) => setBookBalance(event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="book-balance-input" />
             </div>
             <div className="space-y-2" data-testid="bank-statement-balance-wrapper">
-              <Label data-testid="bank-statement-balance-label">الرصيد الشهري من واقع كشف حساب البنك</Label>
+              <Label data-testid="bank-statement-balance-label">الرصيد - كشف الحساب البنكي</Label>
               <Input type="number" step="0.01" value={bankStatementBalance} onChange={(event) => setBankStatementBalance(event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="bank-statement-balance-input" />
             </div>
           </section>
