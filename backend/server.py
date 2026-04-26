@@ -447,6 +447,18 @@ def require_permission(permission_name: str):
     return checker
 
 
+def require_any_permission(permission_names: List[str]):
+    async def checker(current_user: dict = Depends(get_current_user)) -> dict:
+        if current_user.get("role") == "admin":
+            return current_user
+        permissions = current_user.get("permissions", {})
+        if not any(permissions.get(permission_name, False) for permission_name in permission_names):
+            raise HTTPException(status_code=403, detail="ليس لديك صلاحية لتنفيذ هذه العملية")
+        return current_user
+
+    return checker
+
+
 def public_user(user_document: dict) -> UserPublic:
     return UserPublic(**hydrate_user(user_document))
 
@@ -1086,14 +1098,14 @@ async def create_bank_reconciliation(
 
 
 @api_router.get("/banks/{bank_id}/reconciliations", response_model=List[BankReconciliation])
-async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
+async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
     await ensure_bank_async(bank_id)
     documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [BankReconciliation(**hydrate_reconciliation(document)) for document in documents]
 
 
 @api_router.get("/banks/{bank_id}/reconciliations/latest", response_model=BankReconciliation)
-async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
+async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
     await ensure_bank_async(bank_id)
     documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
     if not documents:
@@ -1102,7 +1114,7 @@ async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require
 
 
 @api_router.get("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
-async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_permission("view_reports"))):
+async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
     await ensure_bank_async(bank_id)
     document = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
     if not document:

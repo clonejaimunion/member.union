@@ -268,6 +268,35 @@ class AccruedInterestReport(BaseModel):
     rows: List[AccruedInterestRow]
 
 
+class ReconciliationCheck(BaseModel):
+    check_number: str = Field(..., min_length=1)
+    amount: float = Field(..., ge=0)
+    check_date: datetime
+
+
+class BankReconciliationCreate(BaseModel):
+    period_label: Optional[str] = None
+    book_balance: float
+    bank_statement_balance: float
+    outstanding_checks: List[ReconciliationCheck] = Field(default_factory=list)
+    collection_checks: List[ReconciliationCheck] = Field(default_factory=list)
+
+
+class BankReconciliation(BankReconciliationCreate):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    bank_id: str
+    total_outstanding_checks: float
+    total_collection_checks: float
+    calculated_balance: float
+    difference: float
+    is_matched: bool
+    status_text: str
+    created_at: datetime
+    updated_at: datetime
+
+
 def ensure_bank(bank_id: str) -> dict:
     bank = BANKS.get(bank_id)
     if not bank:
@@ -319,6 +348,34 @@ def hydrate_deposit(document: dict) -> dict:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     return clean
+
+
+def hydrate_reconciliation(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    for list_name in ["outstanding_checks", "collection_checks"]:
+        for item in clean.get(list_name, []):
+            if isinstance(item.get("check_date"), str):
+                item["check_date"] = datetime.fromisoformat(item["check_date"])
+    return clean
+
+
+def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
+    total_outstanding = round(sum(item.amount for item in payload.outstanding_checks), 2)
+    total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
+    calculated_balance = round(payload.book_balance + total_outstanding - total_collection, 2)
+    difference = round(calculated_balance - payload.bank_statement_balance, 2)
+    is_matched = abs(difference) < 0.01
+    return {
+        "total_outstanding_checks": total_outstanding,
+        "total_collection_checks": total_collection,
+        "calculated_balance": calculated_balance,
+        "difference": difference,
+        "is_matched": is_matched,
+        "status_text": "الرصيد مطابق" if is_matched else "الرصيد غير مطابق",
+    }
 
 
 def hydrate_user(document: dict) -> dict:
@@ -384,6 +441,18 @@ def require_permission(permission_name: str):
             return current_user
         permissions = current_user.get("permissions", {})
         if not permissions.get(permission_name, False):
+            raise HTTPException(status_code=403, detail="ليس لديك صلاحية لتنفيذ هذه العملية")
+        return current_user
+
+    return checker
+
+
+def require_any_permission(permission_names: List[str]):
+    async def checker(current_user: dict = Depends(get_current_user)) -> dict:
+        if current_user.get("role") == "admin":
+            return current_user
+        permissions = current_user.get("permissions", {})
+        if not any(permissions.get(permission_name, False) for permission_name in permission_names):
             raise HTTPException(status_code=403, detail="ليس لديك صلاحية لتنفيذ هذه العملية")
         return current_user
 
@@ -1000,6 +1069,57 @@ async def get_accrued_interest_report(
         deposits_count=len(rows),
         rows=rows,
     )
+
+
+@api_router.post("/banks/{bank_id}/reconciliations", response_model=BankReconciliation)
+async def create_bank_reconciliation(
+    bank_id: str,
+    payload: BankReconciliationCreate,
+    _: dict = Depends(require_permission("enter_deposits")),
+):
+    await ensure_bank_async(bank_id)
+    now = datetime.now(timezone.utc)
+    computed = calculate_reconciliation(payload)
+    document = payload.model_dump()
+    for list_name in ["outstanding_checks", "collection_checks"]:
+        for item in document[list_name]:
+            item["check_date"] = serialize_datetime(item["check_date"])
+    document.update(
+        {
+            "id": str(uuid.uuid4()),
+            "bank_id": bank_id,
+            **computed,
+            "created_at": serialize_datetime(now),
+            "updated_at": serialize_datetime(now),
+        }
+    )
+    await db.reconciliations.insert_one(document)
+    return BankReconciliation(**hydrate_reconciliation(document))
+
+
+@api_router.get("/banks/{bank_id}/reconciliations", response_model=List[BankReconciliation])
+async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+    await ensure_bank_async(bank_id)
+    documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [BankReconciliation(**hydrate_reconciliation(document)) for document in documents]
+
+
+@api_router.get("/banks/{bank_id}/reconciliations/latest", response_model=BankReconciliation)
+async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+    await ensure_bank_async(bank_id)
+    documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
+    if not documents:
+        raise HTTPException(status_code=404, detail="لا توجد مذكرات تسوية لهذا البنك")
+    return BankReconciliation(**hydrate_reconciliation(documents[0]))
+
+
+@api_router.get("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
+async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+    await ensure_bank_async(bank_id)
+    document = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
+    return BankReconciliation(**hydrate_reconciliation(document))
 
 # Include the router in the main app
 app.include_router(api_router)

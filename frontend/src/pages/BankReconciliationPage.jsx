@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Printer, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useParams } from "react-router-dom";
@@ -42,7 +42,7 @@ export default function BankReconciliationPage() {
     };
   }, [bookBalance, bankStatementBalance, outstandingChecks, collectionChecks]);
 
-  const loadReconciliations = () => {
+  const loadReconciliations = useCallback(() => {
     api.get(`/banks/${bankId}/reconciliations`).then((response) => {
       setReconciliations(response.data);
       setActiveReconciliation(response.data[0] || null);
@@ -50,12 +50,12 @@ export default function BankReconciliationPage() {
       setReconciliations([]);
       setActiveReconciliation(null);
     });
-  };
+  }, [bankId]);
 
   useEffect(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
     loadReconciliations();
-  }, [bankId]);
+  }, [bankId, loadReconciliations]);
 
   const updateCheck = (type, index, field, value) => {
     const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
