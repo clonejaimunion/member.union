@@ -453,6 +453,18 @@ async def root():
     return {"message": "Bank deposit interest system is running"}
 
 
+@api_router.get("/download/setup")
+async def download_setup_file():
+    setup_path = ROOT_DIR.parent / "dist" / "BankDepositSystemSetup.exe"
+    if not setup_path.exists():
+        raise HTTPException(status_code=404, detail="ملف التثبيت غير موجود حالياً")
+    return FileResponse(
+        setup_path,
+        media_type="application/vnd.microsoft.portable-executable",
+        filename="BankDepositSystemSetup.exe",
+    )
+
+
 @api_router.post("/auth/login", response_model=AuthResponse)
 async def login(payload: LoginRequest):
     user = await db.users.find_one({"username": payload.username.strip()}, {"_id": 0})
