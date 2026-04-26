@@ -1121,6 +1121,19 @@ async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict 
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
     return BankReconciliation(**hydrate_reconciliation(document))
 
+
+@api_router.delete("/banks/{bank_id}/reconciliations/{reconciliation_id}")
+async def delete_bank_reconciliation(
+    bank_id: str,
+    reconciliation_id: str,
+    _: dict = Depends(require_admin),
+):
+    await ensure_bank_async(bank_id)
+    result = await db.reconciliations.delete_one({"bank_id": bank_id, "id": reconciliation_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
+    return {"message": "تم حذف مذكرة التسوية", "deleted_reconciliation_id": reconciliation_id}
+
 # Include the router in the main app
 app.include_router(api_router)
 

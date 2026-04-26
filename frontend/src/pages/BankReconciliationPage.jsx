@@ -10,12 +10,19 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
-import { formatCurrency, formatDateTime, toDateTimeLocal } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
+import { useAuth } from "@/contexts/AuthContext";
 
-const emptyCheck = () => ({ check_number: "", amount: "", check_date: toDateTimeLocal(new Date()) });
+const currentMonthDay = () => {
+  const now = new Date();
+  return `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+};
+
+const emptyCheck = () => ({ check_number: "", amount: "", check_date: currentMonthDay() });
 
 export default function BankReconciliationPage() {
   const { bankId } = useParams();
+  const { user } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   const [periodLabel, setPeriodLabel] = useState("");
   const [bookBalance, setBookBalance] = useState("");
@@ -72,9 +79,18 @@ export default function BankReconciliationPage() {
     setter((current) => current.filter((_, itemIndex) => itemIndex !== index));
   };
 
+  const normalizeMonthDayToDateTime = (value) => {
+    if (!value) return `${new Date().getFullYear()}-01-01T00:00:00`;
+    if (/^\d{2}\/\d{2}$/.test(value)) {
+      const [month, day] = value.split("/");
+      return `${new Date().getFullYear()}-${month}-${day}T00:00:00`;
+    }
+    return value;
+  };
+
   const cleanChecks = (checks) => checks
     .filter((item) => item.check_number || Number(item.amount || 0) > 0)
-    .map((item) => ({ check_number: item.check_number, amount: Number(item.amount || 0), check_date: item.check_date }));
+    .map((item) => ({ check_number: item.check_number, amount: Number(item.amount || 0), check_date: normalizeMonthDayToDateTime(item.check_date) }));
 
   const saveReconciliation = async (event) => {
     event.preventDefault();
@@ -100,6 +116,27 @@ export default function BankReconciliationPage() {
 
   const printPdf = () => window.print();
 
+  const formatEgpText = (value) => `${new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(value || 0))} جنيه مصري`;
+
+  const formatCheckDate = (value) => {
+    if (!value) return "—";
+    if (/^\d{2}\/\d{2}$/.test(value)) return value;
+    const date = new Date(value);
+    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+  };
+
+  const deleteReconciliation = async (item) => {
+    const confirmed = window.confirm(`هل أنت متأكد من حذف مذكرة التسوية ${item.period_label || "المحددة"}؟`);
+    if (!confirmed) return;
+    try {
+      await api.delete(`/banks/${bankId}/reconciliations/${item.id}`);
+      toast.success("تم حذف مذكرة التسوية");
+      loadReconciliations();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حذف مذكرة التسوية");
+    }
+  };
+
   const CheckEditor = ({ title, type, checks }) => (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid={`${type}-checks-section`}>
       <div className="mb-4 flex items-center justify-between gap-3" data-testid={`${type}-checks-heading`}>
@@ -121,7 +158,7 @@ export default function BankReconciliationPage() {
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-date-wrapper`}>
               <Label data-testid={`${type}-check-${index}-date-label`}>تاريخ الشيك</Label>
-              <Input type="date" value={item.check_date?.slice(0, 10)} onChange={(event) => updateCheck(type, index, "check_date", `${event.target.value}T00:00`)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-date-input`} />
+              <Input value={formatCheckDate(item.check_date)} onChange={(event) => updateCheck(type, index, "check_date", event.target.value)} placeholder="MM/DD" maxLength={5} className="h-11 rounded-lg bg-white text-center font-extrabold tracking-wider" data-testid={`${type}-check-${index}-date-input`} />
             </div>
             <button type="button" onClick={() => removeCheck(type, index)} className="mt-7 inline-flex h-11 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-red-700 hover:bg-red-100 print:hidden" data-testid={`remove-${type}-check-${index}-button`}>
               <Trash2 className="h-4 w-4" />
@@ -139,7 +176,7 @@ export default function BankReconciliationPage() {
         <Table data-testid={`${testId}-table`}>
           <TableHeader className="bg-slate-950">
             <TableRow className="hover:bg-slate-950" data-testid={`${testId}-header-row`}>
-              <TableHead className="text-right font-extrabold text-white">التاريخ</TableHead>
+              <TableHead className="text-right font-extrabold text-white">التاريخ MM/DD</TableHead>
               <TableHead className="text-right font-extrabold text-white">رقم الشيك</TableHead>
               <TableHead className="text-right font-extrabold text-white">المبلغ</TableHead>
             </TableRow>
@@ -147,9 +184,9 @@ export default function BankReconciliationPage() {
           <TableBody>
             {(rows || []).map((row, index) => (
               <TableRow key={`${testId}-${index}`} data-testid={`${testId}-row-${index}`}>
-                <TableCell data-testid={`${testId}-row-${index}-date`}>{formatDateTime(row.check_date)}</TableCell>
+                <TableCell data-testid={`${testId}-row-${index}-date`}>{formatCheckDate(row.check_date)}</TableCell>
                 <TableCell className="font-extrabold" data-testid={`${testId}-row-${index}-number`}>{row.check_number}</TableCell>
-                <TableCell data-testid={`${testId}-row-${index}-amount`}>{formatCurrency(row.amount)}</TableCell>
+                <TableCell data-testid={`${testId}-row-${index}-amount`}>{formatEgpText(row.amount)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -193,9 +230,9 @@ export default function BankReconciliationPage() {
           <CheckEditor title="شيكات تحت التحصيل" type="collection" checks={collectionChecks} />
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-live-summary">
-            <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="summary-book-balance-card"><p className="text-xs font-bold text-slate-300">الرصيد الدفتري</p><p className="mt-2 text-xl font-extrabold">{formatCurrency(bookBalance)}</p></div>
-            <div className="rounded-xl bg-emerald-50 p-5 text-emerald-900" data-testid="summary-outstanding-card"><p className="text-xs font-bold text-emerald-700">إجمالي شيكات لم تقدم</p><p className="mt-2 text-xl font-extrabold">{formatCurrency(totals.outstanding)}</p></div>
-            <div className="rounded-xl bg-amber-50 p-5 text-amber-950" data-testid="summary-collection-card"><p className="text-xs font-bold text-amber-700">إجمالي تحت التحصيل</p><p className="mt-2 text-xl font-extrabold">{formatCurrency(totals.collection)}</p></div>
+            <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="summary-book-balance-card"><p className="text-xs font-bold text-slate-300">الرصيد الدفتري</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(bookBalance)}</p></div>
+            <div className="rounded-xl bg-emerald-50 p-5 text-emerald-900" data-testid="summary-outstanding-card"><p className="text-xs font-bold text-emerald-700">إجمالي شيكات لم تقدم</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(totals.outstanding)}</p></div>
+            <div className="rounded-xl bg-amber-50 p-5 text-amber-950" data-testid="summary-collection-card"><p className="text-xs font-bold text-amber-700">إجمالي تحت التحصيل</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(totals.collection)}</p></div>
             <div className={`rounded-xl p-5 ${totals.matched ? "bg-emerald-700 text-white" : "bg-red-700 text-white"}`} data-testid="summary-matched-card"><p className="text-xs font-bold opacity-80">الحالة</p><p className="mt-2 text-xl font-extrabold">{totals.matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p></div>
           </section>
 
@@ -208,11 +245,18 @@ export default function BankReconciliationPage() {
           <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="reconciliations-history-title">مذكرات محفوظة</h3>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="reconciliations-history-grid">
             {reconciliations.map((item) => (
-              <button key={item.id} type="button" onClick={() => setActiveReconciliation(item)} className={`rounded-xl border p-4 text-right transition-transform hover:-translate-y-0.5 ${activeReconciliation?.id === item.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`reconciliation-history-button-${item.id}`}>
-                <p className="text-xs font-bold opacity-70" data-testid={`reconciliation-history-button-${item.id}-period`}>{item.period_label || "بدون فترة"}</p>
-                <p className="mt-1 text-lg font-extrabold" data-testid={`reconciliation-history-button-${item.id}-status`}>{item.status_text}</p>
-                <p className="mt-1 text-sm font-bold opacity-80" data-testid={`reconciliation-history-button-${item.id}-balance`}>{formatCurrency(item.calculated_balance)}</p>
-              </button>
+              <div key={item.id} className={`rounded-xl border p-4 transition-transform hover:-translate-y-0.5 ${activeReconciliation?.id === item.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`reconciliation-history-card-${item.id}`}>
+                <button type="button" onClick={() => setActiveReconciliation(item)} className="w-full text-right" data-testid={`reconciliation-history-button-${item.id}`}>
+                  <p className="text-xs font-bold opacity-70" data-testid={`reconciliation-history-button-${item.id}-period`}>{item.period_label || "بدون فترة"}</p>
+                  <p className="mt-1 text-lg font-extrabold" data-testid={`reconciliation-history-button-${item.id}-status`}>{item.status_text}</p>
+                  <p className="mt-1 text-sm font-bold opacity-80" data-testid={`reconciliation-history-button-${item.id}-balance`}>{formatEgpText(item.calculated_balance)}</p>
+                </button>
+                {user?.role === "admin" && (
+                  <button type="button" onClick={() => deleteReconciliation(item)} className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-extrabold text-red-700 hover:bg-red-100" data-testid={`delete-reconciliation-button-${item.id}`}>
+                    <Trash2 className="h-4 w-4" /> حذف مذكرة التسوية
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </section>
@@ -225,9 +269,9 @@ export default function BankReconciliationPage() {
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-print-kpis">
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد الدفتري</p><p className="text-xl font-extrabold">{formatCurrency(activeReconciliation.book_balance)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-statement-balance"><p className="text-xs font-bold text-slate-500">رصيد كشف البنك</p><p className="text-xl font-extrabold">{formatCurrency(activeReconciliation.bank_statement_balance)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-calculated-balance"><p className="text-xs font-bold text-slate-500">الإجمالي</p><p className="text-xl font-extrabold">{formatCurrency(activeReconciliation.calculated_balance)}</p></div>
+              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد الدفتري</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
+              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-statement-balance"><p className="text-xs font-bold text-slate-500">رصيد كشف البنك</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.bank_statement_balance)}</p></div>
+              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-calculated-balance"><p className="text-xs font-bold text-slate-500">الإجمالي</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>
               <div className={`rounded-xl p-4 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xs font-bold opacity-80">الحالة</p><p className="text-xl font-extrabold">{activeReconciliation.status_text}</p></div>
             </div>
             <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" />
