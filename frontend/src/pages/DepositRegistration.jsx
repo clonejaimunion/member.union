@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Calculator, FileText, Save, WalletCards } from "lucide-react";
 import { toast } from "sonner";
@@ -37,7 +37,7 @@ export default function DepositRegistration() {
     return amount * rate / 100;
   }, [form.amount, form.monthly_interest_rate]);
 
-  const loadDeposits = () => {
+  const loadDeposits = useCallback(() => {
     api.get(`/banks/${bankId}/deposits`).then((response) => {
       setDeposits(response.data);
       setSelectedDeposit(response.data[0] || null);
@@ -45,11 +45,11 @@ export default function DepositRegistration() {
       setDeposits([]);
       setSelectedDeposit(null);
     });
-  };
+  }, [bankId]);
 
   useEffect(() => {
     loadDeposits();
-  }, [bankId]);
+  }, [loadDeposits]);
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 

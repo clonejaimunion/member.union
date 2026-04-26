@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
+import { CreditLine } from "@/components/CreditLine";
 
 const permissionLabels = {
   enter_deposits: "إدخال ودائع",
@@ -219,6 +220,9 @@ export default function AdminPage() {
           </section>
         </aside>
       </section>
+      <footer className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8" data-testid="admin-footer">
+        <CreditLine testId="admin-creator-credit" />
+      </footer>
     </main>
   );
 }

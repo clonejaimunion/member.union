@@ -1,9 +1,11 @@
 import { Link, NavLink, useParams } from "react-router-dom";
-import { ArrowRightLeft, Building2, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
 import { useAuth } from "@/contexts/AuthContext";
+import { BankLogo } from "@/components/BankLogo";
+import { CreditLine } from "@/components/CreditLine";
 
 export const BankShell = ({ children }) => {
   const { bankId } = useParams();
@@ -26,9 +28,7 @@ export const BankShell = ({ children }) => {
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl" data-testid="bank-header">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center gap-4">
-            <div className={`flex h-12 w-12 items-center justify-center rounded-lg ${palette.tone} shadow-sm`} data-testid="bank-logo-mark">
-              <Building2 className="h-6 w-6" />
-            </div>
+            <BankLogo bankId={bank.id} bankName={bank.name} className={`h-14 w-24 ${palette.ring} ring-2`} testId="bank-logo-mark" />
             <div>
               <p className="text-xs font-bold text-slate-500" data-testid="bank-code-label">{bank.code}</p>
               <h1 className="text-xl font-extrabold text-slate-950" data-testid="bank-name-heading">{bank.name}</h1>
@@ -74,6 +74,9 @@ export const BankShell = ({ children }) => {
       </header>
       <section className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8" data-testid="bank-page-content">
         {children}
+        <footer className="mt-10 border-t border-slate-200 pt-5" data-testid="bank-page-footer">
+          <CreditLine testId="bank-page-creator-credit" />
+        </footer>
       </section>
     </main>
   );

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
+import { CreditLine } from "@/components/CreditLine";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -82,6 +83,7 @@ export default function LoginPage() {
           <Link to="/secure-admin-control-panel" className="mt-5 inline-flex text-sm font-extrabold text-emerald-700 hover:text-emerald-800" data-testid="admin-secure-link">
             رابط لوحة الأدمن الخاص
           </Link>
+          <CreditLine className="mt-6 text-center text-xs font-bold text-slate-500" testId="login-creator-credit" />
         </section>
         <section className="order-1 space-y-6 lg:order-2" data-testid="login-hero-section">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-emerald-200" data-testid="login-security-badge">

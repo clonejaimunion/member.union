@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, BadgeCheck, Building2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BankLogo } from "@/components/BankLogo";
+import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
@@ -54,9 +56,7 @@ export default function BankSelection() {
                   data-testid={`bank-card-${bank.id}`}
                   className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-[transform,box-shadow,background-color] hover:-translate-y-1 hover:bg-slate-50 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-emerald-100"
                 >
-                  <div className={`mb-5 flex h-12 w-12 items-center justify-center rounded-lg ${palette.tone}`} data-testid={`bank-card-${bank.id}-icon`}>
-                    <Building2 className="h-6 w-6" />
-                  </div>
+                  <BankLogo bankId={bank.id} bankName={bank.name} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
                   <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
                   <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
                   <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
@@ -83,6 +83,9 @@ export default function BankSelection() {
           <Button asChild className="mt-6 h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800 md:hidden" data-testid="mobile-start-button">
             <Link to={`/bank/${banks[0]?.id || "industrial-development"}/register`}>ابدأ الآن</Link>
           </Button>
+        </div>
+        <div className="absolute bottom-4 left-4 right-4" data-testid="bank-selection-footer-credit">
+          <CreditLine className="text-center text-xs font-bold text-slate-500" testId="bank-selection-creator-credit" />
         </div>
       </section>
     </main>
