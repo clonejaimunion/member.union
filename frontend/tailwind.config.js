@@ -7,6 +7,9 @@ module.exports = {
   ],
   theme: {
   	extend: {
+                fontFamily: {
+                        sans: ['Tajawal', 'sans-serif']
+                },
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
