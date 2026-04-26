@@ -1,19 +1,24 @@
 import { Link, NavLink, useParams } from "react-router-dom";
-import { ArrowRightLeft, Building2, ClipboardPenLine, FileClock, FileText } from "lucide-react";
+import { ArrowRightLeft, Building2, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
+import { useAuth } from "@/contexts/AuthContext";
 
 export const BankShell = ({ children }) => {
   const { bankId } = useParams();
+  const { user, logout } = useAuth();
   const bank = fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const palette = bankPalette[bank.id] || bankPalette["industrial-development"];
+  const canViewReports = user?.role === "admin" || user?.permissions?.view_reports;
+  const canEnterDeposits = user?.role === "admin" || user?.permissions?.enter_deposits;
 
   const navItems = [
-    { label: "تسجيل وديعة", path: "register", icon: ClipboardPenLine, testId: "nav-register-link" },
-    { label: "عائد السنة الحالية", path: "current-year", icon: FileText, testId: "nav-current-report-link" },
-    { label: "عائد السنة السابقة", path: "previous-year", icon: FileClock, testId: "nav-previous-report-link" },
-  ];
+    canEnterDeposits && { label: "تسجيل وديعة", path: "register", icon: ClipboardPenLine, testId: "nav-register-link" },
+    canViewReports && { label: "عائد السنة الحالية", path: "current-year", icon: FileText, testId: "nav-current-report-link" },
+    canViewReports && { label: "عائد السنة السابقة", path: "previous-year", icon: FileClock, testId: "nav-previous-report-link" },
+    canViewReports && { label: "الكشوف التفريغية", path: "statements", icon: FileSpreadsheet, testId: "nav-statements-link" },
+  ].filter(Boolean);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900" data-testid="bank-shell">
@@ -33,8 +38,16 @@ export const BankShell = ({ children }) => {
             <Badge className="w-fit border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50" data-testid="bank-data-separation-badge">
               بيانات البنك منفصلة بالكامل
             </Badge>
+            {user?.role === "admin" && (
+              <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="admin-panel-button">
+                <Link to="/secure-admin-control-panel"><ShieldCheck className="h-4 w-4" /> لوحة الأدمن</Link>
+              </Button>
+            )}
             <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800 transition-transform hover:-translate-y-0.5" data-testid="switch-bank-button">
               <Link to="/"><ArrowRightLeft className="h-4 w-4" /> تغيير البنك</Link>
+            </Button>
+            <Button onClick={logout} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="logout-button">
+              <LogOut className="h-4 w-4" /> خروج
             </Button>
           </div>
         </div>

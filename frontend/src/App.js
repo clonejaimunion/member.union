@@ -2,9 +2,14 @@ import "@/App.css";
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import BankSelection from "@/pages/BankSelection";
 import DepositRegistration from "@/pages/DepositRegistration";
 import ReportPage from "@/pages/ReportPage";
+import LoginPage from "@/pages/LoginPage";
+import AdminPage from "@/pages/AdminPage";
+import StatementsPage from "@/pages/StatementsPage";
 
 function App() {
   useEffect(() => {
@@ -14,15 +19,20 @@ function App() {
 
   return (
     <div className="App" dir="rtl" data-testid="app-root">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<BankSelection />} />
-          <Route path="/bank/:bankId/register" element={<DepositRegistration />} />
-          <Route path="/bank/:bankId/current-year" element={<ReportPage type="current-year" />} />
-          <Route path="/bank/:bankId/previous-year" element={<ReportPage type="previous-year" />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<ProtectedRoute><BankSelection /></ProtectedRoute>} />
+            <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+            <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><DepositRegistration /></ProtectedRoute>} />
+            <Route path="/bank/:bankId/current-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="current-year" /></ProtectedRoute>} />
+            <Route path="/bank/:bankId/previous-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="previous-year" /></ProtectedRoute>} />
+            <Route path="/bank/:bankId/statements" element={<ProtectedRoute permission="view_reports"><StatementsPage /></ProtectedRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
       <Toaster richColors position="top-center" />
     </div>
   );
