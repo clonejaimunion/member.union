@@ -12,22 +12,40 @@ export default function AccruedInterestPage() {
   const { bankId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [report, setReport] = useState(null);
+  const [deposits, setDeposits] = useState([]);
   const [loading, setLoading] = useState(true);
   const selectedYear = searchParams.get("year");
+  const selectedDepositId = searchParams.get("deposit_id") || "all";
 
   useEffect(() => {
     setLoading(true);
-    const query = selectedYear ? `?year=${selectedYear}` : "";
+    const params = new URLSearchParams();
+    if (selectedYear) params.set("year", selectedYear);
+    if (selectedDepositId !== "all") params.set("deposit_id", selectedDepositId);
+    const query = params.toString() ? `?${params.toString()}` : "";
     api.get(`/banks/${bankId}/accrued-interest${query}`)
       .then((response) => setReport(response.data))
       .catch(() => setReport(null))
       .finally(() => setLoading(false));
-  }, [bankId, selectedYear]);
+  }, [bankId, selectedYear, selectedDepositId]);
+
+  useEffect(() => {
+    api.get(`/banks/${bankId}/deposits`).then((response) => setDeposits(response.data)).catch(() => setDeposits([]));
+  }, [bankId]);
 
   const years = useMemo(() => report?.available_years || [], [report]);
 
   const printPdf = () => {
     window.print();
+  };
+
+  const updateFilters = (updates) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (!value || value === "all") next.delete(key);
+      else next.set(key, value);
+    });
+    setSearchParams(next);
   };
 
   return (
@@ -45,7 +63,7 @@ export default function AccruedInterestPage() {
             <div className="flex flex-col gap-3 sm:flex-row print:hidden" data-testid="accrued-actions">
               <select
                 value={report?.year || selectedYear || ""}
-                onChange={(event) => setSearchParams({ year: event.target.value })}
+                onChange={(event) => updateFilters({ year: event.target.value })}
                 className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900"
                 data-testid="accrued-year-selector"
               >
@@ -64,6 +82,19 @@ export default function AccruedInterestPage() {
           <section className="rounded-xl border border-slate-200 bg-white p-10 text-center font-extrabold" data-testid="accrued-loading-state">جاري تحميل تقرير المستحقات...</section>
         ) : report ? (
           <section className="space-y-5" data-testid="accrued-print-area">
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="accrued-deposit-picker-section">
+              <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="accrued-deposit-picker-title">اختيار الوديعة برقم الوديعة</h3>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="accrued-deposit-picker-grid">
+                <button type="button" onClick={() => updateFilters({ deposit_id: "all" })} className={`rounded-xl border p-4 text-right font-extrabold ${selectedDepositId === "all" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800"}`} data-testid="accrued-deposit-all-button">كل الودائع</button>
+                {deposits.map((deposit) => (
+                  <button key={deposit.id} type="button" onClick={() => updateFilters({ deposit_id: deposit.id })} className={`rounded-xl border p-4 text-right transition-transform hover:-translate-y-0.5 ${selectedDepositId === deposit.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`accrued-deposit-button-${deposit.id}`}>
+                    <p className="text-xs font-bold opacity-70" data-testid={`accrued-deposit-button-${deposit.id}-label`}>رقم الوديعة</p>
+                    <p className="mt-1 text-lg font-extrabold" data-testid={`accrued-deposit-button-${deposit.id}-number`}>{deposit.deposit_number}</p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="accrued-kpi-grid">
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="accrued-bank-card">
                 <ReceiptText className="mb-3 h-6 w-6" />
@@ -80,6 +111,25 @@ export default function AccruedInterestPage() {
                 <p className="text-sm font-bold text-amber-700" data-testid="accrued-total-label">إجمالي المستحقات</p>
                 <p className="mt-2 text-2xl font-extrabold" data-testid="accrued-total-value">{formatCurrency(report.total_accrued_interest)}</p>
               </div>
+            </div>
+
+            <div className="space-y-4" data-testid="accrued-deposit-sections">
+              {report.rows.map((row) => (
+                <section key={row.deposit_id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:break-inside-avoid print:shadow-none" data-testid={`accrued-deposit-section-${row.deposit_id}`}>
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" data-testid={`accrued-deposit-section-${row.deposit_id}-header`}>
+                    <div>
+                      <p className="text-sm font-bold text-slate-500" data-testid={`accrued-deposit-section-${row.deposit_id}-label`}>وديعة منفصلة</p>
+                      <h3 className="text-2xl font-extrabold text-slate-950" data-testid={`accrued-deposit-section-${row.deposit_id}-title`}>{row.deposit_number}</h3>
+                    </div>
+                    <Badge className="w-fit bg-amber-50 px-3 py-1 text-amber-700 hover:bg-amber-50" data-testid={`accrued-deposit-section-${row.deposit_id}-amount`}>{formatCurrency(row.accrued_interest_amount)}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid={`accrued-deposit-section-${row.deposit_id}-details`}>
+                    <div className="rounded-lg bg-slate-50 p-4" data-testid={`accrued-deposit-section-${row.deposit_id}-daily`}><p className="text-xs font-bold text-slate-500">العائد اليومي</p><p className="text-lg font-extrabold">{formatCurrency(row.daily_interest_amount)}</p></div>
+                    <div className="rounded-lg bg-slate-50 p-4" data-testid={`accrued-deposit-section-${row.deposit_id}-days`}><p className="text-xs font-bold text-slate-500">أيام مستحقة</p><p className="text-lg font-extrabold">{row.accrued_days}</p></div>
+                    <div className="rounded-lg bg-slate-50 p-4" data-testid={`accrued-deposit-section-${row.deposit_id}-last-payment`}><p className="text-xs font-bold text-slate-500">آخر صرف</p><p className="text-lg font-extrabold">{formatDateTime(row.last_payment_date)}</p></div>
+                  </div>
+                </section>
+              ))}
             </div>
 
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:shadow-none" data-testid="accrued-table-wrapper">

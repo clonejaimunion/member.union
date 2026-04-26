@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { FileSpreadsheet, Landmark, Percent, Sigma, WalletCards } from "lucide-react";
 import { BankShell } from "@/components/BankShell";
@@ -11,6 +11,8 @@ export default function StatementsPage() {
   const { bankId } = useParams();
   const [detailed, setDetailed] = useState(null);
   const [volume, setVolume] = useState(null);
+  const [deposits, setDeposits] = useState([]);
+  const [selectedDepositId, setSelectedDepositId] = useState("all");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -18,14 +20,34 @@ export default function StatementsPage() {
     Promise.all([
       api.get(`/banks/${bankId}/statements/detailed`),
       api.get(`/banks/${bankId}/statements/volume`),
-    ]).then(([detailedResponse, volumeResponse]) => {
+      api.get(`/banks/${bankId}/deposits`),
+    ]).then(([detailedResponse, volumeResponse, depositsResponse]) => {
       setDetailed(detailedResponse.data);
       setVolume(volumeResponse.data);
+      setDeposits(depositsResponse.data);
     }).catch(() => {
       setDetailed(null);
       setVolume(null);
+      setDeposits([]);
     }).finally(() => setLoading(false));
   }, [bankId]);
+
+  const filteredDetailedRows = useMemo(() => {
+    const rows = detailed?.rows || [];
+    return selectedDepositId === "all" ? rows : rows.filter((row) => row.deposit_id === selectedDepositId);
+  }, [detailed, selectedDepositId]);
+
+  const filteredVolumeRows = useMemo(() => {
+    const rows = volume?.rows || [];
+    return selectedDepositId === "all" ? rows : rows.filter((row) => row.deposit_id === selectedDepositId);
+  }, [volume, selectedDepositId]);
+
+  const filteredTotals = useMemo(() => ({
+    volume: filteredDetailedRows.reduce((sum, row) => sum + row.amount, 0),
+    current: filteredDetailedRows.reduce((sum, row) => sum + row.current_year_interest, 0),
+    previous: filteredDetailedRows.reduce((sum, row) => sum + row.previous_years_interest, 0),
+    count: filteredDetailedRows.length,
+  }), [filteredDetailedRows]);
 
   return (
     <BankShell>
@@ -36,7 +58,7 @@ export default function StatementsPage() {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="statements-eyebrow">كشوف تفريغية مفصلة</p>
               <h2 className="mt-2 text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="statements-title">إجماليات الودائع والعوائد لكل وديعة</h2>
               <p className="mt-3 max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="statements-description">
-                كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع حساب كل شهر من العائد السنوي ÷ 365 × أيام الشهر المستحقة بحد أقصى 30 يومًا للشهر الكامل.
+                كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع حساب كل شهر من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر من التقويم.
               </p>
             </div>
             <Badge className="w-fit border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 hover:bg-slate-50" data-testid="statements-bank-badge">
@@ -53,22 +75,35 @@ export default function StatementsPage() {
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="statement-kpi-volume">
                 <WalletCards className="mb-3 h-6 w-6" />
                 <p className="text-sm font-bold text-slate-300" data-testid="statement-kpi-volume-label">إجمالي حجم الودائع</p>
-                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-volume-value">{formatCurrency(detailed.total_deposit_volume)}</p>
+                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-volume-value">{formatCurrency(filteredTotals.volume)}</p>
               </div>
               <div className="rounded-xl bg-emerald-50 p-5 text-emerald-900" data-testid="statement-kpi-current">
                 <Sigma className="mb-3 h-6 w-6" />
                 <p className="text-sm font-bold text-emerald-700" data-testid="statement-kpi-current-label">عائد السنة الحالية</p>
-                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-current-value">{formatCurrency(detailed.total_current_year_interest)}</p>
+                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-current-value">{formatCurrency(filteredTotals.current)}</p>
               </div>
               <div className="rounded-xl bg-amber-50 p-5 text-amber-950" data-testid="statement-kpi-previous">
                 <FileSpreadsheet className="mb-3 h-6 w-6" />
                 <p className="text-sm font-bold text-amber-700" data-testid="statement-kpi-previous-label">مستحق سنوات سابقة</p>
-                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-previous-value">{formatCurrency(detailed.total_previous_years_interest)}</p>
+                <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-previous-value">{formatCurrency(filteredTotals.previous)}</p>
               </div>
               <div className="rounded-xl bg-white p-5 ring-1 ring-slate-200" data-testid="statement-kpi-count">
                 <Percent className="mb-3 h-6 w-6 text-slate-700" />
                 <p className="text-sm font-bold text-slate-500" data-testid="statement-kpi-count-label">عدد الودائع</p>
-                <p className="mt-2 text-2xl font-extrabold text-slate-950" data-testid="statement-kpi-count-value">{formatNumber(detailed.deposits_count)}</p>
+                <p className="mt-2 text-2xl font-extrabold text-slate-950" data-testid="statement-kpi-count-value">{formatNumber(filteredTotals.count)}</p>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="statements-deposit-picker-section">
+              <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="statements-deposit-picker-title">اختيار الوديعة بالفأرة</h3>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="statements-deposit-picker-grid">
+                <button type="button" onClick={() => setSelectedDepositId("all")} className={`rounded-xl border p-4 text-right font-extrabold ${selectedDepositId === "all" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800"}`} data-testid="statements-deposit-all-button">كل الودائع</button>
+                {deposits.map((deposit) => (
+                  <button key={deposit.id} type="button" onClick={() => setSelectedDepositId(deposit.id)} className={`rounded-xl border p-4 text-right transition-transform hover:-translate-y-0.5 ${selectedDepositId === deposit.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`statements-deposit-button-${deposit.id}`}>
+                    <p className="text-xs font-bold opacity-70" data-testid={`statements-deposit-button-${deposit.id}-label`}>رقم الوديعة</p>
+                    <p className="mt-1 text-lg font-extrabold" data-testid={`statements-deposit-button-${deposit.id}-number`}>{deposit.deposit_number}</p>
+                  </button>
+                ))}
               </div>
             </section>
 
@@ -84,7 +119,7 @@ export default function StatementsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {detailed.rows.map((row) => (
+                    {filteredDetailedRows.map((row) => (
                       <TableRow key={row.deposit_id} data-testid={`detailed-interest-row-${row.deposit_id}`}>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`detailed-interest-row-${row.deposit_id}-deposit-number`}>{row.deposit_number}</TableCell>
@@ -113,7 +148,7 @@ export default function StatementsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(volume?.rows || []).map((row) => (
+                    {filteredVolumeRows.map((row) => (
                       <TableRow key={row.deposit_id} data-testid={`volume-row-${row.deposit_id}`}>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`volume-row-${row.deposit_id}-deposit-number`}>{row.deposit_number}</TableCell>

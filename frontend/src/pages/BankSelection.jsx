@@ -56,7 +56,7 @@ export default function BankSelection() {
                   data-testid={`bank-card-${bank.id}`}
                   className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-[transform,box-shadow,background-color] hover:-translate-y-1 hover:bg-slate-50 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-emerald-100"
                 >
-                  <BankLogo bankId={bank.id} bankName={bank.name} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
+                  <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
                   <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
                   <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
                   <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
@@ -75,7 +75,7 @@ export default function BankSelection() {
                 <BadgeCheck className="h-7 w-7 text-emerald-600" />
                 <div>
                   <p className="text-xs font-bold text-slate-500" data-testid="hero-metric-label">تقارير منفصلة</p>
-                  <p className="text-xl font-extrabold text-slate-950" data-testid="hero-metric-value">٣ بنوك</p>
+                  <p className="text-xl font-extrabold text-slate-950" data-testid="hero-metric-value">{banks.length} بنوك</p>
                 </div>
               </div>
             </div>

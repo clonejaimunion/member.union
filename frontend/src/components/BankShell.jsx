@@ -6,11 +6,17 @@ import { bankPalette, fallbackBanks } from "@/lib/banks";
 import { useAuth } from "@/contexts/AuthContext";
 import { BankLogo } from "@/components/BankLogo";
 import { CreditLine } from "@/components/CreditLine";
+import { api } from "@/lib/api";
+import { useEffect, useState } from "react";
 
 export const BankShell = ({ children }) => {
   const { bankId } = useParams();
   const { user, logout } = useAuth();
-  const bank = fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
+  const [banks, setBanks] = useState(fallbackBanks);
+  useEffect(() => {
+    api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
+  }, []);
+  const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const palette = bankPalette[bank.id] || bankPalette["industrial-development"];
   const canViewReports = user?.role === "admin" || user?.permissions?.view_reports;
   const canEnterDeposits = user?.role === "admin" || user?.permissions?.enter_deposits;
@@ -29,7 +35,7 @@ export const BankShell = ({ children }) => {
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl" data-testid="bank-header">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center gap-4">
-            <BankLogo bankId={bank.id} bankName={bank.name} className={`h-14 w-24 ${palette.ring} ring-2`} testId="bank-logo-mark" />
+            <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`h-14 w-24 ${palette.ring} ring-2`} testId="bank-logo-mark" />
             <div>
               <p className="text-xs font-bold text-slate-500" data-testid="bank-code-label">{bank.code}</p>
               <h1 className="text-xl font-extrabold text-slate-950" data-testid="bank-name-heading">{bank.name}</h1>

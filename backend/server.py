@@ -84,6 +84,15 @@ class Bank(BaseModel):
     name: str
     short_name: str
     code: str
+    logo_url: Optional[str] = None
+    color: Optional[str] = None
+
+
+class BankCreate(BaseModel):
+    name: str = Field(..., min_length=2)
+    code: Optional[str] = None
+    logo_url: Optional[str] = None
+    color: Optional[str] = "#0f172a"
 
 
 class DepositBase(BaseModel):
@@ -266,6 +275,34 @@ def ensure_bank(bank_id: str) -> dict:
     return bank
 
 
+def slugify_bank_name(name: str) -> str:
+    cleaned = "-".join(name.strip().lower().split())
+    safe = "".join(char for char in cleaned if char.isascii() and (char.isalnum() or char in {"-", "_"}))
+    return safe or str(uuid.uuid4())
+
+
+async def get_all_banks() -> List[dict]:
+    custom_banks = await db.banks.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    merged = list(BANKS.values()) + custom_banks
+    seen = set()
+    result = []
+    for bank in merged:
+        if bank["id"] not in seen:
+            seen.add(bank["id"])
+            result.append(bank)
+    return result
+
+
+async def ensure_bank_async(bank_id: str) -> dict:
+    bank = BANKS.get(bank_id)
+    if bank:
+        return bank
+    custom_bank = await db.banks.find_one({"id": bank_id}, {"_id": 0})
+    if not custom_bank:
+        raise HTTPException(status_code=404, detail="البنك غير موجود")
+    return custom_bank
+
+
 def normalize_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -357,28 +394,30 @@ def public_user(user_document: dict) -> UserPublic:
     return UserPublic(**hydrate_user(user_document))
 
 
+def days_in_year(year: int) -> int:
+    return 366 if calendar.isleap(year) else 365
+
+
 def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestRow], float, float]:
     start = normalize_datetime(deposit.creation_datetime)
     end = normalize_datetime(deposit.maturity_datetime)
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = math.floor((annual_interest / 365) * 100) / 100
+    daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
     rows = []
     total = 0.0
 
     for month in range(1, 13):
         month_start = datetime(year, month, 1, tzinfo=timezone.utc)
-        last_day = calendar.monthrange(year, month)[1]
-        month_end = datetime(year, month, last_day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        next_month = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc)
 
         overlap_start = max(start, month_start)
-        overlap_end = min(end, month_end)
+        overlap_end = min(end, next_month)
 
         if overlap_end <= overlap_start:
             active_days = 0.0
             interest = 0.0
         else:
-            actual_active_days = (overlap_end - overlap_start).total_seconds() / 86400
-            active_days = min(actual_active_days, 30.0)
+            active_days = (overlap_end - overlap_start).total_seconds() / 86400
             interest = daily_interest * active_days
 
         rounded_interest = round(interest, 2)
@@ -396,9 +435,9 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
     return rows, round(annual_interest, 2), round(total, 2)
 
 
-def calculate_daily_interest_amount(deposit: Deposit) -> tuple[float, float]:
+def calculate_daily_interest_amount(deposit: Deposit, year: int) -> tuple[float, float]:
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = math.floor((annual_interest / 365) * 100) / 100
+    daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
     return round(annual_interest, 2), daily_interest
 
 
@@ -436,7 +475,7 @@ def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
     if year == current_year:
         period_end = min(period_end, today)
 
-    annual_interest, daily_interest = calculate_daily_interest_amount(deposit)
+    annual_interest, daily_interest = calculate_daily_interest_amount(deposit, year)
 
     if year < creation_day.year or year > current_year or period_end <= period_start:
         last_payment_day = period_start
@@ -458,7 +497,7 @@ def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
 
 
 async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) -> Deposit:
-    ensure_bank(bank_id)
+    await ensure_bank_async(bank_id)
     query = {"bank_id": bank_id}
     if deposit_id:
         query["id"] = deposit_id
@@ -471,7 +510,7 @@ async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) 
 
 
 async def get_bank_deposits(bank_id: str) -> List[Deposit]:
-    ensure_bank(bank_id)
+    await ensure_bank_async(bank_id)
     documents = await db.deposits.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
@@ -693,7 +732,31 @@ async def verify_admin_2fa(payload: TwoFactorVerifyRequest, admin_user: dict = D
 
 @api_router.get("/banks", response_model=List[Bank])
 async def get_banks(_: dict = Depends(get_current_user)):
-    return list(BANKS.values())
+    return await get_all_banks()
+
+
+@api_router.post("/admin/banks", response_model=Bank)
+async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
+    bank_id_base = slugify_bank_name(payload.name)
+    bank_id = bank_id_base
+    suffix = 1
+    while BANKS.get(bank_id) or await db.banks.find_one({"id": bank_id}, {"_id": 0}):
+        suffix += 1
+        bank_id = f"{bank_id_base}-{suffix}"
+
+    now = datetime.now(timezone.utc)
+    bank_doc = {
+        "id": bank_id,
+        "name": payload.name.strip(),
+        "short_name": (payload.code or payload.name[:3]).strip().upper(),
+        "code": (payload.code or bank_id.upper()).strip().upper(),
+        "logo_url": payload.logo_url.strip() if payload.logo_url else None,
+        "color": payload.color or "#0f172a",
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+    await db.banks.insert_one(bank_doc)
+    return Bank(**{key: value for key, value in bank_doc.items() if key not in {"created_at", "updated_at"}})
 
 
 @api_router.post("/banks/{bank_id}/deposits", response_model=Deposit)
@@ -702,7 +765,7 @@ async def create_deposit(
     payload: DepositCreate,
     _: dict = Depends(require_permission("enter_deposits")),
 ):
-    ensure_bank(bank_id)
+    await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
 
@@ -732,7 +795,7 @@ async def create_deposit(
 
 @api_router.get("/banks/{bank_id}/deposits", response_model=List[Deposit])
 async def list_deposits(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
-    ensure_bank(bank_id)
+    await ensure_bank_async(bank_id)
     documents = await db.deposits.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
@@ -749,7 +812,7 @@ async def update_deposit(
     payload: DepositCreate,
     _: dict = Depends(require_permission("edit_deposits")),
 ):
-    ensure_bank(bank_id)
+    await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
     if maturity_datetime <= creation_datetime:
@@ -778,7 +841,7 @@ async def get_interest_report(
     deposit_id: Optional[str] = Query(default=None),
     _: dict = Depends(require_permission("view_reports")),
 ):
-    bank = ensure_bank(bank_id)
+    bank = await ensure_bank_async(bank_id)
     if report_type not in {"current-year", "previous-year"}:
         raise HTTPException(status_code=404, detail="نوع التقرير غير صحيح")
 
@@ -802,7 +865,7 @@ async def get_interest_report(
 
 @api_router.get("/banks/{bank_id}/statements/detailed", response_model=BankStatement)
 async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
-    bank = ensure_bank(bank_id)
+    bank = await ensure_bank_async(bank_id)
     current_year = datetime.now(timezone.utc).year
     deposits = await get_bank_deposits(bank_id)
     rows = []
@@ -846,7 +909,7 @@ async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permiss
 
 @api_router.get("/banks/{bank_id}/statements/volume", response_model=DepositVolumeStatement)
 async def get_volume_statement(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
-    bank = ensure_bank(bank_id)
+    bank = await ensure_bank_async(bank_id)
     deposits = await get_bank_deposits(bank_id)
     rows = []
     total_volume = 0.0
@@ -878,12 +941,16 @@ async def get_volume_statement(bank_id: str, _: dict = Depends(require_permissio
 async def get_accrued_interest_report(
     bank_id: str,
     year: Optional[int] = Query(default=None),
+    deposit_id: Optional[str] = Query(default=None),
     _: dict = Depends(require_permission("view_reports")),
 ):
-    bank = ensure_bank(bank_id)
-    deposits = await get_bank_deposits(bank_id)
+    bank = await ensure_bank_async(bank_id)
+    all_deposits = await get_bank_deposits(bank_id)
+    deposits = [deposit for deposit in all_deposits if not deposit_id or deposit.id == deposit_id]
+    if deposit_id and not deposits:
+        raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
     current_year = datetime.now(timezone.utc).year
-    min_year = min([normalize_datetime(deposit.creation_datetime).year for deposit in deposits], default=current_year)
+    min_year = min([normalize_datetime(deposit.creation_datetime).year for deposit in all_deposits], default=current_year)
     available_years = list(range(min_year, current_year + 1))
     target_year = year or current_year
 

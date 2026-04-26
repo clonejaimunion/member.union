@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, UserCog, UsersRound } from "lucide-react";
+import { Building2, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ export default function AdminPage() {
   const [resetPasswords, setResetPasswords] = useState({});
   const [twoFactor, setTwoFactor] = useState(null);
   const [otpCode, setOtpCode] = useState("");
+  const [bankForm, setBankForm] = useState({ name: "", code: "", logo_url: "", color: "#0f172a" });
 
   const loadUsers = () => {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
@@ -104,6 +105,17 @@ export default function AdminPage() {
     }
   };
 
+  const createBank = async (event) => {
+    event.preventDefault();
+    try {
+      await api.post("/admin/banks", bankForm);
+      toast.success("تمت إضافة البنك الجديد");
+      setBankForm({ name: "", code: "", logo_url: "", color: "#0f172a" });
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر إضافة البنك");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="admin-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="admin-header">
@@ -148,6 +160,32 @@ export default function AdminPage() {
                 ))}
               </div>
               <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-user-submit-button"><Plus className="h-4 w-4" /> إضافة المستخدم</Button>
+            </form>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-bank-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="create-bank-heading">
+              <Building2 className="h-6 w-6 text-emerald-700" />
+              <h2 className="text-2xl font-extrabold" data-testid="create-bank-title">إضافة بنك جديد</h2>
+            </div>
+            <form onSubmit={createBank} className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="create-bank-form">
+              <div className="space-y-2" data-testid="new-bank-name-wrapper">
+                <Label htmlFor="new_bank_name" data-testid="new-bank-name-label">اسم البنك</Label>
+                <Input id="new_bank_name" value={bankForm.name} onChange={(event) => setBankForm((current) => ({ ...current, name: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-name-input" />
+              </div>
+              <div className="space-y-2" data-testid="new-bank-code-wrapper">
+                <Label htmlFor="new_bank_code" data-testid="new-bank-code-label">كود البنك</Label>
+                <Input id="new_bank_code" value={bankForm.code} onChange={(event) => setBankForm((current) => ({ ...current, code: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-code-input" />
+              </div>
+              <div className="space-y-2" data-testid="new-bank-logo-wrapper">
+                <Label htmlFor="new_bank_logo" data-testid="new-bank-logo-label">رابط اللوجو اختياري</Label>
+                <Input id="new_bank_logo" value={bankForm.logo_url} onChange={(event) => setBankForm((current) => ({ ...current, logo_url: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-logo-input" />
+              </div>
+              <div className="space-y-2" data-testid="new-bank-color-wrapper">
+                <Label htmlFor="new_bank_color" data-testid="new-bank-color-label">لون مميز</Label>
+                <Input id="new_bank_color" type="color" value={bankForm.color} onChange={(event) => setBankForm((current) => ({ ...current, color: event.target.value }))} className="h-12 rounded-lg bg-slate-50 p-1" data-testid="new-bank-color-input" />
+              </div>
+              <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-bank-submit-button"><Plus className="h-4 w-4" /> إضافة البنك</Button>
             </form>
           </section>
 

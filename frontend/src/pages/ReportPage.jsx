@@ -53,7 +53,7 @@ export default function ReportPage({ type }) {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="report-type-label">{report?.year || "—"}</p>
               <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="report-title">{title}</h2>
               <p className="max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="report-description">
-                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ 365 × أيام الشهر المستحقة بحد أقصى 30 يومًا للشهر الكامل.
+                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر الفعلية من التقويم.
               </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="report-kpis">
@@ -111,6 +111,20 @@ export default function ReportPage({ type }) {
                 </div>
               </div>
               <DepositSummary deposit={report.deposit} />
+              <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="report-clickable-deposits-grid">
+                {deposits.map((deposit) => (
+                  <button
+                    key={deposit.id}
+                    type="button"
+                    onClick={() => changeDeposit(deposit.id)}
+                    className={`rounded-xl border p-4 text-right transition-[transform,background-color,border-color] hover:-translate-y-0.5 ${deposit.id === selectedValue ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`}
+                    data-testid={`report-clickable-deposit-${deposit.id}`}
+                  >
+                    <p className="text-xs font-bold opacity-70" data-testid={`report-clickable-deposit-${deposit.id}-label`}>اختيار الوديعة بالفأرة</p>
+                    <p className="mt-1 text-lg font-extrabold" data-testid={`report-clickable-deposit-${deposit.id}-number`}>{deposit.deposit_number}</p>
+                  </button>
+                ))}
+              </div>
             </section>
 
             <section className="space-y-4" data-testid="monthly-report-section">
