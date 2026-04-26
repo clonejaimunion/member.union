@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, Check, ChevronDown, ClipboardPenLine, Sigma } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ClipboardPenLine, Printer, Sigma } from "lucide-react";
 import { BankShell } from "@/components/BankShell";
 import { DepositSummary } from "@/components/DepositSummary";
 import { ReportTable } from "@/components/ReportTable";
@@ -18,6 +18,10 @@ export default function ReportPage({ type }) {
   const depositId = searchParams.get("deposit_id");
 
   const title = type === "current-year" ? "العائد الشهري عن السنة الحالية" : "العائد الشهري المستحق عن السنة السابقة";
+
+  const printPdf = () => {
+    window.print();
+  };
 
   useEffect(() => {
     api.get(`/banks/${bankId}/deposits`).then((response) => setDeposits(response.data)).catch(() => setDeposits([]));
@@ -55,6 +59,13 @@ export default function ReportPage({ type }) {
               <p className="max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="report-description">
                 التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر الفعلية من التقويم.
               </p>
+              {type === "current-year" && (
+                <div className="print:hidden" data-testid="report-print-actions">
+                  <Button onClick={printPdf} className="h-12 rounded-lg bg-slate-950 px-6 text-white hover:bg-slate-800" data-testid="print-current-year-pdf-button">
+                    <Printer className="h-4 w-4" /> طباعة PDF
+                  </Button>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="report-kpis">
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="report-monthly-interest-card">

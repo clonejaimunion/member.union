@@ -25,7 +25,10 @@ html {
     header,
     nav,
     [data-testid="bank-page-footer"],
-    [data-testid="accrued-actions"] {
+    [data-testid="accrued-actions"],
+    [data-testid="report-print-actions"],
+    [data-testid="report-deposit-selector-wrapper"],
+    [data-testid="report-clickable-deposits-grid"] {
         display: none !important;
     }
 
