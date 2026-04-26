@@ -1,0 +1,40 @@
+{
+  "summary": "Completed backend + frontend regression for saved reconciliation card actions (preview/print/edit), PUT update behavior, role-based UI visibility, and setup.exe MZ signature.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reconciliation_saved_actions_iter10.py",
+    "/app/backend/tests/seed_view_only_user_iter10.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking fixes required for requested scope.",
+    "Optional: clean temporary test users/reconciliations created during iteration_10."
+  ],
+  "critical_code_review_comments": [
+    "No critical functional bug found in requested reconciliation feature scope.",
+    "backend/server.py is still a large monolithic file (>1100 lines), increasing regression and maintenance risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reconciliation_saved_actions_iter10.py",
+    "/app/backend/tests/seed_view_only_user_iter10.py",
+    "/app/test_reports/iteration_10.json"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3 pytest)",
+    "frontend": "95% (requested flows passed; print-call capture was flaky in some automation runs but validated in isolation and one integrated run)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin/Admin@123. Created deterministic view_reports-only user: ui_viewonly_iter10_fixed / ViewOnly@123 for UI permission validation.",
+  "seed_data_creation": "Created TEST/UI reconciliation records (UI10_REQ_*, UI10_FINAL_*) and one view-only user for permission checks.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Admin reconciliation cards showed delete+preview+print+edit. Preview updated active print area. Edit populated form, showed 'حفظ تعديل مذكرة التسوية' + cancel button, and saving kept same card count (update not create). Backend PUT /api/banks/{bank_id}/reconciliations/{id} validated via pytest. view_reports-only user sees preview/print and does not see edit/delete or reconciliation form. setup.exe MZ validated via /api/download/setup and /app/dist/BankDepositSystemSetup.exe.",
+  "rca of the issue": "No functional defect reproduced in requested scope. Intermittent automation-only flake observed when spying window.print in long E2E script; isolated run and focused run confirmed print handler invocation."
+}

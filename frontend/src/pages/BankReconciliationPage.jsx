@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Printer, Save, Trash2 } from "lucide-react";
+import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
@@ -33,9 +33,11 @@ export default function BankReconciliationPage() {
   const [collectionChecks, setCollectionChecks] = useState([emptyCheck()]);
   const [reconciliations, setReconciliations] = useState([]);
   const [activeReconciliation, setActiveReconciliation] = useState(null);
+  const [editingReconciliationId, setEditingReconciliationId] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
+  const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits;
   const organizationPrintName = (value) => value === "مشروع التكافل الاجتماعي" ? "النقابة العامة للزراعة والري - مشروع التكافل االجتماعي" : "النقابة العامة للعاملين بالزراعة والري";
 
   const totals = useMemo(() => {
@@ -95,6 +97,36 @@ export default function BankReconciliationPage() {
     .filter((item) => item.check_number || Number(item.amount || 0) > 0)
     .map((item) => ({ check_number: item.check_number, amount: Number(item.amount || 0), check_date: normalizeMonthDayToDateTime(item.check_date) }));
 
+  const fillFormFromReconciliation = (item) => {
+    setEditingReconciliationId(item.id);
+    setActiveReconciliation(item);
+    setPeriodLabel(item.period_label || "");
+    setAdministration(item.administration || "النقابة العامة للعاملين بالزراعة والري");
+    setBookBalance(String(item.book_balance ?? ""));
+    setBankStatementBalance(String(item.bank_statement_balance ?? ""));
+    setOutstandingChecks((item.outstanding_checks?.length ? item.outstanding_checks : [emptyCheck()]).map((check) => ({
+      check_number: check.check_number || "",
+      amount: String(check.amount ?? ""),
+      check_date: formatCheckDate(check.check_date),
+    })));
+    setCollectionChecks((item.collection_checks?.length ? item.collection_checks : [emptyCheck()]).map((check) => ({
+      check_number: check.check_number || "",
+      amount: String(check.amount ?? ""),
+      check_date: formatCheckDate(check.check_date),
+    })));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const resetForm = () => {
+    setEditingReconciliationId(null);
+    setPeriodLabel("");
+    setAdministration("النقابة العامة للعاملين بالزراعة والري");
+    setBookBalance("");
+    setBankStatementBalance("");
+    setOutstandingChecks([emptyCheck()]);
+    setCollectionChecks([emptyCheck()]);
+  };
+
   const saveReconciliation = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -107,9 +139,12 @@ export default function BankReconciliationPage() {
         outstanding_checks: cleanChecks(outstandingChecks),
         collection_checks: cleanChecks(collectionChecks),
       };
-      const response = await api.post(`/banks/${bankId}/reconciliations`, payload);
+      const response = editingReconciliationId
+        ? await api.put(`/banks/${bankId}/reconciliations/${editingReconciliationId}`, payload)
+        : await api.post(`/banks/${bankId}/reconciliations`, payload);
       setActiveReconciliation(response.data);
-      toast.success("تم حفظ مذكرة التسوية البنكية");
+      toast.success(editingReconciliationId ? "تم تعديل مذكرة التسوية" : "تم حفظ مذكرة التسوية البنكية");
+      setEditingReconciliationId(null);
       loadReconciliations();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حفظ التسوية البنكية");
@@ -139,6 +174,16 @@ export default function BankReconciliationPage() {
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حذف مذكرة التسوية");
     }
+  };
+
+  const previewReconciliation = (item) => {
+    setActiveReconciliation(item);
+    setTimeout(() => document.querySelector('[data-testid="reconciliation-print-report"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
+  const printReconciliation = (item) => {
+    setActiveReconciliation(item);
+    setTimeout(() => window.print(), 120);
   };
 
   const CheckEditor = ({ title, type, checks }) => (
@@ -218,7 +263,7 @@ export default function BankReconciliationPage() {
           </div>
         </section>
 
-        <form onSubmit={saveReconciliation} className="space-y-6 print:hidden" data-testid="reconciliation-form">
+        {canEditReconciliation && <form onSubmit={saveReconciliation} className="space-y-6 print:hidden" data-testid="reconciliation-form">
           <section className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3" data-testid="reconciliation-balances-section">
             <div className="space-y-2" data-testid="reconciliation-administration-wrapper">
               <Label data-testid="reconciliation-administration-label">الإدارة</Label>
@@ -251,10 +296,17 @@ export default function BankReconciliationPage() {
             <div className={`rounded-xl p-5 ${totals.matched ? "bg-emerald-700 text-white" : "bg-red-700 text-white"}`} data-testid="summary-matched-card"><p className="text-xs font-bold opacity-80">الحالة</p><p className="mt-2 text-xl font-extrabold">{totals.matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p></div>
           </section>
 
-          <Button type="submit" disabled={saving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="save-reconciliation-button">
-            <Save className="h-4 w-4" /> {saving ? "جاري الحفظ..." : "حفظ مذكرة التسوية"}
-          </Button>
-        </form>
+          <div className="flex flex-col gap-3 sm:flex-row" data-testid="reconciliation-form-actions">
+            <Button type="submit" disabled={saving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="save-reconciliation-button">
+              <Save className="h-4 w-4" /> {saving ? "جاري الحفظ..." : editingReconciliationId ? "حفظ تعديل مذكرة التسوية" : "حفظ مذكرة التسوية"}
+            </Button>
+            {editingReconciliationId && (
+              <Button type="button" onClick={resetForm} variant="outline" className="h-12 rounded-lg bg-white px-7" data-testid="cancel-edit-reconciliation-button">
+                <X className="h-4 w-4" /> إلغاء التعديل
+              </Button>
+            )}
+          </div>
+        </form>}
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="reconciliations-history-section">
           <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="reconciliations-history-title">مذكرات محفوظة</h3>
@@ -271,6 +323,19 @@ export default function BankReconciliationPage() {
                     <Trash2 className="h-4 w-4" /> حذف مذكرة التسوية
                   </button>
                 )}
+                <div className="mt-3 grid grid-cols-1 gap-2" data-testid={`reconciliation-history-actions-${item.id}`}>
+                  <button type="button" onClick={() => previewReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-extrabold text-slate-800 hover:bg-slate-100" data-testid={`preview-reconciliation-button-${item.id}`}>
+                    <Eye className="h-4 w-4" /> معاينة
+                  </button>
+                  <button type="button" onClick={() => printReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-extrabold text-emerald-700 hover:bg-emerald-100" data-testid={`print-saved-reconciliation-button-${item.id}`}>
+                    <Printer className="h-4 w-4" /> طباعة
+                  </button>
+                  {canEditReconciliation && (
+                    <button type="button" onClick={() => fillFormFromReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-extrabold text-amber-700 hover:bg-amber-100" data-testid={`edit-reconciliation-button-${item.id}`}>
+                      <Pencil className="h-4 w-4" /> تعديل
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

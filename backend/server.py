@@ -1123,6 +1123,29 @@ async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict 
     return BankReconciliation(**hydrate_reconciliation(document))
 
 
+@api_router.put("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
+async def update_bank_reconciliation(
+    bank_id: str,
+    reconciliation_id: str,
+    payload: BankReconciliationCreate,
+    _: dict = Depends(require_permission("enter_deposits")),
+):
+    await ensure_bank_async(bank_id)
+    existing = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
+
+    computed = calculate_reconciliation(payload)
+    updates = payload.model_dump()
+    for list_name in ["outstanding_checks", "collection_checks"]:
+        for item in updates[list_name]:
+            item["check_date"] = serialize_datetime(item["check_date"])
+    updates.update({**computed, "updated_at": serialize_datetime(datetime.now(timezone.utc))})
+    await db.reconciliations.update_one({"bank_id": bank_id, "id": reconciliation_id}, {"$set": updates})
+    updated = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    return BankReconciliation(**hydrate_reconciliation(updated))
+
+
 @api_router.delete("/banks/{bank_id}/reconciliations/{reconciliation_id}")
 async def delete_bank_reconciliation(
     bank_id: str,
