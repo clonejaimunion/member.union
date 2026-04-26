@@ -10,16 +10,16 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, sanitizeDayMonthInput, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { BankLogo } from "@/components/BankLogo";
 
-const currentMonthDay = () => {
+const currentDayMonth = () => {
   const now = new Date();
-  return `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+  return `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}`;
 };
 
-const emptyCheck = () => ({ check_number: "", amount: "", check_date: currentMonthDay() });
+const emptyCheck = () => ({ check_number: "", amount: "", check_date: currentDayMonth() });
 
 export default function BankReconciliationPage() {
   const { bankId } = useParams();
@@ -47,8 +47,8 @@ export default function BankReconciliationPage() {
   const organizationPrintName = (value) => value === "مشروع التكافل الاجتماعي" ? "النقابة العامة للزراعة والري - مشروع التكافل االجتماعي" : "النقابة العامة للعاملين بالزراعة والري";
 
   const totals = useMemo(() => {
-    const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const collection = collectionChecks.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
+    const collection = collectionChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
     const calculated = Number(bookBalance || 0) + outstanding - collection;
     const difference = calculated - Number(bankStatementBalance || 0);
     return {
@@ -159,8 +159,13 @@ export default function BankReconciliationPage() {
   }, [hasUnsavedChanges, location.pathname, navigate, requestNavigation]);
 
   const updateCheck = (type, index, field, value) => {
+    const nextValue = field === "amount"
+        ? sanitizeDecimalInput(value)
+        : field === "check_date"
+          ? sanitizeDayMonthInput(value)
+          : value;
     const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
-    setter((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item));
+    setter((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item));
   };
 
   const addCheck = (type) => {
@@ -173,18 +178,25 @@ export default function BankReconciliationPage() {
     setter((current) => current.filter((_, itemIndex) => itemIndex !== index));
   };
 
-  const normalizeMonthDayToDateTime = (value) => {
+  const normalizeDayMonthToDateTime = (value) => {
     if (!value) return `${new Date().getFullYear()}-01-01T00:00:00`;
-    if (/^\d{2}\/\d{2}$/.test(value)) {
-      const [month, day] = value.split("/");
+    const sanitized = sanitizeDayMonthInput(value);
+    if (/^\d{1,2}\/\d{1,2}$/.test(sanitized)) {
+      const [dayValue, monthValue] = sanitized.split("/");
+      const day = String(Math.min(Math.max(Number(dayValue), 1), 31)).padStart(2, "0");
+      const month = String(Math.min(Math.max(Number(monthValue), 1), 12)).padStart(2, "0");
       return `${new Date().getFullYear()}-${month}-${day}T00:00:00`;
     }
-    return value;
+    return sanitized || `${new Date().getFullYear()}-01-01T00:00:00`;
   };
 
   const cleanChecks = (checks) => checks
-    .filter((item) => item.check_number || Number(item.amount || 0) > 0)
-    .map((item) => ({ check_number: item.check_number, amount: Number(item.amount || 0), check_date: normalizeMonthDayToDateTime(item.check_date) }));
+    .filter((item) => item.check_number || Number(sanitizeDecimalInput(item.amount) || 0) > 0)
+    .map((item) => ({
+      check_number: sanitizeDigitsInput(item.check_number),
+      amount: Number(sanitizeDecimalInput(item.amount) || 0),
+      check_date: normalizeDayMonthToDateTime(item.check_date),
+    }));
 
   const fillFormFromReconciliation = (item) => {
     const nextOutstandingChecks = (item.outstanding_checks?.length ? item.outstanding_checks : [emptyCheck()]).map((check) => ({
@@ -269,9 +281,10 @@ export default function BankReconciliationPage() {
 
   const formatCheckDate = (value) => {
     if (!value) return "—";
-    if (/^\d{2}\/\d{2}$/.test(value)) return value;
+    if (/^\d{1,2}\/\d{1,2}$/.test(value)) return sanitizeDayMonthInput(value);
     const date = new Date(value);
-    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+    if (Number.isNaN(date.getTime())) return sanitizeDayMonthInput(value);
+    return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   };
 
   const deleteReconciliation = async (item) => {
@@ -322,15 +335,15 @@ export default function BankReconciliationPage() {
           <div key={`${type}-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid={`${type}-check-row-${index}`}>
             <div className="space-y-2" data-testid={`${type}-check-${index}-number-wrapper`}>
               <Label data-testid={`${type}-check-${index}-number-label`}>رقم الشيك</Label>
-              <Input value={item.check_number} onChange={(event) => updateCheck(type, index, "check_number", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-number-input`} />
+              <Input inputMode="numeric" dir="ltr" value={item.check_number} onChange={(event) => updateCheck(type, index, "check_number", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-number-input`} />
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-amount-wrapper`}>
               <Label data-testid={`${type}-check-${index}-amount-label`}>مبلغ الشيك</Label>
-              <Input type="number" step="0.01" min="0" value={item.amount} onChange={(event) => updateCheck(type, index, "amount", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-amount-input`} />
+              <Input inputMode="decimal" dir="ltr" value={item.amount} onChange={(event) => updateCheck(type, index, "amount", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-amount-input`} />
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-date-wrapper`}>
               <Label data-testid={`${type}-check-${index}-date-label`}>تاريخ الشيك</Label>
-              <Input value={formatCheckDate(item.check_date)} onChange={(event) => updateCheck(type, index, "check_date", event.target.value)} placeholder="MM/DD" maxLength={5} className="h-11 rounded-lg bg-white text-center font-extrabold tracking-wider" data-testid={`${type}-check-${index}-date-input`} />
+              <Input inputMode="numeric" dir="ltr" value={item.check_date} onChange={(event) => updateCheck(type, index, "check_date", event.target.value)} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-white text-center font-extrabold tracking-wider" data-testid={`${type}-check-${index}-date-input`} />
             </div>
             <button type="button" onClick={() => removeCheck(type, index)} className="mt-7 inline-flex h-11 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-red-700 hover:bg-red-100 print:hidden" data-testid={`remove-${type}-check-${index}-button`}>
               <Trash2 className="h-4 w-4" />
@@ -348,7 +361,7 @@ export default function BankReconciliationPage() {
         <Table data-testid={`${testId}-table`}>
           <TableHeader className="bg-slate-950">
             <TableRow className="hover:bg-slate-950" data-testid={`${testId}-header-row`}>
-              <TableHead className="text-right font-extrabold text-white">التاريخ MM/DD</TableHead>
+              <TableHead className="text-right font-extrabold text-white">التاريخ يوم/شهر</TableHead>
               <TableHead className="text-right font-extrabold text-white">رقم الشيك</TableHead>
               <TableHead className="text-right font-extrabold text-white">المبلغ</TableHead>
             </TableRow>

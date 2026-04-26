@@ -34,7 +34,36 @@ const easternArabicDigits = {
   9: "٩",
 };
 
+const westernArabicDigits = {
+  "٠": "0",
+  "١": "1",
+  "٢": "2",
+  "٣": "3",
+  "٤": "4",
+  "٥": "5",
+  "٦": "6",
+  "٧": "7",
+  "٨": "8",
+  "٩": "9",
+};
+
 export const toEasternArabicNumerals = (value) => String(value ?? "").replace(/[0-9]/g, (digit) => easternArabicDigits[digit]);
+
+export const toWesternArabicNumerals = (value) => String(value ?? "").replace(/[٠-٩]/g, (digit) => westernArabicDigits[digit]);
+
+export const sanitizeDecimalInput = (value) => {
+  const normalized = toWesternArabicNumerals(value).replace(/[٬,]/g, "").replace(/٫/g, ".");
+  const cleaned = normalized.replace(/[^0-9.]/g, "");
+  const [integerPart, ...decimalParts] = cleaned.split(".");
+  return decimalParts.length ? `${integerPart}.${decimalParts.join("")}` : integerPart;
+};
+
+export const sanitizeDigitsInput = (value) => toWesternArabicNumerals(value).replace(/[^0-9]/g, "");
+
+export const sanitizeDayMonthInput = (value) => {
+  const normalized = toWesternArabicNumerals(value).replace(/[.-]/g, "/");
+  return normalized.replace(/[^0-9/]/g, "").replace(/\/{2,}/g, "/").slice(0, 5);
+};
 
 export const applyEasternArabicNumeralsToDocument = () => {
   const excludedTags = new Set(["INPUT", "TEXTAREA", "SCRIPT", "STYLE", "NOSCRIPT"]);
