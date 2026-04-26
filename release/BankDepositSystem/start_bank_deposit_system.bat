@@ -1,17 +1,17 @@
 @echo off
 setlocal
-title نظام عوائد الودائع البنكية
+title Bank Deposit Interest System
 
 cd /d %~dp0
 
 echo ============================================
-echo   نظام عوائد الودائع البنكية
-echo   تم إنشاء البرنامج بواسطة يوسف عبدالغني احمد
+echo   Bank Deposit Interest System
+echo   Created by Youssef Abdelghany Ahmed
 echo ============================================
 
 where python >nul 2>nul
 if errorlevel 1 (
-  echo Python غير مثبت على الجهاز. برجاء تثبيت Python 3.11 أو أحدث.
+  echo Python is not installed. Please install Python 3.11 or newer.
   pause
   exit /b 1
 )
@@ -36,5 +36,5 @@ echo Admin URL: http://localhost:8001/secure-admin-control-panel
 echo Username: admin
 echo Password: Admin@123
 echo.
-echo إذا لم يعمل البرنامج تأكد أن MongoDB Community Server يعمل على الجهاز.
+echo If the app does not start, make sure MongoDB Community Server is installed and running.
 pause
