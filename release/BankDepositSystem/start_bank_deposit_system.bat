@@ -3,6 +3,8 @@ setlocal
 title Bank Deposit Interest System
 
 cd /d %~dp0
+set APP_DIR=%~dp0
+set VENV_PY=%APP_DIR%backend\.venv\Scripts\python.exe
 
 echo ============================================
 echo   Bank Deposit Interest System
@@ -16,17 +18,24 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist backend\.venv (
+if not exist "%APP_DIR%backend\.venv" (
   echo Preparing Python environment...
-  python -m venv backend\.venv
+  python -m venv "%APP_DIR%backend\.venv"
 )
 
-call backend\.venv\Scripts\activate
 echo Installing/Checking backend requirements...
-pip install -r backend\requirements.txt
+"%VENV_PY%" -m pip install --upgrade pip
+"%VENV_PY%" -m pip install -r "%APP_DIR%backend\requirements.txt"
+
+echo Checking application server package...
+"%VENV_PY%" -m pip show uvicorn >nul 2>nul
+if errorlevel 1 (
+  echo Uvicorn was not installed correctly. Installing it now...
+  "%VENV_PY%" -m pip install uvicorn
+)
 
 echo Starting local system on http://localhost:8001 ...
-start "Bank Deposit System" cmd /k "cd /d %cd%\backend && call .venv\Scripts\activate && uvicorn server:app --host 127.0.0.1 --port 8001"
+start "Bank Deposit System" "%APP_DIR%run_backend_server.bat"
 
 timeout /t 4 > nul
 start http://localhost:8001
