@@ -28,7 +28,9 @@ html {
     [data-testid="accrued-actions"],
     [data-testid="report-print-actions"],
     [data-testid="report-deposit-selector-wrapper"],
-    [data-testid="report-clickable-deposits-grid"] {
+    [data-testid="report-clickable-deposits-grid"],
+    [data-testid="reconciliation-form"],
+    [data-testid="reconciliations-history-section"] {
         display: none !important;
     }
 

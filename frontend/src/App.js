@@ -11,6 +11,7 @@ import LoginPage from "@/pages/LoginPage";
 import AdminPage from "@/pages/AdminPage";
 import StatementsPage from "@/pages/StatementsPage";
 import AccruedInterestPage from "@/pages/AccruedInterestPage";
+import BankReconciliationPage from "@/pages/BankReconciliationPage";
 
 function App() {
   useEffect(() => {
@@ -30,6 +31,7 @@ function App() {
             <Route path="/bank/:bankId/current-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="current-year" /></ProtectedRoute>} />
             <Route path="/bank/:bankId/previous-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="previous-year" /></ProtectedRoute>} />
             <Route path="/bank/:bankId/accrued-interest" element={<ProtectedRoute permission="view_reports"><AccruedInterestPage /></ProtectedRoute>} />
+            <Route path="/bank/:bankId/reconciliation" element={<ProtectedRoute permission="view_reports"><BankReconciliationPage /></ProtectedRoute>} />
             <Route path="/bank/:bankId/statements" element={<ProtectedRoute permission="view_reports"><StatementsPage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

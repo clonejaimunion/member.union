@@ -1,0 +1,47 @@
+{
+  "summary": "Executed backend + frontend reconciliation regression on public URL. Verified calculation formula, required API response fields, save/list/select/print flows, and permission behavior. Found one critical UI/backend permission mismatch for enter_deposits-only users.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Reconciliation access/save permission",
+        "issue": "User with enter_deposits=true and view_reports=false is blocked from /bank/:bankId/reconciliation by ProtectedRoute(permission='view_reports'), so cannot reach UI to save reconciliation despite backend allowing POST with enter_deposits.",
+        "affected_selectors": [
+          "/bank/:bankId/reconciliation route",
+          "ProtectedRoute permission=\"view_reports\" in App.js"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bank_reconciliation_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Align reconciliation page access permission with save permission requirement (enter_deposits).",
+    "Decide intended policy: either allow enter_deposits users to open reconciliation page, or change backend save permission to match view_reports and update requirement/UI messaging."
+  ],
+  "critical_code_review_comments": [
+    "Permission contract is inconsistent across layers: frontend route gate uses view_reports while reconciliation POST requires enter_deposits.",
+    "backend/server.py is monolithic (>1100 lines), increasing regression risk for finance-critical changes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bank_reconciliation_api.py",
+    "/app/test_reports/iteration_6.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 pytest)",
+    "frontend": "92% (core reconciliation flows passed; 1 critical permission integration mismatch)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin/Admin@123.",
+  "seed_data_creation": "Created TEST reconciliation records and temporary users: TEST_recon_*, TEST_enteronly_1777227335, TEST_viewonly_1777227358.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Reconciliation math/status/print/history are working. Reproduce critical mismatch by logging in as enter_deposits-only user and opening /bank/banque-misr/reconciliation; app redirects to '/'.",
+  "rca of the issue": "RCA: route protection mismatch. In frontend App.js, reconciliation route is wrapped with ProtectedRoute(permission='view_reports'). Backend POST /api/banks/{bank_id}/reconciliations is guarded by require_permission('enter_deposits'). This split causes enter_deposits-only users to be denied UI access even though backend authorizes save. Reproduction: create user {enter_deposits:true, view_reports:false}, login, navigate to /bank/banque-misr/reconciliation, observe redirect to '/'."
+}

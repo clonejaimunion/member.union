@@ -1,5 +1,5 @@
 import { Link, NavLink, useParams } from "react-router-dom";
-import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
+import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, Landmark, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
@@ -26,6 +26,7 @@ export const BankShell = ({ children }) => {
     canViewReports && { label: "عائد السنة الحالية", path: "current-year", icon: FileText, testId: "nav-current-report-link" },
     canViewReports && { label: "عائد السنة السابقة", path: "previous-year", icon: FileClock, testId: "nav-previous-report-link" },
     canViewReports && { label: "تقرير المستحقات", path: "accrued-interest", icon: ReceiptText, testId: "nav-accrued-report-link" },
+    canViewReports && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
     canViewReports && { label: "الكشوف التفريغية", path: "statements", icon: FileSpreadsheet, testId: "nav-statements-link" },
   ].filter(Boolean);
 
