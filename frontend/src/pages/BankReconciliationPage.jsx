@@ -34,6 +34,7 @@ export default function BankReconciliationPage() {
   const [reconciliations, setReconciliations] = useState([]);
   const [activeReconciliation, setActiveReconciliation] = useState(null);
   const [editingReconciliationId, setEditingReconciliationId] = useState(null);
+  const [selectedHistoryYear, setSelectedHistoryYear] = useState("all");
   const [saving, setSaving] = useState(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
@@ -53,6 +54,22 @@ export default function BankReconciliationPage() {
       matched: Math.abs(difference) < 0.01,
     };
   }, [bookBalance, bankStatementBalance, outstandingChecks, collectionChecks]);
+
+  const getReconciliationYear = (item) => {
+    const labelMatch = String(item.period_label || "").match(/(20\d{2}|19\d{2})/);
+    if (labelMatch) return labelMatch[1];
+    return String(new Date(item.created_at).getFullYear());
+  };
+
+  const historyYears = useMemo(() => {
+    const years = [...new Set(reconciliations.map(getReconciliationYear))].sort((a, b) => Number(b) - Number(a));
+    return years;
+  }, [reconciliations]);
+
+  const filteredReconciliations = useMemo(() => {
+    if (selectedHistoryYear === "all") return reconciliations;
+    return reconciliations.filter((item) => getReconciliationYear(item) === selectedHistoryYear);
+  }, [reconciliations, selectedHistoryYear]);
 
   const loadReconciliations = useCallback(() => {
     api.get(`/banks/${bankId}/reconciliations`).then((response) => {
@@ -310,8 +327,17 @@ export default function BankReconciliationPage() {
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="reconciliations-history-section">
           <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="reconciliations-history-title">مذكرات محفوظة</h3>
+          <div className="mb-5 max-w-xs" data-testid="reconciliations-year-filter-wrapper">
+            <Label data-testid="reconciliations-year-filter-label">اختيار السنة</Label>
+            <select value={selectedHistoryYear} onChange={(event) => setSelectedHistoryYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="reconciliations-year-filter-select">
+              <option value="all" data-testid="reconciliations-year-filter-all-option">كل السنوات</option>
+              {historyYears.map((year) => (
+                <option key={year} value={year} data-testid={`reconciliations-year-filter-option-${year}`}>{year}</option>
+              ))}
+            </select>
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="reconciliations-history-grid">
-            {reconciliations.map((item) => (
+            {filteredReconciliations.map((item) => (
               <div key={item.id} className={`rounded-xl border p-4 transition-transform hover:-translate-y-0.5 ${activeReconciliation?.id === item.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`reconciliation-history-card-${item.id}`}>
                 <button type="button" onClick={() => setActiveReconciliation(item)} className="w-full text-right" data-testid={`reconciliation-history-button-${item.id}`}>
                   <p className="text-xs font-bold opacity-70" data-testid={`reconciliation-history-button-${item.id}-period`}>{item.period_label || "بدون فترة"}</p>
