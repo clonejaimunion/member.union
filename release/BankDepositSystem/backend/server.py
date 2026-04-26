@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Dict, List, Optional
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import calendar
 import math
 import base64
@@ -235,6 +235,30 @@ class DepositVolumeStatement(BaseModel):
     rows: List[DepositVolumeRow]
 
 
+class AccruedInterestRow(BaseModel):
+    serial: int
+    deposit_id: str
+    account_number: str
+    deposit_number: str
+    amount: float
+    annual_interest_rate: float
+    annual_interest_amount: float
+    daily_interest_amount: float
+    last_payment_date: str
+    accrued_until_date: str
+    accrued_days: int
+    accrued_interest_amount: float
+
+
+class AccruedInterestReport(BaseModel):
+    bank: Bank
+    year: int
+    available_years: List[int]
+    total_accrued_interest: float
+    deposits_count: int
+    rows: List[AccruedInterestRow]
+
+
 def ensure_bank(bank_id: str) -> dict:
     bank = BANKS.get(bank_id)
     if not bank:
@@ -370,6 +394,67 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
         )
 
     return rows, round(annual_interest, 2), round(total, 2)
+
+
+def calculate_daily_interest_amount(deposit: Deposit) -> tuple[float, float]:
+    annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
+    daily_interest = math.floor((annual_interest / 365) * 100) / 100
+    return round(annual_interest, 2), daily_interest
+
+
+def payment_date_for_month(year: int, month: int, payment_day: int) -> date:
+    month_last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(payment_day, month_last_day))
+
+
+def latest_payment_date_on_or_before(target_day: date, creation_day: date) -> date:
+    payment_day = creation_day.day
+    cursor_year = target_day.year
+    cursor_month = target_day.month
+
+    for _ in range(36):
+        candidate = payment_date_for_month(cursor_year, cursor_month, payment_day)
+        if creation_day <= candidate <= target_day:
+            return candidate
+        cursor_month -= 1
+        if cursor_month == 0:
+            cursor_month = 12
+            cursor_year -= 1
+
+    return creation_day
+
+
+def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
+    creation_day = normalize_datetime(deposit.creation_datetime).date()
+    maturity_day = normalize_datetime(deposit.maturity_datetime).date()
+    today = datetime.now(timezone.utc).date()
+    current_year = today.year
+
+    period_start = max(date(year, 1, 1), creation_day)
+    nominal_year_end = date(year, 12, 31)
+    period_end = min(nominal_year_end, maturity_day)
+    if year == current_year:
+        period_end = min(period_end, today)
+
+    annual_interest, daily_interest = calculate_daily_interest_amount(deposit)
+
+    if year < creation_day.year or year > current_year or period_end <= period_start:
+        last_payment_day = period_start
+        accrued_days = 0
+    else:
+        last_payment_day = latest_payment_date_on_or_before(period_end, creation_day)
+        last_payment_day = max(last_payment_day, period_start)
+        accrued_days = max((period_end - last_payment_day).days, 0)
+
+    accrued_interest = round(daily_interest * accrued_days, 2)
+    return {
+        "annual_interest_amount": annual_interest,
+        "daily_interest_amount": daily_interest,
+        "last_payment_date": last_payment_day.isoformat(),
+        "accrued_until_date": period_end.isoformat(),
+        "accrued_days": accrued_days,
+        "accrued_interest_amount": accrued_interest,
+    }
 
 
 async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) -> Deposit:
@@ -784,6 +869,54 @@ async def get_volume_statement(bank_id: str, _: dict = Depends(require_permissio
     return DepositVolumeStatement(
         bank=Bank(**bank),
         total_deposit_volume=round(total_volume, 2),
+        deposits_count=len(rows),
+        rows=rows,
+    )
+
+
+@api_router.get("/banks/{bank_id}/accrued-interest", response_model=AccruedInterestReport)
+async def get_accrued_interest_report(
+    bank_id: str,
+    year: Optional[int] = Query(default=None),
+    _: dict = Depends(require_permission("view_reports")),
+):
+    bank = ensure_bank(bank_id)
+    deposits = await get_bank_deposits(bank_id)
+    current_year = datetime.now(timezone.utc).year
+    min_year = min([normalize_datetime(deposit.creation_datetime).year for deposit in deposits], default=current_year)
+    available_years = list(range(min_year, current_year + 1))
+    target_year = year or current_year
+
+    if target_year < min_year or target_year > current_year:
+        raise HTTPException(status_code=400, detail="السنة المختارة خارج نطاق سنوات الودائع")
+
+    rows = []
+    total = 0.0
+    for index, deposit in enumerate(deposits, start=1):
+        accrued = calculate_accrued_interest_for_year(deposit, target_year)
+        total += accrued["accrued_interest_amount"]
+        rows.append(
+            AccruedInterestRow(
+                serial=index,
+                deposit_id=deposit.id,
+                account_number=deposit.account_number,
+                deposit_number=deposit.deposit_number,
+                amount=deposit.amount,
+                annual_interest_rate=deposit.monthly_interest_rate,
+                annual_interest_amount=accrued["annual_interest_amount"],
+                daily_interest_amount=accrued["daily_interest_amount"],
+                last_payment_date=accrued["last_payment_date"],
+                accrued_until_date=accrued["accrued_until_date"],
+                accrued_days=accrued["accrued_days"],
+                accrued_interest_amount=accrued["accrued_interest_amount"],
+            )
+        )
+
+    return AccruedInterestReport(
+        bank=Bank(**bank),
+        year=target_year,
+        available_years=available_years,
+        total_accrued_interest=round(total, 2),
         deposits_count=len(rows),
         rows=rows,
     )

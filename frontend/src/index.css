@@ -17,6 +17,29 @@ html {
     background: #f8fafc;
 }
 
+@media print {
+    body {
+        background: #ffffff !important;
+    }
+
+    header,
+    nav,
+    [data-testid="bank-page-footer"],
+    [data-testid="accrued-actions"] {
+        display: none !important;
+    }
+
+    [data-testid="bank-page-content"] {
+        max-width: none !important;
+        padding: 0 !important;
+    }
+
+    .rounded-xl,
+    .rounded-lg {
+        border-radius: 0.25rem !important;
+    }
+}
+
 code {
     font-family:
         source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
