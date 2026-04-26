@@ -322,7 +322,7 @@ export default function BankReconciliationPage() {
     setPendingNavigation(null);
   };
 
-  const CheckEditor = ({ title, type, checks }) => (
+  const renderCheckEditor = ({ title, type, checks }) => (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid={`${type}-checks-section`}>
       <div className="mb-4 flex items-center justify-between gap-3" data-testid={`${type}-checks-heading`}>
         <h3 className="text-xl font-extrabold text-slate-950" data-testid={`${type}-checks-title`}>{title}</h3>
@@ -422,8 +422,8 @@ export default function BankReconciliationPage() {
             </div>
           </section>
 
-          <CheckEditor title="شيكات لم تقدم للصرف" type="outstanding" checks={outstandingChecks} />
-          <CheckEditor title="شيكات تحت التحصيل" type="collection" checks={collectionChecks} />
+          {renderCheckEditor({ title: "شيكات لم تقدم للصرف", type: "outstanding", checks: outstandingChecks })}
+          {renderCheckEditor({ title: "شيكات تحت التحصيل", type: "collection", checks: collectionChecks })}
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-live-summary">
             <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="summary-book-balance-card"><p className="text-xs font-bold text-slate-300">الرصيد الدفتري</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(bookBalance)}</p></div>
