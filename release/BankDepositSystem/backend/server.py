@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import uuid
 from datetime import datetime, timedelta, timezone
 import calendar
+import math
 import base64
 from io import BytesIO
 
@@ -335,7 +336,8 @@ def public_user(user_document: dict) -> UserPublic:
 def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestRow], float, float]:
     start = normalize_datetime(deposit.creation_datetime)
     end = normalize_datetime(deposit.maturity_datetime)
-    monthly_interest = deposit.amount * deposit.monthly_interest_rate / 100
+    annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
+    daily_interest = math.floor((annual_interest / 365) * 100) / 100
     rows = []
     total = 0.0
 
@@ -346,14 +348,14 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
 
         overlap_start = max(start, month_start)
         overlap_end = min(end, month_end)
-        days_in_month = (month_end - month_start).total_seconds() / 86400
 
         if overlap_end <= overlap_start:
             active_days = 0.0
             interest = 0.0
         else:
-            active_days = (overlap_end - overlap_start).total_seconds() / 86400
-            interest = monthly_interest * (active_days / days_in_month)
+            actual_active_days = (overlap_end - overlap_start).total_seconds() / 86400
+            active_days = min(actual_active_days, 30.0)
+            interest = daily_interest * active_days
 
         rounded_interest = round(interest, 2)
         total += rounded_interest
@@ -367,7 +369,7 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             )
         )
 
-    return rows, round(monthly_interest, 2), round(total, 2)
+    return rows, round(annual_interest, 2), round(total, 2)
 
 
 async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) -> Deposit:
@@ -724,7 +726,7 @@ async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permiss
     total_previous = 0.0
 
     for index, deposit in enumerate(deposits, start=1):
-        _, monthly_interest, current_total = calculate_interest_rows(deposit, current_year)
+        _, annual_interest, current_total = calculate_interest_rows(deposit, current_year)
         previous_breakdown, previous_total = calculate_previous_years(deposit, current_year)
         total_volume += deposit.amount
         total_current += current_total
@@ -737,7 +739,7 @@ async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permiss
                 deposit_number=deposit.deposit_number,
                 amount=deposit.amount,
                 monthly_interest_rate=deposit.monthly_interest_rate,
-                monthly_interest_amount=monthly_interest,
+                monthly_interest_amount=annual_interest,
                 current_year_interest=current_total,
                 previous_years_interest=previous_total,
                 total_due_interest=round(current_total + previous_total, 2),
@@ -765,7 +767,7 @@ async def get_volume_statement(bank_id: str, _: dict = Depends(require_permissio
     total_volume = 0.0
 
     for index, deposit in enumerate(deposits, start=1):
-        monthly_interest = round(deposit.amount * deposit.monthly_interest_rate / 100, 2)
+        annual_interest = round(deposit.amount * deposit.monthly_interest_rate / 100, 2)
         total_volume += deposit.amount
         rows.append(
             DepositVolumeRow(
@@ -775,7 +777,7 @@ async def get_volume_statement(bank_id: str, _: dict = Depends(require_permissio
                 deposit_number=deposit.deposit_number,
                 amount=deposit.amount,
                 monthly_interest_rate=deposit.monthly_interest_rate,
-                monthly_interest_amount=monthly_interest,
+                monthly_interest_amount=annual_interest,
             )
         )
 

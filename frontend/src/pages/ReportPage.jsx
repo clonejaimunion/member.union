@@ -53,12 +53,12 @@ export default function ReportPage({ type }) {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="report-type-label">{report?.year || "—"}</p>
               <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="report-title">{title}</h2>
               <p className="max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="report-description">
-                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري المحسوب طبقاً للمبلغ ونسبة الفائدة وتواريخ الاستحقاق.
+                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ 365 × أيام الشهر المستحقة بحد أقصى 30 يومًا للشهر الكامل.
               </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="report-kpis">
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="report-monthly-interest-card">
-                <p className="text-xs font-bold text-slate-300" data-testid="report-monthly-interest-label">الفائدة الشهرية الكاملة</p>
+                <p className="text-xs font-bold text-slate-300" data-testid="report-monthly-interest-label">العائد السنوي الكامل</p>
                 <p className="mt-2 text-2xl font-extrabold" data-testid="report-monthly-interest-value">{formatCurrency(report?.monthly_interest_amount)}</p>
               </div>
               <div className="rounded-xl bg-amber-50 p-5 text-slate-950" data-testid="report-total-interest-card">

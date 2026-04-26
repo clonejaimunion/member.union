@@ -36,7 +36,7 @@ export default function StatementsPage() {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="statements-eyebrow">كشوف تفريغية مفصلة</p>
               <h2 className="mt-2 text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="statements-title">إجماليات الودائع والعوائد لكل وديعة</h2>
               <p className="mt-3 max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="statements-description">
-                كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع كشف حجم الودائع برقم الوديعة ومبلغها ونسبة الفائدة.
+                كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع حساب كل شهر من العائد السنوي ÷ 365 × أيام الشهر المستحقة بحد أقصى 30 يومًا للشهر الكامل.
               </p>
             </div>
             <Badge className="w-fit border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 hover:bg-slate-50" data-testid="statements-bank-badge">
@@ -78,7 +78,7 @@ export default function StatementsPage() {
                 <Table data-testid="detailed-interest-table">
                   <TableHeader className="bg-slate-950">
                     <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'الفائدة الشهرية', 'عائد السنة الحالية', 'مستحق سنوات سابقة', 'الإجمالي المستحق'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', 'عائد السنة الحالية', 'مستحق سنوات سابقة', 'الإجمالي المستحق'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`detailed-interest-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>
@@ -107,7 +107,7 @@ export default function StatementsPage() {
                 <Table data-testid="volume-table">
                   <TableHeader className="bg-emerald-700">
                     <TableRow className="hover:bg-emerald-700" data-testid="volume-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'نسبة الفائدة', 'الفائدة الشهرية'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'نسبة الفائدة السنوية', 'العائد السنوي'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`volume-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>

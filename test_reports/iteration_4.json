@@ -1,0 +1,39 @@
+{
+  "summary": "Executed backend + frontend regression for annual-interest fix on public URL. Verified admin login, creating 1,000,000 deposit at 20% annual (2026-01-01 to 2027-01-01), current-year report math (annual 200000, January 30 days and 16438.20), statements annual-interest behavior, and setup installer validity.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_interest_calculation_fix.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional maintenance: rename backend field monthly_interest_rate to annual_interest_rate across API/contracts to reduce ambiguity and future regression risk.",
+    "Clean up CALC_/UI test deposits from database if a manual cleanup policy is required (no delete endpoint exposed)."
+  ],
+  "critical_code_review_comments": [
+    "Backend calculation logic is correct for requested fix: annual interest = amount * rate/100, daily = floor((annual/365)*100)/100, monthly row = daily * active_days with active_days capped at 30.",
+    "Naming mismatch remains in code contract (monthly_interest_rate, monthly_interest_amount) while business meaning is annual; this is a readability/maintainability risk, not a functional failure in current scope.",
+    "Large monolithic backend file (/app/backend/server.py, >700 lines) still increases change-risk for financial calculations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_interest_calculation_fix.py",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 pytest for targeted fix + setup download endpoint 200/MZ)",
+    "frontend": "100% (requested flows validated on public URL)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used official admin/Admin@123.",
+  "seed_data_creation": "Created CALC-DEP-* via backend pytest and UI-DEP-204104 via UI flow for Banque Misr.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "UI and API values rendered in Arabic numerals (e.g., ٢٠٠٬٠٠٠٫٠٠), so numeric assertions should normalize locale-aware formatting. No MOCKED API observed.",
+  "rca of the issue": "No unresolved issue in this scope. Historical mismatch came from treating annual rate with non-daily-prorated monthly logic; current implementation now follows annual/365 with daily truncation and 30-day monthly cap as required."
+}

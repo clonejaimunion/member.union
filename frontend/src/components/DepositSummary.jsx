@@ -6,7 +6,7 @@ export const DepositSummary = ({ deposit }) => {
     { label: "رقم الحساب", value: deposit?.account_number, icon: CreditCard, testId: "summary-account-number" },
     { label: "رقم الوديعة", value: deposit?.deposit_number, icon: ReceiptText, testId: "summary-deposit-number" },
     { label: "مبلغ الوديعة", value: formatCurrency(deposit?.amount), icon: WalletCards, testId: "summary-deposit-amount" },
-    { label: "نسبة الفائدة الشهرية", value: `${formatNumber(deposit?.monthly_interest_rate)}%`, icon: Percent, testId: "summary-interest-rate" },
+    { label: "نسبة الفائدة السنوية", value: `${formatNumber(deposit?.monthly_interest_rate)}%`, icon: Percent, testId: "summary-interest-rate" },
     { label: "تاريخ إنشاء الوديعة", value: formatDateTime(deposit?.creation_datetime), icon: CalendarClock, testId: "summary-creation-date" },
     { label: "تاريخ الاستحقاق", value: formatDateTime(deposit?.maturity_datetime), icon: Landmark, testId: "summary-maturity-date" },
   ];

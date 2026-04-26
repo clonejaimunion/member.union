@@ -31,7 +31,7 @@ export default function DepositRegistration() {
   const [selectedDeposit, setSelectedDeposit] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const expectedMonthlyInterest = useMemo(() => {
+  const expectedAnnualInterest = useMemo(() => {
     const amount = Number(form.amount || 0);
     const rate = Number(form.monthly_interest_rate || 0);
     return amount * rate / 100;
@@ -84,8 +84,8 @@ export default function DepositRegistration() {
               <h2 className="mt-2 text-3xl font-extrabold text-slate-950" data-testid="deposit-form-title">ملف وديعة جديد</h2>
             </div>
             <div className="rounded-xl bg-slate-50 p-4" data-testid="expected-interest-box">
-              <p className="text-xs font-bold text-slate-500" data-testid="expected-interest-label">الفائدة الشهرية المتوقعة</p>
-              <p className="text-2xl font-extrabold text-slate-950" data-testid="expected-interest-value">{formatCurrency(expectedMonthlyInterest)}</p>
+              <p className="text-xs font-bold text-slate-500" data-testid="expected-interest-label">العائد السنوي المتوقع</p>
+              <p className="text-2xl font-extrabold text-slate-950" data-testid="expected-interest-value">{formatCurrency(expectedAnnualInterest)}</p>
             </div>
           </div>
           <form onSubmit={submitDeposit} className="grid grid-cols-1 gap-5 md:grid-cols-2" data-testid="deposit-registration-form">
@@ -102,7 +102,7 @@ export default function DepositRegistration() {
               <Input id="amount" required min="1" step="0.01" type="number" value={form.amount} onChange={(event) => updateField("amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-deposit-amount" />
             </div>
             <div className="space-y-2" data-testid="field-interest-rate-wrapper">
-              <Label htmlFor="monthly_interest_rate" data-testid="label-interest-rate">النسبة المئوية للفائدة الشهرية</Label>
+              <Label htmlFor="monthly_interest_rate" data-testid="label-interest-rate">النسبة المئوية للفائدة السنوية</Label>
               <Input id="monthly_interest_rate" required min="0" step="0.001" type="number" value={form.monthly_interest_rate} onChange={(event) => updateField("monthly_interest_rate", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-interest-rate" />
             </div>
             <div className="space-y-2" data-testid="field-creation-date-wrapper">
