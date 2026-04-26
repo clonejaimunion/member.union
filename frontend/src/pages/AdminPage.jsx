@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Building2, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, UserCog, UsersRound } from "lucide-react";
+import { Building2, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,13 +14,14 @@ const permissionLabels = {
   enter_deposits: "إدخال ودائع",
   view_reports: "مشاهدة التقارير",
   edit_deposits: "تعديل الودائع",
+  manage_reconciliations: "إدارة التسويات البنكية",
   manage_users: "إدارة مستخدمين",
 };
 
 const defaultUserForm = {
   username: "",
   password: "",
-  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_users: false },
+  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_users: false },
   is_active: true,
 };
 
@@ -68,6 +69,27 @@ export default function AdminPage() {
       loadUsers();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر تحديث المستخدم");
+    }
+  };
+
+  const toggleExistingPermission = async (targetUser, permission) => {
+    await updateUser(targetUser, {
+      permissions: {
+        ...targetUser.permissions,
+        [permission]: !targetUser.permissions?.[permission],
+      },
+    });
+  };
+
+  const deleteUser = async (targetUser) => {
+    const confirmed = window.confirm(`هل أنت متأكد من حذف المستخدم ${targetUser.username}؟`);
+    if (!confirmed) return;
+    try {
+      await api.delete(`/admin/users/${targetUser.id}`);
+      toast.success("تم حذف المستخدم");
+      loadUsers();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حذف المستخدم");
     }
   };
 
@@ -207,10 +229,21 @@ export default function AdminPage() {
                     </div>
                   </div>
                   {item.role !== "admin" && (
-                    <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto]" data-testid={`user-row-${item.id}-actions`}>
+                    <div className="mt-4 space-y-3" data-testid={`user-row-${item.id}-actions`}>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid={`user-row-${item.id}-permissions-editor`}>
+                        {Object.entries(permissionLabels).map(([key, label]) => (
+                          <button key={key} type="button" onClick={() => toggleExistingPermission(item, key)} className={`flex items-center justify-between rounded-lg border p-3 text-sm font-extrabold transition-colors ${item.permissions?.[key] ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"}`} data-testid={`user-row-${item.id}-permission-${key}-toggle`}>
+                            {label}
+                            {item.permissions?.[key] ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]" data-testid={`user-row-${item.id}-security-actions`}>
                       <Input type="password" placeholder="كلمة مرور جديدة" value={resetPasswords[item.id] || ""} onChange={(event) => setResetPasswords((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 rounded-lg bg-white text-right" data-testid={`user-row-${item.id}-reset-password-input`} />
                       <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { password: resetPasswords[item.id] })} data-testid={`user-row-${item.id}-reset-password-button`}>تغيير كلمة المرور</Button>
                       <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { is_active: !item.is_active })} data-testid={`user-row-${item.id}-toggle-active-button`}>{item.is_active ? "إيقاف" : "تفعيل"}</Button>
+                      <Button type="button" variant="outline" className="h-11 rounded-lg border-red-200 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => deleteUser(item)} data-testid={`user-row-${item.id}-delete-button`}><Trash2 className="h-4 w-4" /> حذف المستخدم</Button>
+                      </div>
                     </div>
                   )}
                 </div>

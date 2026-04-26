@@ -38,7 +38,7 @@ export default function BankReconciliationPage() {
   const [saving, setSaving] = useState(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
-  const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits;
+  const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
   const organizationPrintName = (value) => value === "مشروع التكافل الاجتماعي" ? "النقابة العامة للزراعة والري - مشروع التكافل االجتماعي" : "النقابة العامة للعاملين بالزراعة والري";
 
   const totals = useMemo(() => {

@@ -32,7 +32,7 @@ export const BankShell = ({ children }) => {
     canViewReports && { label: "الكشوف التفريغية", path: "statements", icon: FileSpreadsheet, testId: "nav-statements-link" },
   ].filter(Boolean);
   const reconciliationNavItems = [
-    (canViewReports || canEnterDeposits) && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
+    (canViewReports || canEnterDeposits || user?.permissions?.manage_reconciliations) && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
   ].filter(Boolean);
   const navItems = isReconciliationModule ? reconciliationNavItems : depositNavItems;
 

@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function ModuleSelection() {
   const { user, logout } = useAuth();
   const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
-  const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
+  const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
 
   const modules = [
     canUseDeposits && {

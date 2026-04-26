@@ -89,10 +89,10 @@ export default function LoginPage() {
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-emerald-200" data-testid="login-security-badge">
             <ShieldCheck className="h-4 w-4" /> حماية بالصلاحيات والمصادقة الثنائية
           </div>
-          <h2 className="max-w-2xl text-4xl font-extrabold leading-tight sm:text-5xl" data-testid="login-hero-title">نظام بنكي محلي لإدارة الودائع والكشوف التفريغية</h2>
-          <p className="max-w-2xl text-lg font-semibold leading-8 text-slate-300" data-testid="login-hero-description">
-            دخول منفصل للمستخدمين، لوحة أدمن خاصة، وصلاحيات دقيقة لحماية بيانات كل بنك وكل وديعة.
-          </p>
+          <div className="space-y-4" data-testid="login-hero-title-block">
+            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الارادي</h2>
+            <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">نظام بنكي محلي لإدارة الودائع البنكية وفوائدها - والتسويات البنكية</p>
+          </div>
         </section>
       </div>
     </main>

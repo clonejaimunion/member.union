@@ -140,6 +140,7 @@ class UserPermissions(BaseModel):
     view_reports: bool = True
     edit_deposits: bool = False
     manage_users: bool = False
+    manage_reconciliations: bool = True
 
 
 class UserPublic(BaseModel):
@@ -625,6 +626,7 @@ async def ensure_default_admin():
         view_reports=True,
         edit_deposits=True,
         manage_users=True,
+        manage_reconciliations=True,
     ).model_dump()
     await db.users.insert_one(
         {
@@ -749,6 +751,19 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
     await db.users.update_one({"id": user_id}, {"$set": updates})
     updated = await db.users.find_one({"id": user_id}, {"_id": 0})
     return public_user(updated)
+
+
+@api_router.delete("/admin/users/{user_id}")
+async def delete_user(user_id: str, admin_user: dict = Depends(require_admin)):
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    if user.get("role") == "admin" or user.get("id") == admin_user.get("id"):
+        raise HTTPException(status_code=403, detail="لا يمكن حذف حساب الأدمن")
+    result = await db.users.delete_one({"id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    return {"message": "تم حذف المستخدم", "deleted_user_id": user_id}
 
 
 @api_router.post("/admin/change-password", response_model=UserPublic)
@@ -1104,7 +1119,7 @@ async def get_accrued_interest_report(
 async def create_bank_reconciliation(
     bank_id: str,
     payload: BankReconciliationCreate,
-    _: dict = Depends(require_permission("enter_deposits")),
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
 ):
     await ensure_bank_async(bank_id)
     now = datetime.now(timezone.utc)
@@ -1127,14 +1142,14 @@ async def create_bank_reconciliation(
 
 
 @api_router.get("/banks/{bank_id}/reconciliations", response_model=List[BankReconciliation])
-async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
     documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return [BankReconciliation(**hydrate_reconciliation(document)) for document in documents]
 
 
 @api_router.get("/banks/{bank_id}/reconciliations/latest", response_model=BankReconciliation)
-async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
     documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
     if not documents:
@@ -1143,7 +1158,7 @@ async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require
 
 
 @api_router.get("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
-async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports"]))):
+async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
     document = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
     if not document:
@@ -1156,7 +1171,7 @@ async def update_bank_reconciliation(
     bank_id: str,
     reconciliation_id: str,
     payload: BankReconciliationCreate,
-    _: dict = Depends(require_permission("enter_deposits")),
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
 ):
     await ensure_bank_async(bank_id)
     existing = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})

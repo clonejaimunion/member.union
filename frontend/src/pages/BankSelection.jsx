@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, BadgeCheck, Home, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, Home, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,7 +66,7 @@ export default function BankSelection({ mode = "deposits" }) {
               {isReconciliation ? "اختر البنك وابدأ مذكرة التسوية البنكية" : "اختر البنك وابدأ إدارة عوائد الودائع بدقة"}
             </h1>
             <p className="max-w-2xl text-base font-semibold leading-8 text-slate-600 md:text-lg" data-testid="bank-selection-subtitle">
-              {isReconciliation ? "كل بنك له مذكرات تسوية منفصلة تشمل الشيكات والمطابقة والطباعة." : "كل بنك له بياناته وتقاريره المستقلة، مع تسجيل الوديعة واستخراج عائد السنة الحالية والسابقة بشكل منظم."}
+              {isReconciliation ? "كل بنك له مذكرات تسوية منفصلة تشمل الشيكات والمطابقة والطباعة." : "كل بنك له بياناته وتقاريره المستقلة، مع تسجيل الوديعة واستخراج عائد السنة الحالية والسابقة والفوائد المستحقة بشكل منظم."}
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="bank-cards-grid">
@@ -104,15 +104,6 @@ export default function BankSelection({ mode = "deposits" }) {
         <div className="order-1 lg:order-2" data-testid="bank-selection-image-panel">
           <div className="relative mx-auto aspect-[1.05/1] w-full max-w-xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl shadow-slate-200">
             <img src={heroImage} alt="خزينة وبطاقات بنكية" className="h-full w-full object-cover" data-testid="bank-selection-hero-image" />
-            <div className="absolute bottom-5 right-5 rounded-xl border border-white/60 bg-white/90 p-4 shadow-lg backdrop-blur" data-testid="bank-selection-hero-metric">
-              <div className="flex items-center gap-3">
-                <BadgeCheck className="h-7 w-7 text-emerald-600" />
-                <div>
-                  <p className="text-xs font-bold text-slate-500" data-testid="hero-metric-label">{isReconciliation ? "تسويات منفصلة" : "تقارير منفصلة"}</p>
-                  <p className="text-xl font-extrabold text-slate-950" data-testid="hero-metric-value">{banks.length} بنوك</p>
-                </div>
-              </div>
-            </div>
           </div>
           <Button asChild className="mt-6 h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800 md:hidden" data-testid="mobile-start-button">
             <Link to={bankPath(banks[0]?.id || "industrial-development")}>ابدأ الآن</Link>
