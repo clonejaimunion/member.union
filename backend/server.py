@@ -834,6 +834,19 @@ async def update_deposit(
     return Deposit(**hydrate_deposit(updated))
 
 
+@api_router.delete("/banks/{bank_id}/deposits/{deposit_id}")
+async def delete_deposit(
+    bank_id: str,
+    deposit_id: str,
+    _: dict = Depends(require_admin),
+):
+    await ensure_bank_async(bank_id)
+    result = await db.deposits.delete_one({"id": deposit_id, "bank_id": bank_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
+    return {"message": "تم حذف الوديعة بالكامل", "deleted_deposit_id": deposit_id}
+
+
 @api_router.get("/banks/{bank_id}/reports/{report_type}", response_model=InterestReport)
 async def get_interest_report(
     bank_id: str,
