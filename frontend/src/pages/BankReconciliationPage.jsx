@@ -164,9 +164,8 @@ export default function BankReconciliationPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-8" data-testid="reconciliation-heading-section">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-sm font-extrabold text-emerald-700" data-testid="reconciliation-eyebrow">تسوية بنكية</p>
-              <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="reconciliation-title">مذكرة تسوية حساب بنك - {bank.name}</h2>
-              <p className="mt-3 text-base font-semibold text-slate-600" data-testid="reconciliation-description">الرصيد الدفتري + شيكات لم تقدم للصرف - شيكات تحت التحصيل = الإجمالي المطابق لرصيد كشف حساب البنك.</p>
+              <p className="text-sm font-extrabold text-emerald-700" data-testid="reconciliation-eyebrow">مذكرة تسوية</p>
+              <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="reconciliation-title">مذكرة تسوية حساب - {bank.name}</h2>
             </div>
             <Button onClick={printPdf} className="h-12 rounded-lg bg-slate-950 px-6 text-white hover:bg-slate-800 print:hidden" data-testid="print-reconciliation-pdf-button">
               <Printer className="h-4 w-4" /> طباعة PDF
@@ -222,7 +221,7 @@ export default function BankReconciliationPage() {
           <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
             <div className="text-center" data-testid="reconciliation-print-header">
               <p className="text-sm font-bold text-slate-500" data-testid="reconciliation-print-organization">النقابة العامة للزراعة والري - مشروع التكافل الاجتماعي</p>
-              <h2 className="mt-2 text-3xl font-extrabold text-slate-950" data-testid="reconciliation-print-title">مذكرة تسوية حساب بنك - {bank.name}</h2>
+              <h2 className="mt-2 text-3xl font-extrabold text-slate-950" data-testid="reconciliation-print-title">مذكرة تسوية حساب - {bank.name}</h2>
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-print-kpis">

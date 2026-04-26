@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, BadgeCheck, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Home, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BankLogo } from "@/components/BankLogo";
@@ -11,9 +11,16 @@ import { bankPalette, fallbackBanks } from "@/lib/banks";
 
 const heroImage = "https://static.prod-images.emergentagent.com/jobs/4f04fbc5-156c-472b-951d-b7c652b3b7cc/images/36a05283766e2e65b334ee079225dde8ffc0c070fd433ac61be8d002f145fac0.png";
 
-export default function BankSelection() {
+export default function BankSelection({ mode = "deposits" }) {
   const { user, logout } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
+  const isReconciliation = mode === "reconciliations";
+  const canEnterDeposits = user?.role === "admin" || user?.permissions?.enter_deposits;
+
+  const bankPath = (bankId) => {
+    if (isReconciliation) return `/bank/${bankId}/reconciliation`;
+    return canEnterDeposits ? `/bank/${bankId}/register` : `/bank/${bankId}/current-year`;
+  };
 
   useEffect(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
@@ -28,6 +35,7 @@ export default function BankSelection() {
             {user?.role === "admin" && (
               <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-admin-button"><Link to="/secure-admin-control-panel">لوحة الأدمن</Link></Button>
             )}
+            <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-modules-button"><Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link></Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-logout-button">خروج</Button>
           </div>
         </div>
@@ -36,14 +44,14 @@ export default function BankSelection() {
         <div className="absolute inset-0 -z-10 bg-[linear-gradient(135deg,rgba(15,23,42,0.08)_1px,transparent_1px)] bg-[size:30px_30px]" />
         <div className="order-2 space-y-8 lg:order-1" data-testid="bank-selection-content">
           <Badge className="border-slate-200 bg-white px-3 py-1 text-slate-700 shadow-sm hover:bg-white" data-testid="bank-system-badge">
-            <ShieldCheck className="ml-1 h-4 w-4 text-emerald-600" /> نظام عوائد الودائع البنكية
+            <ShieldCheck className="ml-1 h-4 w-4 text-emerald-600" /> {isReconciliation ? "قسم التسويات البنكية" : "قسم فوائد الودائع"}
           </Badge>
           <div className="space-y-4">
             <h1 className="max-w-3xl text-4xl font-extrabold leading-tight text-slate-950 sm:text-5xl lg:text-6xl" data-testid="bank-selection-title">
-              اختر البنك وابدأ إدارة عوائد الودائع بدقة
+              {isReconciliation ? "اختر البنك وابدأ مذكرة التسوية البنكية" : "اختر البنك وابدأ إدارة عوائد الودائع بدقة"}
             </h1>
             <p className="max-w-2xl text-base font-semibold leading-8 text-slate-600 md:text-lg" data-testid="bank-selection-subtitle">
-              كل بنك له بياناته وتقاريره المستقلة، مع تسجيل الوديعة واستخراج عائد السنة الحالية والسابقة بشكل منظم.
+              {isReconciliation ? "كل بنك له مذكرات تسوية منفصلة تشمل الشيكات والمطابقة والطباعة." : "كل بنك له بياناته وتقاريره المستقلة، مع تسجيل الوديعة واستخراج عائد السنة الحالية والسابقة بشكل منظم."}
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="bank-cards-grid">
@@ -52,7 +60,7 @@ export default function BankSelection() {
               return (
                 <Link
                   key={bank.id}
-                  to={`/bank/${bank.id}/register`}
+                  to={bankPath(bank.id)}
                   data-testid={`bank-card-${bank.id}`}
                   className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-[transform,box-shadow,background-color] hover:-translate-y-1 hover:bg-slate-50 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-emerald-100"
                 >
@@ -60,7 +68,7 @@ export default function BankSelection() {
                   <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
                   <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
                   <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
-                    فتح ملف البنك <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
+                    {isReconciliation ? "فتح تسوية البنك" : "فتح ملف البنك"} <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
                   </div>
                 </Link>
               );
@@ -74,14 +82,14 @@ export default function BankSelection() {
               <div className="flex items-center gap-3">
                 <BadgeCheck className="h-7 w-7 text-emerald-600" />
                 <div>
-                  <p className="text-xs font-bold text-slate-500" data-testid="hero-metric-label">تقارير منفصلة</p>
+                  <p className="text-xs font-bold text-slate-500" data-testid="hero-metric-label">{isReconciliation ? "تسويات منفصلة" : "تقارير منفصلة"}</p>
                   <p className="text-xl font-extrabold text-slate-950" data-testid="hero-metric-value">{banks.length} بنوك</p>
                 </div>
               </div>
             </div>
           </div>
           <Button asChild className="mt-6 h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800 md:hidden" data-testid="mobile-start-button">
-            <Link to={`/bank/${banks[0]?.id || "industrial-development"}/register`}>ابدأ الآن</Link>
+            <Link to={bankPath(banks[0]?.id || "industrial-development")}>ابدأ الآن</Link>
           </Button>
         </div>
         <div className="absolute bottom-4 left-4 right-4" data-testid="bank-selection-footer-credit">

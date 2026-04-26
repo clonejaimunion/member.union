@@ -1,5 +1,5 @@
-import { Link, NavLink, useParams } from "react-router-dom";
-import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, Landmark, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
+import { Link, NavLink, useLocation, useParams } from "react-router-dom";
+import { ArrowRightLeft, ClipboardPenLine, FileClock, FileSpreadsheet, FileText, Home, Landmark, LogOut, ReceiptText, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 export const BankShell = ({ children }) => {
   const { bankId } = useParams();
+  const location = useLocation();
   const { user, logout } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
   useEffect(() => {
@@ -20,15 +21,20 @@ export const BankShell = ({ children }) => {
   const palette = bankPalette[bank.id] || bankPalette["industrial-development"];
   const canViewReports = user?.role === "admin" || user?.permissions?.view_reports;
   const canEnterDeposits = user?.role === "admin" || user?.permissions?.enter_deposits;
+  const isReconciliationModule = location.pathname.includes("/reconciliation");
+  const moduleBankSelectionPath = isReconciliationModule ? "/reconciliations" : "/deposits";
 
-  const navItems = [
+  const depositNavItems = [
     canEnterDeposits && { label: "تسجيل وديعة", path: "register", icon: ClipboardPenLine, testId: "nav-register-link" },
     canViewReports && { label: "عائد السنة الحالية", path: "current-year", icon: FileText, testId: "nav-current-report-link" },
     canViewReports && { label: "عائد السنة السابقة", path: "previous-year", icon: FileClock, testId: "nav-previous-report-link" },
     canViewReports && { label: "تقرير المستحقات", path: "accrued-interest", icon: ReceiptText, testId: "nav-accrued-report-link" },
-    (canViewReports || canEnterDeposits) && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
     canViewReports && { label: "الكشوف التفريغية", path: "statements", icon: FileSpreadsheet, testId: "nav-statements-link" },
   ].filter(Boolean);
+  const reconciliationNavItems = [
+    (canViewReports || canEnterDeposits) && { label: "التسوية البنكية", path: "reconciliation", icon: Landmark, testId: "nav-reconciliation-link" },
+  ].filter(Boolean);
+  const navItems = isReconciliationModule ? reconciliationNavItems : depositNavItems;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900" data-testid="bank-shell">
@@ -52,7 +58,10 @@ export const BankShell = ({ children }) => {
               </Button>
             )}
             <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800 transition-transform hover:-translate-y-0.5" data-testid="switch-bank-button">
-              <Link to="/"><ArrowRightLeft className="h-4 w-4" /> تغيير البنك</Link>
+              <Link to={moduleBankSelectionPath}><ArrowRightLeft className="h-4 w-4" /> تغيير البنك</Link>
+            </Button>
+            <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="module-home-button">
+              <Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link>
             </Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="logout-button">
               <LogOut className="h-4 w-4" /> خروج
