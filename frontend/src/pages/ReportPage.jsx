@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, ChevronDown, ClipboardPenLine, Sigma } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ClipboardPenLine, Sigma } from "lucide-react";
 import { BankShell } from "@/components/BankShell";
 import { DepositSummary } from "@/components/DepositSummary";
 import { ReportTable } from "@/components/ReportTable";
@@ -14,6 +14,7 @@ export default function ReportPage({ type }) {
   const [deposits, setDeposits] = useState([]);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectorOpen, setSelectorOpen] = useState(false);
   const depositId = searchParams.get("deposit_id");
 
   const title = type === "current-year" ? "العائد الشهري عن السنة الحالية" : "العائد الشهري المستحق عن السنة السابقة";
@@ -30,9 +31,17 @@ export default function ReportPage({ type }) {
 
   const selectedValue = useMemo(() => report?.deposit?.id || depositId || "", [report, depositId]);
 
-  const changeDeposit = (event) => {
-    const value = event.target.value;
-    if (value) setSearchParams({ deposit_id: value });
+  const selectedDepositLabel = useMemo(() => {
+    const selected = deposits.find((deposit) => deposit.id === selectedValue) || report?.deposit;
+    if (!selected) return "اختر الوديعة";
+    return `${selected.deposit_number} - ${selected.account_number}`;
+  }, [deposits, selectedValue, report]);
+
+  const changeDeposit = (value) => {
+    if (value) {
+      setSearchParams({ deposit_id: value });
+      setSelectorOpen(false);
+    }
   };
 
   return (
@@ -71,17 +80,34 @@ export default function ReportPage({ type }) {
                   <h3 className="text-2xl font-extrabold text-slate-950" data-testid="report-deposit-details-title">{report.deposit.deposit_number}</h3>
                 </div>
                 <div className="relative w-full lg:w-80" data-testid="report-deposit-selector-wrapper">
-                  <select
-                    value={selectedValue}
-                    onChange={changeDeposit}
-                    className="h-12 w-full appearance-none rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-bold text-slate-800 outline-none transition-colors focus:border-slate-900 focus:bg-white"
+                  <button
+                    type="button"
+                    onClick={() => setSelectorOpen((current) => !current)}
+                    className="flex h-12 w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-bold text-slate-800 outline-none transition-colors hover:bg-white focus:border-slate-900 focus:bg-white"
                     data-testid="report-deposit-selector"
                   >
-                    {deposits.map((deposit) => (
-                      <option key={deposit.id} value={deposit.id} data-testid={`report-deposit-option-${deposit.id}`}>{deposit.deposit_number} - {deposit.account_number}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" data-testid="report-deposit-selector-icon" />
+                    <span className="truncate" data-testid="report-deposit-selector-label">{selectedDepositLabel}</span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${selectorOpen ? "rotate-180" : ""}`} data-testid="report-deposit-selector-icon" />
+                  </button>
+                  {selectorOpen && (
+                    <div className="absolute left-0 right-0 top-14 z-30 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl" data-testid="report-deposit-options-list">
+                      {deposits.map((deposit) => {
+                        const isSelected = deposit.id === selectedValue;
+                        return (
+                          <button
+                            key={deposit.id}
+                            type="button"
+                            onClick={() => changeDeposit(deposit.id)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-3 text-right text-sm font-bold transition-colors ${isSelected ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"}`}
+                            data-testid={`report-deposit-option-${deposit.id}`}
+                          >
+                            <span className="truncate" data-testid={`report-deposit-option-${deposit.id}-label`}>{deposit.deposit_number} - {deposit.account_number}</span>
+                            {isSelected && <Check className="h-4 w-4 shrink-0" data-testid={`report-deposit-option-${deposit.id}-check`} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
               <DepositSummary deposit={report.deposit} />
