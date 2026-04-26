@@ -312,18 +312,23 @@ def slugify_bank_name(name: str) -> str:
 
 
 async def get_all_banks() -> List[dict]:
+    deleted_documents = await db.deleted_banks.find({}, {"_id": 0, "id": 1}).to_list(500)
+    deleted_ids = {document["id"] for document in deleted_documents}
     custom_banks = await db.banks.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
     merged = list(BANKS.values()) + custom_banks
     seen = set()
     result = []
     for bank in merged:
-        if bank["id"] not in seen:
+        if bank["id"] not in seen and bank["id"] not in deleted_ids:
             seen.add(bank["id"])
             result.append(bank)
     return result
 
 
 async def ensure_bank_async(bank_id: str) -> dict:
+    deleted_bank = await db.deleted_banks.find_one({"id": bank_id}, {"_id": 0})
+    if deleted_bank:
+        raise HTTPException(status_code=404, detail="البنك محذوف أو غير موجود")
     bank = BANKS.get(bank_id)
     if bank:
         return bank
@@ -827,6 +832,29 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
     }
     await db.banks.insert_one(bank_doc)
     return Bank(**{key: value for key, value in bank_doc.items() if key not in {"created_at", "updated_at"}})
+
+
+@api_router.delete("/admin/banks/{bank_id}")
+async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
+    bank = BANKS.get(bank_id) or await db.banks.find_one({"id": bank_id}, {"_id": 0})
+    if not bank:
+        raise HTTPException(status_code=404, detail="البنك غير موجود")
+
+    now = datetime.now(timezone.utc)
+    await db.deleted_banks.update_one(
+        {"id": bank_id},
+        {"$set": {"id": bank_id, "name": bank.get("name"), "deleted_at": serialize_datetime(now)}},
+        upsert=True,
+    )
+    await db.banks.delete_one({"id": bank_id})
+    deposits_result = await db.deposits.delete_many({"bank_id": bank_id})
+    reconciliations_result = await db.reconciliations.delete_many({"bank_id": bank_id})
+    return {
+        "message": "تم حذف البنك وكل بياناته بالكامل",
+        "deleted_bank_id": bank_id,
+        "deleted_deposits": deposits_result.deleted_count,
+        "deleted_reconciliations": reconciliations_result.deleted_count,
+    }
 
 
 @api_router.post("/banks/{bank_id}/deposits", response_model=Deposit)

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, BadgeCheck, Home, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Home, ShieldCheck, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BankLogo } from "@/components/BankLogo";
@@ -25,6 +26,20 @@ export default function BankSelection({ mode = "deposits" }) {
   useEffect(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
   }, []);
+
+  const deleteBank = async (bank, event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const confirmed = window.confirm(`هل أنت متأكد من حذف ${bank.name}؟ سيتم حذف كل الودائع والتسويات الخاصة بهذا البنك بالكامل.`);
+    if (!confirmed) return;
+    try {
+      await api.delete(`/admin/banks/${bank.id}`);
+      toast.success("تم حذف البنك وكل بياناته");
+      setBanks((current) => current.filter((item) => item.id !== bank.id));
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حذف البنك");
+    }
+  };
 
   return (
     <main className="min-h-screen overflow-hidden bg-slate-50 text-slate-950" data-testid="bank-selection-page">
@@ -58,19 +73,30 @@ export default function BankSelection({ mode = "deposits" }) {
             {banks.map((bank) => {
               const palette = bankPalette[bank.id] || bankPalette["industrial-development"];
               return (
-                <Link
+                <div
                   key={bank.id}
-                  to={bankPath(bank.id)}
                   data-testid={`bank-card-${bank.id}`}
                   className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-[transform,box-shadow,background-color] hover:-translate-y-1 hover:bg-slate-50 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-emerald-100"
                 >
-                  <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
-                  <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
-                  <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
-                  <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
-                    {isReconciliation ? "فتح تسوية البنك" : "فتح ملف البنك"} <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
-                  </div>
-                </Link>
+                  <Link to={bankPath(bank.id)} className="block" data-testid={`bank-card-${bank.id}-open-link`}>
+                    <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
+                    <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
+                    <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
+                    <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
+                      {isReconciliation ? "فتح تسوية البنك" : "فتح ملف البنك"} <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
+                    </div>
+                  </Link>
+                  {user?.role === "admin" && (
+                    <button
+                      type="button"
+                      onClick={(event) => deleteBank(bank, event)}
+                      className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-extrabold text-red-700 transition-colors hover:bg-red-100"
+                      data-testid={`delete-bank-button-${bank.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" /> حذف البنك بالكامل
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>
