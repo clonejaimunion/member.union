@@ -48,18 +48,21 @@ BANKS = {
         "name": "بنك التنمية الصناعية",
         "short_name": "IDB",
         "code": "IDB-EG",
+        "swift_code": "DIBBEGCA",
     },
     "banque-misr": {
         "id": "banque-misr",
         "name": "بنك مصر",
         "short_name": "BM",
         "code": "BM-EG",
+        "swift_code": "BMISEGCX",
     },
     "agricultural-bank": {
         "id": "agricultural-bank",
         "name": "البنك الزراعي",
         "short_name": "ABE",
         "code": "ABE-EG",
+        "swift_code": "BDACEGCA",
     },
 }
 
@@ -84,6 +87,7 @@ class Bank(BaseModel):
     name: str
     short_name: str
     code: str
+    swift_code: Optional[str] = None
     logo_url: Optional[str] = None
     color: Optional[str] = None
 
@@ -91,6 +95,7 @@ class Bank(BaseModel):
 class BankCreate(BaseModel):
     name: str = Field(..., min_length=2)
     code: Optional[str] = None
+    swift_code: Optional[str] = None
     logo_url: Optional[str] = None
     color: Optional[str] = "#0f172a"
 
@@ -840,6 +845,7 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
         "name": payload.name.strip(),
         "short_name": (payload.code or payload.name[:3]).strip().upper(),
         "code": (payload.code or bank_id.upper()).strip().upper(),
+        "swift_code": payload.swift_code.strip().upper() if payload.swift_code else None,
         "logo_url": payload.logo_url.strip() if payload.logo_url else None,
         "color": payload.color or "#0f172a",
         "created_at": serialize_datetime(now),

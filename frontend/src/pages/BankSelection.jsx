@@ -81,6 +81,7 @@ export default function BankSelection({ mode = "deposits" }) {
                   <Link to={bankPath(bank.id)} className="block" data-testid={`bank-card-${bank.id}-open-link`}>
                     <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`mb-5 h-16 w-28 ${palette.ring} ring-2`} testId={`bank-card-${bank.id}-logo`} />
                     <p className="text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-code`}>{bank.code}</p>
+                    <p className="mt-1 text-xs font-extrabold text-slate-500" data-testid={`bank-card-${bank.id}-swift-code`}>SWIFT CODE: {bank.swift_code || "غير مسجل"}</p>
                     <h2 className="mt-2 min-h-14 text-xl font-extrabold leading-7 text-slate-950" data-testid={`bank-card-${bank.id}-name`}>{bank.name}</h2>
                     <div className="mt-5 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-700" data-testid={`bank-card-${bank.id}-action-text`}>
                       {isReconciliation ? "فتح تسوية البنك" : "فتح ملف البنك"} <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />

@@ -20,9 +20,9 @@ export const bankPalette = {
 };
 
 export const fallbackBanks = [
-  { id: "industrial-development", name: "بنك التنمية الصناعية", short_name: "IDB", code: "IDB-EG" },
-  { id: "banque-misr", name: "بنك مصر", short_name: "BM", code: "BM-EG" },
-  { id: "agricultural-bank", name: "البنك الزراعي", short_name: "ABE", code: "ABE-EG" },
+  { id: "industrial-development", name: "بنك التنمية الصناعية", short_name: "IDB", code: "IDB-EG", swift_code: "DIBBEGCA" },
+  { id: "banque-misr", name: "بنك مصر", short_name: "BM", code: "BM-EG", swift_code: "BMISEGCX" },
+  { id: "agricultural-bank", name: "البنك الزراعي", short_name: "ABE", code: "ABE-EG", swift_code: "BDACEGCA" },
 ];
 
 export const creatorCredit = "تم إنشاء البرنامج بواسطة يوسف عبدالغني احمد";

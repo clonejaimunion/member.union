@@ -33,7 +33,7 @@ export default function AdminPage() {
   const [resetPasswords, setResetPasswords] = useState({});
   const [twoFactor, setTwoFactor] = useState(null);
   const [otpCode, setOtpCode] = useState("");
-  const [bankForm, setBankForm] = useState({ name: "", code: "", logo_url: "", color: "#0f172a" });
+  const [bankForm, setBankForm] = useState({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
 
   const loadUsers = () => {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
@@ -132,7 +132,7 @@ export default function AdminPage() {
     try {
       await api.post("/admin/banks", bankForm);
       toast.success("تمت إضافة البنك الجديد");
-      setBankForm({ name: "", code: "", logo_url: "", color: "#0f172a" });
+      setBankForm({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر إضافة البنك");
     }
@@ -198,6 +198,10 @@ export default function AdminPage() {
               <div className="space-y-2" data-testid="new-bank-code-wrapper">
                 <Label htmlFor="new_bank_code" data-testid="new-bank-code-label">كود البنك</Label>
                 <Input id="new_bank_code" value={bankForm.code} onChange={(event) => setBankForm((current) => ({ ...current, code: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-code-input" />
+              </div>
+              <div className="space-y-2" data-testid="new-bank-swift-wrapper">
+                <Label htmlFor="new_bank_swift" data-testid="new-bank-swift-label">SWIFT CODE</Label>
+                <Input id="new_bank_swift" value={bankForm.swift_code} onChange={(event) => setBankForm((current) => ({ ...current, swift_code: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-swift-input" />
               </div>
               <div className="space-y-2" data-testid="new-bank-logo-wrapper">
                 <Label htmlFor="new_bank_logo" data-testid="new-bank-logo-label">رابط اللوجو اختياري</Label>
