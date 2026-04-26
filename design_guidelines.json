@@ -1,0 +1,95 @@
+{
+  "project_context": {
+    "app_type": "hybrid_fullstack banking_dashboard",
+    "theme": "light",
+    "archetype": "4 (Swiss & High-Contrast - Banking Variation)",
+    "language": "Arabic",
+    "direction": "rtl"
+  },
+  "typography": {
+    "primary_font": "'Tajawal', sans-serif",
+    "secondary_font": "'Tajawal', sans-serif",
+    "setup_instructions": "1. Import Tajawal via Google Fonts in index.css: @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap'); \n2. Set font-family 'sans' to 'Tajawal' in tailwind.config.js.",
+    "hierarchy": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl md:text-3xl font-bold tracking-tight text-slate-900",
+      "h3": "text-xl font-bold text-slate-800",
+      "h4": "text-lg font-semibold text-slate-800",
+      "body": "text-base font-medium text-slate-600",
+      "small": "text-sm font-medium text-slate-500",
+      "overline": "text-xs font-bold uppercase tracking-widest text-slate-400"
+    }
+  },
+  "colors": {
+    "background": "bg-slate-50",
+    "surface": "bg-white",
+    "primary": "bg-slate-900",
+    "primary_text": "text-slate-900",
+    "secondary": "bg-emerald-600",
+    "accent": "bg-amber-500",
+    "border": "border-slate-200",
+    "muted": "bg-slate-100",
+    "success": "bg-emerald-50 text-emerald-700 border-emerald-200",
+    "hover_states": {
+      "primary": "hover:bg-slate-800 hover:text-white",
+      "secondary": "hover:bg-emerald-700 hover:text-white",
+      "surface": "hover:bg-slate-50"
+    }
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "p-6, p-8, p-12 - use generous padding for cards to avoid text collision.",
+    "form_layout": "grid grid-cols-1 md:grid-cols-2 gap-6. Input groups should have tight spacing gap-2.",
+    "page_layout": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10",
+    "components": {
+      "cards": "bg-white rounded-xl border border-slate-200 shadow-sm p-6 or p-8",
+      "tables": "w-full text-sm text-slate-600",
+      "inputs": "h-12 bg-slate-50 border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
+    },
+    "surface_strategies": {
+      "header": "Crystal Glass: backdrop-blur-xl bg-white/70 border-b border-slate-200/50",
+      "dashboard_cards": "Flat background, 1px subtle border (border-slate-200), shadow-sm. On hover: slight lift (-translate-y-1) and shadow-md."
+    }
+  },
+  "components_instructions": {
+    "ui_library": "shadcn/ui",
+    "forms": "Use Shadcn Input, Select, Popover (for Calendar/DatePicker). Override native HTML default date inputs. All form inputs must be clearly labeled and horizontally aligned where appropriate.",
+    "tables": "Use Shadcn Table component. Since the app is RTL, ensure headers and text are right-aligned natively.",
+    "navigation": "Top Navigation bar + Sub-navigation tabs (Sidebar or horizontal tabs) for dashboard sections. Include a prominent 'Switch Bank' button.",
+    "icons": "Use lucide-react. Flip directional icons horizontally if needed for RTL context."
+  },
+  "pages_and_routing": {
+    "global_rule": "The app must handle separate states/storage for each of the 3 banks. Use React Router with dynamic parameters (e.g., /bank/:bankId/...) or a robust global context that segregates data by bank.",
+    "1_bank_selection": "Hero landing page. Display the 'bank_selection_hero' image in a split layout. Render 3 distinct selection cards: 'بنك التنمية الصناعية' (IDB), 'بنك مصر' (Banque Misr), 'البنك الزراعي' (Agricultural Bank).",
+    "2_deposit_registration": "Form page: /bank/:bankId/register. Fields required: Account Number, Deposit Number, Amount (EGP), Creation Date, Maturity Date, Monthly Interest Rate (%). Ensure all inputs have Arabic labels.",
+    "3_current_year_report": "Dashboard view: /bank/:bankId/current-year. Top section: F-Pattern summary widget showing the Deposit details. Bottom section: Data table with [مسلسل, الشهر, مبلغ الفائدة] (Serial, Month, Interest amount) calculated for the current year.",
+    "4_previous_year_report": "Dashboard view: /bank/:bankId/previous-year. Identical layout to Current Year report, but data calculation reflects the previous year."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "hero",
+        "description": "3D Bank Cards / Vault illustration for Bank Selection screen. Place on the landing page.",
+        "url": "https://static.prod-images.emergentagent.com/jobs/4f04fbc5-156c-472b-951d-b7c652b3b7cc/images/36a05283766e2e65b334ee079225dde8ffc0c070fd433ac61be8d002f145fac0.png"
+      },
+      {
+        "category": "background",
+        "description": "Minimalist geometric texture for dashboard background wrapper. Use with low opacity (e.g. opacity-50) behind the main layout.",
+        "url": "https://static.prod-images.emergentagent.com/jobs/4f04fbc5-156c-472b-951d-b7c652b3b7cc/images/32f63bc7b4200ece7f239f7c58d95e0e3cae6a924f0c254e0871db01a8e55b39.png"
+      },
+      {
+        "category": "building",
+        "description": "Modern bank entrance. Can be used as a supplementary image in the dashboard empty states.",
+        "url": "https://images.unsplash.com/photo-1760243875440-3556238664d6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBiYW5rJTIwYnVpbGRpbmclMjBleHRlcmlvcnxlbnwwfHx8fDE3NzcxOTU3NDZ8MA&ixlib=rb-4.1.0&q=85"
+      }
+    ]
+  },
+  "animations": {
+    "hover": "transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease",
+    "page_transition": "Wrap main content changes in framer-motion opacity fade-ins."
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure text contrast against white and slate-50 backgrounds meets minimum 4.5:1 ratio.",
+    "test_ids": "MANDATORY: Add data-testid attributes to all interactive elements, form inputs, buttons, and table rows. (e.g., data-testid='submit-deposit-button', data-testid='input-account-number')",
+    "rtl_support": "MANDATORY: Inject dir='rtl' on the <html> or root <div> element. Use logical CSS properties natively provided by Tailwind (ps-4, pe-4, ms-4, me-4, text-start, text-end)."
+  }
+}
