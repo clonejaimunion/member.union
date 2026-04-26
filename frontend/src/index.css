@@ -30,13 +30,24 @@ html {
     [data-testid="report-deposit-selector-wrapper"],
     [data-testid="report-clickable-deposits-grid"],
     [data-testid="reconciliation-form"],
-    [data-testid="reconciliations-history-section"] {
+    [data-testid="reconciliations-history-section"],
+    [data-sonner-toaster] {
         display: none !important;
     }
 
     [data-testid="bank-page-content"] {
         max-width: none !important;
         padding: 0 !important;
+    }
+
+    [data-testid="print-status-wrapper"] {
+        direction: ltr !important;
+        justify-content: flex-start !important;
+        margin-top: auto !important;
+    }
+
+    [data-testid="print-status"] {
+        direction: rtl !important;
     }
 
     .rounded-xl,

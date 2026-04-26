@@ -498,7 +498,7 @@ export default function BankReconciliationPage() {
         </section>
 
         {activeReconciliation && (
-          <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
+          <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:flex print:min-h-[95vh] print:flex-col print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
             <div className="relative text-center" data-testid="reconciliation-print-header">
               <div className="absolute left-0 top-0" data-testid="reconciliation-print-bank-logo">
                 <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className="h-16 w-28" testId="reconciliation-print-bank-logo-mark" />
@@ -506,14 +506,13 @@ export default function BankReconciliationPage() {
               <p className="text-base font-extrabold text-slate-700" data-testid="reconciliation-print-organization">{organizationPrintName(activeReconciliation.administration)}</p>
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="reconciliation-print-kpis">
+            <div className="grid grid-cols-1 gap-4" data-testid="reconciliation-print-kpis">
               <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-calculated-balance"><p className="text-xs font-bold text-slate-500">الإجمالي</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>
             </div>
             {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
             {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
-            <div className="flex justify-start pt-6" data-testid="print-status-wrapper">
-              <div className={`rounded-xl p-4 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xs font-bold opacity-80">الحالة</p><p className="text-xl font-extrabold">{activeReconciliation.status_text}</p></div>
+            <div className="flex justify-end pt-6 print:mt-auto print:justify-start" data-testid="print-status-wrapper">
+              <div className={`rounded-xl p-4 print:bg-transparent print:p-0 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xl font-extrabold" data-testid="print-status-text">{activeReconciliation.status_text}</p></div>
             </div>
           </section>
         )}
