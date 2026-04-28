@@ -51,6 +51,7 @@ export default function ExpensesPage() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState(null);
+  const [selectedVoucherYear, setSelectedVoucherYear] = useState("");
 
   const canManage = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_expenses;
   const deductionTotal = useMemo(() => form.deductions.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0), [form.deductions]);
@@ -74,6 +75,7 @@ export default function ExpensesPage() {
         items: items.sort((a, b) => String(b.issued_at || "").localeCompare(String(a.issued_at || ""))),
       }));
   }, [expenses]);
+  const selectedVoucherGroup = useMemo(() => voucherExpenseGroups.find((group) => group.year === selectedVoucherYear), [selectedVoucherYear, voucherExpenseGroups]);
 
   const loadBanks = useCallback(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
@@ -232,7 +234,7 @@ export default function ExpensesPage() {
         <section dir="ltr" className="mt-6 overflow-hidden border-2 border-slate-900" data-testid="expense-voucher-table-wrapper">
           <div className="grid grid-cols-[1fr_150px_150px] border-b-2 border-slate-900 text-center text-lg font-extrabold" data-testid="expense-voucher-table-header">
             <div dir="rtl" className="border-r-2 border-slate-900 p-3" data-testid="expense-voucher-header-statement">البيان</div>
-            <div dir="rtl" className="border-r-2 border-slate-900" data-testid="expense-voucher-header-partial"><div className="border-b border-slate-900 p-2">المبلغ الجزئي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1">جنيه</span><span className="p-1">قرش</span></div></div>
+            <div dir="rtl" className="border-r-2 border-slate-900" data-testid="expense-voucher-header-partial"><div className="border-b border-slate-900 p-2">المبلغ الجزئي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1" data-testid="expense-voucher-partial-piastres-header">قرش</span><span className="p-1" data-testid="expense-voucher-partial-pounds-header">جنيه</span></div></div>
             <div data-testid="expense-voucher-header-total"><div className="border-b border-slate-900 p-2">المبلغ الكلي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1">جنيه</span><span className="p-1">قرش</span></div></div>
           </div>
           <div className="grid min-h-[82px] grid-cols-[1fr_150px_150px] border-b border-slate-300" data-testid="expense-voucher-entitlement-row">
@@ -250,7 +252,7 @@ export default function ExpensesPage() {
             return (
               <div key={`voucher-deduction-${index}`} className="grid min-h-[48px] grid-cols-[1fr_150px_150px] border-b border-dotted border-slate-300" data-testid={`expense-voucher-deduction-row-${index}`}>
                 <div dir="rtl" className="border-r-2 border-slate-900 p-3 text-right font-bold" data-testid={`expense-voucher-deduction-${index}-statement`}>{deduction.statement}</div>
-                <div className="grid grid-cols-2 border-r-2 border-slate-900 text-center font-bold"><span className="border-l border-slate-300 p-3" data-testid={`expense-voucher-deduction-${index}-pounds`}>{parts.pounds}</span><span className="p-3" data-testid={`expense-voucher-deduction-${index}-piastres`}>{parts.piastres}</span></div>
+                <div className="grid grid-cols-2 border-r-2 border-slate-900 text-center font-bold"><span className="border-l border-slate-300 p-3" data-testid={`expense-voucher-deduction-${index}-piastres`}>{parts.piastres}</span><span className="p-3" data-testid={`expense-voucher-deduction-${index}-pounds`}>{parts.pounds}</span></div>
                 <div className="grid grid-cols-2 text-center"><span className="border-l border-slate-300 p-3">—</span><span className="p-3">—</span></div>
               </div>
             );
@@ -292,19 +294,34 @@ export default function ExpensesPage() {
         <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="expenses-report-section"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="expenses-report-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expenses-report-eyebrow">تقرير المصروفات</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expenses-report-title">بيان المصروفات المسجلة</h2></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="expenses-report-kpis"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="expenses-gross-card"><p className="text-xs font-bold text-slate-300">إجمالي الاستحقاقات</p><p className="text-xl font-extrabold" data-testid="expenses-gross-value">{formatCurrency(reportTotals.gross)}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid="expenses-deductions-card"><p className="text-xs font-bold text-red-700">إجمالي الاستقطاعات</p><p className="text-xl font-extrabold" data-testid="expenses-deductions-value">{formatCurrency(reportTotals.deductions)}</p></div><div className="rounded-xl bg-emerald-50 p-4 text-emerald-900" data-testid="expenses-net-total-card"><p className="text-xs font-bold text-emerald-700">إجمالي الصافي</p><p className="text-xl font-extrabold" data-testid="expenses-net-total-value">{formatCurrency(reportTotals.net)}</p></div></div></div><div className="overflow-hidden rounded-xl border border-slate-200" data-testid="expenses-table-wrapper"><Table data-testid="expenses-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="expenses-table-header-row">{["رقم الإذن", "طريقة الصرف", "بيان الصرف", "المرجع", "البنك", "المبلغ الكلي", "إجمالي الاستقطاعات", "الصافي", "تحريراً في", "الموظف"].map((title) => <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`expenses-header-${title}`}>{title}</TableHead>)}{canManage && <TableHead className="text-right font-extrabold text-white print:hidden" data-testid="expenses-header-actions">إجراءات</TableHead>}</TableRow></TableHeader><TableBody>{expenses.map((item) => <TableRow key={item.id} data-testid={`expense-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-number`}>{item.expense_number}</TableCell><TableCell data-testid={`expense-row-${item.id}-method`}>{methodLabels[item.payment_method]}</TableCell><TableCell data-testid={`expense-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-reference`}>{refValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`expense-row-${item.id}-gross`}>{formatCurrency(item.gross_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-deductions`}>{formatCurrency(item.total_deductions)}</TableCell><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-net`}>{formatCurrency(item.net_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`expense-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`expense-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`expense-row-${item.id}-manage-actions`}><button type="button" onClick={() => editExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-expense-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button><button type="button" onClick={() => deleteExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-expense-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody></Table></div></section>
         {expenses.length > 0 && (
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="expense-voucher-actions-section">
-            <div className="mb-4 flex items-center justify-between gap-3" data-testid="expense-voucher-actions-heading">
-              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expense-voucher-actions-title">عرض إذن الصرف التفصيلي</h3>
-              <Badge className="bg-red-50 text-red-700 hover:bg-red-50" data-testid="expense-voucher-actions-count">{expenses.length} مصروف</Badge>
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="expense-voucher-actions-heading">
+              <div>
+                <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expense-voucher-actions-title">عرض إذن الصرف التفصيلي</h3>
+                <p className="mt-1 text-sm font-bold text-slate-500" data-testid="expense-voucher-actions-description">اختر سنة التحرير لعرض الأذون المحفوظة.</p>
+              </div>
+              <Badge className="w-fit bg-red-50 text-red-700 hover:bg-red-50" data-testid="expense-voucher-actions-count">{expenses.length} مصروف</Badge>
+            </div>
+            <div className="mb-5 max-w-xs" data-testid="expense-voucher-year-filter-wrapper">
+              <Label data-testid="expense-voucher-year-filter-label">اختيار السنة</Label>
+              <select value={selectedVoucherYear} onChange={(event) => setSelectedVoucherYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="expense-voucher-year-filter-select">
+                <option value="" data-testid="expense-voucher-year-filter-placeholder-option">اختر السنة لعرض الأذون</option>
+                {voucherExpenseGroups.map((group) => <option key={group.year} value={group.year} data-testid={`expense-voucher-year-filter-option-${group.year}`}>{group.year}</option>)}
+              </select>
             </div>
             <div className="space-y-5" data-testid="expense-voucher-actions-year-groups">
-              {voucherExpenseGroups.map((group) => (
-                <div key={group.year} className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`expense-voucher-year-group-${group.year}`}>
-                  <div className="mb-3 flex items-center justify-between" data-testid={`expense-voucher-year-heading-${group.year}`}>
-                    <h4 className="text-xl font-extrabold text-slate-950" data-testid={`expense-voucher-year-title-${group.year}`}>سنة {group.year}</h4>
-                    <Badge className="bg-white text-slate-700 hover:bg-white" data-testid={`expense-voucher-year-count-${group.year}`}>{group.items.length} إذن</Badge>
+              {!selectedVoucherYear ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expense-voucher-year-required-state">
+                  <p className="text-lg font-extrabold text-slate-950" data-testid="expense-voucher-year-required-title">اختر السنة أولاً</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="expense-voucher-year-required-description">لن تظهر أذون الصرف المحفوظة إلا بعد تحديد سنة التحرير.</p>
+                </div>
+              ) : selectedVoucherGroup ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`expense-voucher-year-group-${selectedVoucherGroup.year}`}>
+                  <div className="mb-3 flex items-center justify-between" data-testid={`expense-voucher-year-heading-${selectedVoucherGroup.year}`}>
+                    <h4 className="text-xl font-extrabold text-slate-950" data-testid={`expense-voucher-year-title-${selectedVoucherGroup.year}`}>سنة {selectedVoucherGroup.year}</h4>
+                    <Badge className="bg-white text-slate-700 hover:bg-white" data-testid={`expense-voucher-year-count-${selectedVoucherGroup.year}`}>{selectedVoucherGroup.items.length} إذن</Badge>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid={`expense-voucher-year-grid-${group.year}`}>
-                    {group.items.map((item) => (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid={`expense-voucher-year-grid-${selectedVoucherGroup.year}`}>
+                    {selectedVoucherGroup.items.map((item) => (
                       <button key={`voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 text-right transition-colors hover:border-slate-950" data-testid={`view-expense-voucher-button-${item.id}`}>
                         <span data-testid={`view-expense-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إذن رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">{methodLabels[item.payment_method]} — {formatCurrency(item.net_amount)}</span></span>
                         <Eye className="h-5 w-5 text-red-700" />
@@ -312,7 +329,11 @@ export default function ExpensesPage() {
                     ))}
                   </div>
                 </div>
-              ))}
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expense-voucher-year-empty-state">
+                  <p className="text-lg font-extrabold text-slate-950" data-testid="expense-voucher-year-empty-title">لا توجد أذون لهذه السنة</p>
+                </div>
+              )}
             </div>
           </section>
         )}

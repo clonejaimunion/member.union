@@ -18,6 +18,11 @@ html {
 }
 
 @media print {
+    @page {
+        size: A4 portrait;
+        margin: 10mm;
+    }
+
     body {
         background: #ffffff !important;
     }
@@ -82,14 +87,32 @@ html {
     }
 
     [data-testid="expense-voucher-document"] {
-        width: 100% !important;
+        width: 190mm !important;
         max-width: none !important;
+        min-height: 277mm !important;
+        box-sizing: border-box !important;
         padding: 0 !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
         color: #000000 !important;
         opacity: 1 !important;
+        break-after: page !important;
+        page-break-after: always !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
+    }
+
+    [data-testid="expense-voucher-document"] [data-testid="expense-voucher-party-section"] {
+        gap: 8px !important;
+        margin-top: 12px !important;
+        font-size: 14px !important;
+    }
+
+    [data-testid="expense-voucher-document"] [data-testid="expense-voucher-table-wrapper"] {
+        margin-top: 12px !important;
+    }
+
+    [data-testid="expense-voucher-document"] [data-testid="expense-voucher-footer"] {
+        margin-top: 18px !important;
     }
 
     [data-testid="expense-voucher-document"] * {
