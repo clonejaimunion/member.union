@@ -11,7 +11,7 @@ import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
-import { formatCurrency, numberToArabicCurrencyWords, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
+import { formatCurrency, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyDeduction = () => ({ amount: "", statement: "" });
@@ -223,7 +223,7 @@ export default function ExpensesPage() {
 
   const DetailGrid = ({ item, prefix }) => (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid={`${prefix}-details-grid`}>
-      {[["رقم الإذن", item.expense_number], ["الجهة", organizationLabels[item.organization_scope || "social_solidarity_project"]], ["نوع المصروف", categoryLabels[item.expense_category || "general_expenses"]], ["طريقة الصرف", methodLabels[item.payment_method]], [detailLabel(item), detailValue(item)], [item.payment_method === "bank_transfer" ? "رقم عملية التحويل" : "رقم الشيك", refValue(item)], ["البنك", item.bank_name], ...((item.expense_category === "death_benefits") ? [["رقم العضوية", item.membership_number], ["لجنة", item.committee], ["محافظة", item.governorate]] : []), ["المبلغ الكلي", formatCurrency(item.gross_amount)], ["بيان المبلغ", item.gross_statement], ["إجمالي الاستقطاعات", formatCurrency(item.total_deductions)], ["الصافي", formatCurrency(item.net_amount)], ["الصافي كتابة", numberToArabicCurrencyWords(item.net_amount)], ["تحريراً في", item.issued_at], ["الموظف المختص", item.responsible_employee]].map(([label, value], index) => (
+      {[["رقم الإذن", item.expense_number], ["الجهة", organizationLabels[item.organization_scope || "social_solidarity_project"]], ["نوع المصروف", categoryLabels[item.expense_category || "general_expenses"]], ["طريقة الصرف", methodLabels[item.payment_method]], [detailLabel(item), detailValue(item)], [item.payment_method === "bank_transfer" ? "رقم عملية التحويل" : "رقم الشيك", refValue(item)], ["البنك", item.bank_name], ...((item.expense_category === "death_benefits") ? [["رقم العضوية", item.membership_number], ["لجنة", item.committee], ["محافظة", item.governorate]] : []), ["المبلغ الكلي", formatCurrency(item.gross_amount)], ["بيان المبلغ", item.gross_statement], ["إجمالي الاستقطاعات", formatCurrency(item.total_deductions)], ["الصافي", formatCurrency(item.net_amount)], ["تحريراً في", item.issued_at], ["الموظف المختص", item.responsible_employee]].map(([label, value], index) => (
         <div key={`${prefix}-${label}`} className={index === 6 ? "rounded-lg bg-slate-50 p-3 md:col-span-2" : "rounded-lg bg-slate-50 p-3"} data-testid={`${prefix}-detail-${index}`}><p className="text-xs font-bold text-slate-500" data-testid={`${prefix}-detail-${index}-label`}>{label}</p><p className="mt-1 break-words text-base font-extrabold text-slate-950" data-testid={`${prefix}-detail-${index}-value`}>{value || "—"}</p></div>
       ))}
       {item.deductions?.length > 0 && <div className="rounded-lg bg-amber-50 p-3 md:col-span-2" data-testid={`${prefix}-deductions-list`}><p className="text-xs font-bold text-amber-700" data-testid={`${prefix}-deductions-title`}>بيانات الاستقطاعات</p>{item.deductions.map((deduction, index) => <p key={`${prefix}-deduction-${index}`} className="mt-2 text-sm font-bold text-slate-800" data-testid={`${prefix}-deduction-${index}`}>{formatCurrency(deduction.amount)} — {deduction.statement}</p>)}</div>}
@@ -284,8 +284,8 @@ export default function ExpensesPage() {
             );
           })}
           <div className="grid grid-cols-[1fr_150px_150px] bg-slate-50 text-xl font-extrabold" data-testid="expense-voucher-net-row">
-            <div dir="rtl" className="border-r-2 border-slate-900 p-4 text-right" data-testid="expense-voucher-net-label">الصافي مبلغ وقدره</div>
-            <div dir="rtl" className="border-r-2 border-slate-900 p-4 text-center leading-7" data-testid="expense-voucher-net-text">{numberToArabicCurrencyWords(item.net_amount)}</div>
+            <div dir="rtl" className="border-r-2 border-slate-900 p-4 text-right" data-testid="expense-voucher-net-label">الصافي</div>
+            <div className="border-r-2 border-slate-900 p-4 text-center" data-testid="expense-voucher-net-text">{formatCurrency(item.net_amount)}</div>
             <div className="grid grid-cols-2 text-center"><span className="border-l border-slate-300 p-4" data-testid="expense-voucher-net-pounds">{netParts.pounds}</span><span className="p-4" data-testid="expense-voucher-net-piastres">{netParts.piastres}</span></div>
           </div>
         </section>
