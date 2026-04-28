@@ -8,7 +8,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 import uuid
 from datetime import date, datetime, timedelta, timezone
 import calendar
@@ -146,6 +146,7 @@ class UserPermissions(BaseModel):
     edit_deposits: bool = False
     manage_users: bool = False
     manage_reconciliations: bool = True
+    manage_revenues: bool = True
 
 
 class UserPublic(BaseModel):
@@ -304,6 +305,33 @@ class BankReconciliation(BankReconciliationCreate):
     updated_at: datetime
 
 
+class RevenueBase(BaseModel):
+    receipt_number: str = Field(..., min_length=1)
+    amount: float = Field(..., gt=0)
+    collection_method: Literal["cash", "check", "payment_order"]
+    supplier_name: Optional[str] = None
+    check_number: Optional[str] = None
+    payment_order_number: Optional[str] = None
+    bank_id: str
+    dated: date
+    value: str = Field(..., min_length=1)
+    issued_at: date
+    responsible_employee: Literal["يوسف عبدالغني", "دعاء علي"]
+
+
+class RevenueCreate(RevenueBase):
+    pass
+
+
+class Revenue(RevenueBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    bank_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
 def ensure_bank(bank_id: str) -> dict:
     bank = BANKS.get(bank_id)
     if not bank:
@@ -354,6 +382,10 @@ def serialize_datetime(value: datetime) -> str:
     return normalize_datetime(value).isoformat()
 
 
+def serialize_date(value: date) -> str:
+    return value.isoformat()
+
+
 def hydrate_deposit(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
     for field_name in ["creation_datetime", "maturity_datetime", "created_at", "updated_at"]:
@@ -372,6 +404,71 @@ def hydrate_reconciliation(document: dict) -> dict:
             if isinstance(item.get("check_date"), str):
                 item["check_date"] = datetime.fromisoformat(item["check_date"])
     return clean
+
+
+def hydrate_revenue(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["dated", "issued_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = date.fromisoformat(clean[field_name])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+WESTERN_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def normalize_digit_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.strip().translate(WESTERN_DIGIT_MAP)
+
+
+async def ensure_revenue_unique(payload: RevenueCreate, revenue_id: Optional[str] = None):
+    receipt_number = normalize_digit_text(payload.receipt_number)
+    if not receipt_number or not receipt_number.isdigit():
+        raise HTTPException(status_code=400, detail="رقم الإذن يجب أن يكون أرقام فقط")
+    base_exclusion = {"id": {"$ne": revenue_id}} if revenue_id else {}
+    if await db.revenues.find_one({"receipt_number": receipt_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="رقم الإذن موجود بالفعل ولا يمكن تكراره")
+
+    if payload.collection_method == "cash":
+        if not payload.supplier_name or not payload.supplier_name.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال اسم الشخص الذي قام بالتوريد عند اختيار نقداً")
+    elif payload.collection_method == "check":
+        check_number = normalize_digit_text(payload.check_number)
+        if not check_number or not check_number.isdigit():
+            raise HTTPException(status_code=400, detail="يجب إدخال رقم شيك صحيح عند اختيار شيك")
+        if await db.revenues.find_one({"check_number": check_number, **base_exclusion}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="رقم الشيك موجود بالفعل ولا يمكن تكراره")
+    elif payload.collection_method == "payment_order":
+        payment_order_number = normalize_digit_text(payload.payment_order_number)
+        if not payment_order_number or not payment_order_number.isdigit():
+            raise HTTPException(status_code=400, detail="يجب إدخال رقم أمر الدفع عند اختيار أمر دفع")
+        if await db.revenues.find_one({"payment_order_number": payment_order_number, **base_exclusion}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="رقم أمر الدفع موجود بالفعل ولا يمكن تكراره")
+
+
+async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Optional[str] = None) -> dict:
+    bank = await ensure_bank_async(payload.bank_id)
+    await ensure_revenue_unique(payload, revenue_id)
+    method = payload.collection_method
+    return {
+        "receipt_number": normalize_digit_text(payload.receipt_number),
+        "amount": round(float(payload.amount), 2),
+        "collection_method": method,
+        "supplier_name": payload.supplier_name.strip() if method == "cash" and payload.supplier_name else None,
+        "check_number": normalize_digit_text(payload.check_number) if method == "check" else None,
+        "payment_order_number": normalize_digit_text(payload.payment_order_number) if method == "payment_order" else None,
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "dated": serialize_date(payload.dated),
+        "value": payload.value.strip(),
+        "issued_at": serialize_date(payload.issued_at),
+        "responsible_employee": payload.responsible_employee,
+    }
 
 
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
@@ -632,6 +729,7 @@ async def ensure_default_admin():
         edit_deposits=True,
         manage_users=True,
         manage_reconciliations=True,
+        manage_revenues=True,
     ).model_dump()
     await db.users.insert_one(
         {
@@ -654,6 +752,9 @@ async def ensure_default_admin():
 @app.on_event("startup")
 async def startup_tasks():
     await ensure_default_admin()
+    await db.revenues.create_index("receipt_number", unique=True)
+    await db.revenues.create_index("check_number")
+    await db.revenues.create_index("payment_order_number")
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -870,11 +971,13 @@ async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
     await db.banks.delete_one({"id": bank_id})
     deposits_result = await db.deposits.delete_many({"bank_id": bank_id})
     reconciliations_result = await db.reconciliations.delete_many({"bank_id": bank_id})
+    revenues_result = await db.revenues.delete_many({"bank_id": bank_id})
     return {
         "message": "تم حذف البنك وكل بياناته بالكامل",
         "deleted_bank_id": bank_id,
         "deleted_deposits": deposits_result.deleted_count,
         "deleted_reconciliations": reconciliations_result.deleted_count,
+        "deleted_revenues": revenues_result.deleted_count,
     }
 
 
@@ -1206,6 +1309,96 @@ async def delete_bank_reconciliation(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
     return {"message": "تم حذف مذكرة التسوية", "deleted_reconciliation_id": reconciliation_id}
+
+
+@api_router.post("/revenues", response_model=Revenue)
+async def create_revenue(
+    payload: RevenueCreate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+):
+    now = datetime.now(timezone.utc)
+    document = await revenue_document_from_payload(payload)
+    document.update({"id": str(uuid.uuid4()), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
+    await db.revenues.insert_one(document)
+    return Revenue(**hydrate_revenue(document))
+
+
+@api_router.get("/revenues", response_model=List[Revenue])
+async def list_revenues(
+    bank_id: Optional[str] = Query(default=None),
+    collection_method: Optional[str] = Query(default=None),
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
+):
+    query = {}
+    if bank_id:
+        await ensure_bank_async(bank_id)
+        query["bank_id"] = bank_id
+    if collection_method:
+        query["collection_method"] = collection_method
+    if from_date or to_date:
+        query["dated"] = {}
+        if from_date:
+            query["dated"]["$gte"] = serialize_date(from_date)
+        if to_date:
+            query["dated"]["$lte"] = serialize_date(to_date)
+    documents = await db.revenues.find(query, {"_id": 0}).sort("dated", -1).sort("created_at", -1).to_list(1000)
+    return [Revenue(**hydrate_revenue(document)) for document in documents]
+
+
+@api_router.get("/revenues/search", response_model=List[Revenue])
+async def search_revenues(
+    query: str = Query(..., min_length=1),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
+):
+    cleaned = query.strip()
+    digit_query = normalize_digit_text(cleaned)
+    conditions = [
+        {"supplier_name": {"$regex": cleaned, "$options": "i"}},
+        {"check_number": digit_query},
+        {"payment_order_number": digit_query},
+    ]
+    documents = await db.revenues.find({"$or": conditions}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return [Revenue(**hydrate_revenue(document)) for document in documents]
+
+
+@api_router.get("/revenues/{revenue_id}", response_model=Revenue)
+async def get_revenue(
+    revenue_id: str,
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
+):
+    document = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    return Revenue(**hydrate_revenue(document))
+
+
+@api_router.put("/revenues/{revenue_id}", response_model=Revenue)
+async def update_revenue(
+    revenue_id: str,
+    payload: RevenueCreate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+):
+    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    updates = await revenue_document_from_payload(payload, revenue_id)
+    updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
+    await db.revenues.update_one({"id": revenue_id}, {"$set": updates})
+    updated = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    return Revenue(**hydrate_revenue(updated))
+
+
+@api_router.delete("/revenues/{revenue_id}")
+async def delete_revenue(
+    revenue_id: str,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+):
+    result = await db.revenues.delete_one({"id": revenue_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    return {"message": "تم حذف الإيراد", "deleted_revenue_id": revenue_id}
 
 # Include the router in the main app
 app.include_router(api_router)

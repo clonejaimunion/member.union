@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, Landmark, LogOut, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Building2, Landmark, LogOut, ReceiptText, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -10,6 +10,7 @@ export default function ModuleSelection() {
   const { user, logout } = useAuth();
   const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
   const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
+  const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
 
   const modules = [
     canUseDeposits && {
@@ -25,6 +26,13 @@ export default function ModuleSelection() {
       path: "/reconciliations",
       icon: Landmark,
       testId: "module-reconciliations-card",
+    },
+    canUseRevenues && {
+      title: "الإيرادات",
+      description: "تسجيل الإيرادات، طرق التحصيل، البحث، التقرير، وطباعة PDF.",
+      path: "/revenues",
+      icon: ReceiptText,
+      testId: "module-revenues-card",
     },
   ].filter(Boolean);
 
@@ -61,7 +69,7 @@ export default function ModuleSelection() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2" data-testid="module-cards-grid">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3" data-testid="module-cards-grid">
           {modules.map((module) => {
             const Icon = module.icon;
             return (

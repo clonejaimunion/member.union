@@ -15,13 +15,14 @@ const permissionLabels = {
   view_reports: "مشاهدة التقارير",
   edit_deposits: "تعديل الودائع",
   manage_reconciliations: "إدارة التسويات البنكية",
+  manage_revenues: "إدارة الإيرادات",
   manage_users: "إدارة مستخدمين",
 };
 
 const defaultUserForm = {
   username: "",
   password: "",
-  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_users: false },
+  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_users: false },
   is_active: true,
 };
 
