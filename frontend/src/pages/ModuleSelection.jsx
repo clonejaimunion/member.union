@@ -75,24 +75,24 @@ export default function ModuleSelection() {
         </div>
       </header>
 
-      <section className="mx-auto grid min-h-[calc(100vh-88px)] max-w-7xl grid-cols-1 items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8" data-testid="module-selection-content">
-        <div className="space-y-5" data-testid="module-selection-intro">
+      <section className="mx-auto flex min-h-[calc(100vh-88px)] max-w-7xl flex-col justify-center gap-10 px-4 py-10 sm:px-6 lg:px-8" data-testid="module-selection-content">
+        <div className="mx-auto max-w-4xl space-y-5 text-center" data-testid="module-selection-intro">
           <Badge className="border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50" data-testid="module-selection-badge">نظام بنكي منفصل ومنظم</Badge>
-          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">كل جزء في مكانه: الودائع وحدها، والتسويات وحدها</h2>
-          <p className="max-w-xl text-base font-semibold leading-8 text-slate-600 md:text-lg" data-testid="module-selection-description">
-            اختار القسم المطلوب أولًا، ثم اختار البنك لتفتح الصفحات الخاصة بهذا القسم فقط بدون خلط بين الودائع والتسويات.
+          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">اختر القسم المطلوب</h2>
+          <p className="mx-auto max-w-2xl text-base font-semibold leading-8 text-slate-600 md:text-lg" data-testid="module-selection-description">
+            كل قسم مستقل وواضح للوصول السريع بدون تزاحم في العرض.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5" data-testid="module-cards-grid">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" data-testid="module-cards-grid">
           {modules.map((module) => {
             const Icon = module.icon;
             return (
-              <Link key={module.path} to={module.path} className="group rounded-2xl border border-slate-200 bg-white p-7 shadow-sm transition-[transform,box-shadow,background-color] hover:-translate-y-1 hover:bg-slate-50 hover:shadow-xl" data-testid={module.testId}>
-                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid={`${module.testId}-icon`}><Icon className="h-7 w-7" /></div>
-                <h3 className="text-3xl font-extrabold text-slate-950" data-testid={`${module.testId}-title`}>{module.title}</h3>
-                <p className="mt-4 min-h-20 text-base font-semibold leading-8 text-slate-600" data-testid={`${module.testId}-description`}>{module.description}</p>
-                <div className="mt-6 text-sm font-extrabold text-emerald-700 transition-transform group-hover:-translate-x-1" data-testid={`${module.testId}-action`}>اختيار القسم ←</div>
+              <Link key={module.path} to={module.path} className="group flex aspect-square min-h-56 flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm transition-[transform,box-shadow,background-color,border-color] hover:-translate-y-1 hover:border-slate-300 hover:bg-slate-50 hover:shadow-xl" data-testid={module.testId}>
+                <div className="mb-5 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm transition-transform group-hover:scale-105" data-testid={`${module.testId}-icon`}><Icon className="h-9 w-9" /></div>
+                <h3 className="flex min-h-16 items-center justify-center text-balance text-2xl font-extrabold leading-snug text-slate-950" data-testid={`${module.testId}-title`}>{module.title}</h3>
+                <p className="sr-only" data-testid={`${module.testId}-description`}>{module.description}</p>
+                <div className="mt-5 text-sm font-extrabold text-emerald-700 transition-transform group-hover:-translate-x-1" data-testid={`${module.testId}-action`}>اختيار القسم ←</div>
               </Link>
             );
           })}
