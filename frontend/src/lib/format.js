@@ -16,6 +16,59 @@ export const formatDateTime = (value) => {
   }).format(new Date(value));
 };
 
+const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"];
+const tens = ["", "عشرة", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
+const teens = ["عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
+const hundreds = ["", "مائة", "مائتان", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+
+const belowThousandToArabic = (number) => {
+  const value = Number(number || 0);
+  const parts = [];
+  const hundred = Math.floor(value / 100);
+  const remainder = value % 100;
+  if (hundred) parts.push(hundreds[hundred]);
+  if (remainder) {
+    if (remainder < 10) parts.push(ones[remainder]);
+    else if (remainder < 20) parts.push(teens[remainder - 10]);
+    else {
+      const unit = remainder % 10;
+      const ten = Math.floor(remainder / 10);
+      parts.push(unit ? `${ones[unit]} و${tens[ten]}` : tens[ten]);
+    }
+  }
+  return parts.join(" و");
+};
+
+const scaleToArabic = (value, singular, dual, plural) => {
+  if (!value) return "";
+  if (value === 1) return singular;
+  if (value === 2) return dual;
+  if (value >= 3 && value <= 10) return `${belowThousandToArabic(value)} ${plural}`;
+  return `${belowThousandToArabic(value)} ${singular}`;
+};
+
+export const numberToArabicWords = (number) => {
+  const value = Math.floor(Math.abs(Number(number || 0)));
+  if (value === 0) return "صفر";
+  const millions = Math.floor(value / 1000000);
+  const thousands = Math.floor((value % 1000000) / 1000);
+  const remainder = value % 1000;
+  return [
+    scaleToArabic(millions, "مليون", "مليونان", "ملايين"),
+    scaleToArabic(thousands, "ألف", "ألفان", "آلاف"),
+    belowThousandToArabic(remainder),
+  ].filter(Boolean).join(" و");
+};
+
+export const numberToArabicCurrencyWords = (value) => {
+  const amount = Math.abs(Number(value || 0));
+  const pounds = Math.floor(amount);
+  const piastres = Math.round((amount - pounds) * 100);
+  const poundText = `${numberToArabicWords(pounds)} ${pounds === 1 ? "جنيه مصري" : "جنيهاً مصرياً"}`;
+  const piastreText = piastres ? ` و${numberToArabicWords(piastres)} ${piastres === 1 ? "قرش" : "قرشاً"}` : "";
+  return `فقط ${poundText}${piastreText} لا غير`;
+};
+
 export const toDateTimeLocal = (date) => {
   const pad = (number) => String(number).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
