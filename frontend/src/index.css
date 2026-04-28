@@ -50,6 +50,53 @@ html {
         direction: rtl !important;
     }
 
+    body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-header"],
+    body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-content"],
+    body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-footer"],
+    body:has([data-testid="expense-invoice-modal-overlay"]) [data-sonner-toaster] {
+        display: none !important;
+    }
+
+    [data-testid="expense-invoice-modal-overlay"] {
+        position: static !important;
+        inset: auto !important;
+        display: block !important;
+        overflow: visible !important;
+        background: white !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="expense-invoice-modal"] {
+        width: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        overflow: visible !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="expense-voucher-document"] {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 0 !important;
+        font-size: 12px !important;
+        color: #000000 !important;
+        opacity: 1 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    [data-testid="expense-voucher-document"] * {
+        color: #000000 !important;
+        border-color: #000000 !important;
+        opacity: 1 !important;
+    }
+
+    [data-testid="expense-invoice-actions"] {
+        display: none !important;
+    }
+
     .rounded-xl,
     .rounded-lg {
         border-radius: 0.25rem !important;

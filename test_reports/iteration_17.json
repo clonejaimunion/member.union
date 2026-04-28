@@ -1,0 +1,77 @@
+{
+  "summary": "Executed backend + frontend regression for expense voucher display on public URL. Backend voucher data APIs passed. Frontend voucher modal works for available methods (cash/check), but print isolation check failed: expenses report remains visible in print mode while modal voucher is open.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No brute-force lockout after 5 failed attempts (statuses: 401x5 then 200)."
+      },
+      {
+        "endpoint": "CORS preflight",
+        "issue": "access-control-allow-origin is '*' instead of explicit origins with credentialed posture."
+      },
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No app auth HttpOnly session cookie observed; only JSON token response (set-cookie seen was Cloudflare cookie)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Expense voucher print mode",
+        "issue": "When voucher modal is open and print media is emulated, expenses report section is still display:block; expected hidden for voucher-only print.",
+        "selector": "[data-testid='expenses-report-section']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Voucher title verification by payment method",
+        "issue": "Bank transfer voucher title could not be validated from existing data set in this run (no bank_transfer record after filter).",
+        "affected_selectors": [
+          "[data-testid='expenses-filter-method-select']",
+          "[data-testid^='view-expense-voucher-button-']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_expense_voucher_api.py",
+    "/app/backend/tests/test_iteration17_cleanup_test_records.py",
+    "/app/test_reports/pytest/pytest_results_iter17_backend.xml",
+    "/app/test_reports/pytest/pytest_results_iter17_cleanup.xml",
+    "/app/test_reports/iter17_login_headers.txt",
+    "/app/test_reports/iter17_lockout_statuses.txt",
+    "/app/test_reports/iter17_cors_options_headers.txt"
+  ],
+  "action_items": [
+    "Fix print CSS so expense page/report sections are hidden when printing voucher modal (voucher-only output).",
+    "Re-test bank_transfer voucher title/path with seeded bank_transfer expense visible in UI voucher actions.",
+    "Implement auth lockout policy after repeated failed logins.",
+    "Replace wildcard CORS with explicit allowed origins for credentialed auth.",
+    "If session-cookie auth is required, implement app-issued HttpOnly cookie flow."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains a large monolith (~1600+ LOC), raising regression risk and reducing testability.",
+    "Password hashing path uses bcrypt.hashpw (compatible with $2b$ format expectation).",
+    "ensure_default_admin returns immediately when admin exists, so changed ADMIN_INITIAL_PASSWORD is not reconciled for existing admin."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration17_expense_voucher_api.py",
+    "/app/backend/tests/test_iteration17_cleanup_test_records.py",
+    "/app/test_reports/iteration_17.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "70%"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin/Admin@123.",
+  "seed_data_creation": "Temporary TEST UI / TEST ITER17 expenses were created during UI run and cleaned via /app/backend/tests/test_iteration17_cleanup_test_records.py.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Cash/check voucher modal fields and signatures verified. Print button triggers window.print, but print isolation fails (expenses report remains visible in print emulation). Bank transfer voucher validation is still pending due no visible bank_transfer record in filtered UI during this run.",
+  "rca of the issue": "Print RCA: Current CSS relies on @media print with body:has([data-testid='expense-invoice-modal-overlay']) to hide expenses sections. In tested browser print emulation, expenses-report-section stayed display:block, suggesting selector/media application mismatch for this path. Repro: login -> /expenses -> open any voucher -> emulate/print -> report section still visible. Mitigation: apply print-hide styles directly to target sections under a deterministic print class on body/html toggled when modal opens, instead of relying solely on :has in print context."
+}
