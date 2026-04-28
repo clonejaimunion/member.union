@@ -147,6 +147,7 @@ class UserPermissions(BaseModel):
     manage_users: bool = False
     manage_reconciliations: bool = True
     manage_revenues: bool = True
+    manage_expenses: bool = True
 
 
 class UserPublic(BaseModel):
@@ -332,6 +333,41 @@ class Revenue(RevenueBase):
     updated_at: datetime
 
 
+class ExpenseDeduction(BaseModel):
+    amount: float = Field(..., ge=0)
+    statement: str = Field(..., min_length=1)
+
+
+class ExpenseBase(BaseModel):
+    expense_number: str = Field(..., min_length=1)
+    payment_method: Literal["cash", "check", "bank_transfer"]
+    payee_name: Optional[str] = None
+    check_number: Optional[str] = None
+    transfer_number: Optional[str] = None
+    transfer_to: Optional[str] = None
+    bank_id: str
+    gross_amount: float = Field(..., gt=0)
+    gross_statement: str = Field(..., min_length=1)
+    deductions: List[ExpenseDeduction] = Field(default_factory=list)
+    issued_at: date
+    responsible_employee: Literal["يوسف عبدالغني", "دعاء علي"]
+
+
+class ExpenseCreate(ExpenseBase):
+    pass
+
+
+class Expense(ExpenseBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    bank_name: str
+    total_deductions: float
+    net_amount: float
+    created_at: datetime
+    updated_at: datetime
+
+
 def ensure_bank(bank_id: str) -> dict:
     bank = BANKS.get(bank_id)
     if not bank:
@@ -417,6 +453,16 @@ def hydrate_revenue(document: dict) -> dict:
     return clean
 
 
+def hydrate_expense(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    if isinstance(clean.get("issued_at"), str):
+        clean["issued_at"] = date.fromisoformat(clean["issued_at"])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
 WESTERN_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
@@ -466,6 +512,65 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
         "bank_name": bank["name"],
         "dated": serialize_date(payload.dated),
         "value": payload.value.strip(),
+        "issued_at": serialize_date(payload.issued_at),
+        "responsible_employee": payload.responsible_employee,
+    }
+
+
+async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str] = None):
+    expense_number = normalize_digit_text(payload.expense_number)
+    if not expense_number or not expense_number.isdigit():
+        raise HTTPException(status_code=400, detail="رقم الإذن يجب أن يكون أرقام فقط")
+    base_exclusion = {"id": {"$ne": expense_id}} if expense_id else {}
+    if await db.expenses.find_one({"expense_number": expense_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="رقم الإذن موجود بالفعل داخل المصروفات ولا يمكن تكراره")
+
+    if payload.payment_method == "cash":
+        if not payload.payee_name or not payload.payee_name.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال اسم الشخص الذي قام بالصرف له")
+    elif payload.payment_method == "check":
+        check_number = normalize_digit_text(payload.check_number)
+        if not check_number or not check_number.isdigit():
+            raise HTTPException(status_code=400, detail="يجب إدخال رقم شيك صحيح")
+        if not payload.payee_name or not payload.payee_name.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال اسم يصرف للسيد")
+        if await db.expenses.find_one({"check_number": check_number, **base_exclusion}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="رقم الشيك موجود بالفعل داخل المصروفات ولا يمكن تكراره")
+    elif payload.payment_method == "bank_transfer":
+        transfer_number = normalize_digit_text(payload.transfer_number)
+        if not transfer_number or not transfer_number.isdigit():
+            raise HTTPException(status_code=400, detail="يجب إدخال رقم عملية التحويل")
+        if not payload.transfer_to or not payload.transfer_to.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال اسم الجهة التي تم التحويل إليها")
+        if await db.expenses.find_one({"transfer_number": transfer_number, **base_exclusion}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="رقم عملية التحويل موجود بالفعل داخل المصروفات ولا يمكن تكراره")
+
+
+async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Optional[str] = None) -> dict:
+    bank = await ensure_bank_async(payload.bank_id)
+    await ensure_expense_unique(payload, expense_id)
+    deductions = [
+        {"amount": round(float(item.amount), 2), "statement": item.statement.strip()}
+        for item in payload.deductions
+        if float(item.amount) > 0 or item.statement.strip()
+    ]
+    total_deductions = round(sum(item["amount"] for item in deductions), 2)
+    gross_amount = round(float(payload.gross_amount), 2)
+    net_amount = round(gross_amount - total_deductions, 2)
+    return {
+        "expense_number": normalize_digit_text(payload.expense_number),
+        "payment_method": payload.payment_method,
+        "payee_name": payload.payee_name.strip() if payload.payment_method in ["cash", "check"] and payload.payee_name else None,
+        "check_number": normalize_digit_text(payload.check_number) if payload.payment_method == "check" else None,
+        "transfer_number": normalize_digit_text(payload.transfer_number) if payload.payment_method == "bank_transfer" else None,
+        "transfer_to": payload.transfer_to.strip() if payload.payment_method == "bank_transfer" and payload.transfer_to else None,
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "gross_amount": gross_amount,
+        "gross_statement": payload.gross_statement.strip(),
+        "deductions": deductions,
+        "total_deductions": total_deductions,
+        "net_amount": net_amount,
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
     }
@@ -730,6 +835,7 @@ async def ensure_default_admin():
         manage_users=True,
         manage_reconciliations=True,
         manage_revenues=True,
+        manage_expenses=True,
     ).model_dump()
     await db.users.insert_one(
         {
@@ -755,6 +861,9 @@ async def startup_tasks():
     await db.revenues.create_index("receipt_number", unique=True)
     await db.revenues.create_index("check_number")
     await db.revenues.create_index("payment_order_number")
+    await db.expenses.create_index("expense_number")
+    await db.expenses.create_index("check_number")
+    await db.expenses.create_index("transfer_number")
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -972,12 +1081,14 @@ async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
     deposits_result = await db.deposits.delete_many({"bank_id": bank_id})
     reconciliations_result = await db.reconciliations.delete_many({"bank_id": bank_id})
     revenues_result = await db.revenues.delete_many({"bank_id": bank_id})
+    expenses_result = await db.expenses.delete_many({"bank_id": bank_id})
     return {
         "message": "تم حذف البنك وكل بياناته بالكامل",
         "deleted_bank_id": bank_id,
         "deleted_deposits": deposits_result.deleted_count,
         "deleted_reconciliations": reconciliations_result.deleted_count,
         "deleted_revenues": revenues_result.deleted_count,
+        "deleted_expenses": expenses_result.deleted_count,
     }
 
 
@@ -1399,6 +1510,98 @@ async def delete_revenue(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
     return {"message": "تم حذف الإيراد", "deleted_revenue_id": revenue_id}
+
+
+@api_router.post("/expenses", response_model=Expense)
+async def create_expense(
+    payload: ExpenseCreate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+):
+    now = datetime.now(timezone.utc)
+    document = await expense_document_from_payload(payload)
+    document.update({"id": str(uuid.uuid4()), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
+    await db.expenses.insert_one(document)
+    return Expense(**hydrate_expense(document))
+
+
+@api_router.get("/expenses", response_model=List[Expense])
+async def list_expenses(
+    bank_id: Optional[str] = Query(default=None),
+    payment_method: Optional[str] = Query(default=None),
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
+):
+    query = {}
+    if bank_id:
+        await ensure_bank_async(bank_id)
+        query["bank_id"] = bank_id
+    if payment_method:
+        query["payment_method"] = payment_method
+    if from_date or to_date:
+        query["issued_at"] = {}
+        if from_date:
+            query["issued_at"]["$gte"] = serialize_date(from_date)
+        if to_date:
+            query["issued_at"]["$lte"] = serialize_date(to_date)
+    documents = await db.expenses.find(query, {"_id": 0}).sort("issued_at", -1).sort("created_at", -1).to_list(1000)
+    return [Expense(**hydrate_expense(document)) for document in documents]
+
+
+@api_router.get("/expenses/search", response_model=List[Expense])
+async def search_expenses(
+    query: str = Query(..., min_length=1),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
+):
+    cleaned = query.strip()
+    digit_query = normalize_digit_text(cleaned)
+    conditions = [
+        {"expense_number": digit_query},
+        {"check_number": digit_query},
+        {"transfer_number": digit_query},
+        {"payee_name": {"$regex": cleaned, "$options": "i"}},
+        {"transfer_to": {"$regex": cleaned, "$options": "i"}},
+    ]
+    documents = await db.expenses.find({"$or": conditions}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return [Expense(**hydrate_expense(document)) for document in documents]
+
+
+@api_router.get("/expenses/{expense_id}", response_model=Expense)
+async def get_expense(
+    expense_id: str,
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
+):
+    document = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    return Expense(**hydrate_expense(document))
+
+
+@api_router.put("/expenses/{expense_id}", response_model=Expense)
+async def update_expense(
+    expense_id: str,
+    payload: ExpenseCreate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+):
+    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    updates = await expense_document_from_payload(payload, expense_id)
+    updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
+    await db.expenses.update_one({"id": expense_id}, {"$set": updates})
+    updated = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    return Expense(**hydrate_expense(updated))
+
+
+@api_router.delete("/expenses/{expense_id}")
+async def delete_expense(
+    expense_id: str,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+):
+    result = await db.expenses.delete_one({"id": expense_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    return {"message": "تم حذف المصروف", "deleted_expense_id": expense_id}
 
 # Include the router in the main app
 app.include_router(api_router)
