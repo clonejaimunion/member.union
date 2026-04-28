@@ -60,6 +60,20 @@ export default function ExpensesPage() {
     deductions: acc.deductions + Number(item.total_deductions || 0),
     net: acc.net + Number(item.net_amount || 0),
   }), { gross: 0, deductions: 0, net: 0 }), [expenses]);
+  const voucherExpenseGroups = useMemo(() => {
+    const groups = expenses.reduce((acc, item) => {
+      const year = String(item.issued_at || "").slice(0, 4) || "بدون سنة";
+      if (!acc[year]) acc[year] = [];
+      acc[year].push(item);
+      return acc;
+    }, {});
+    return Object.entries(groups)
+      .sort(([yearA], [yearB]) => Number(yearB) - Number(yearA))
+      .map(([year, items]) => ({
+        year,
+        items: items.sort((a, b) => String(b.issued_at || "").localeCompare(String(a.issued_at || ""))),
+      }));
+  }, [expenses]);
 
   const loadBanks = useCallback(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
@@ -215,42 +229,40 @@ export default function ExpensesPage() {
             <span className="mx-4">على بنك :</span><span className="font-bold">{item.bank_name}</span>
           </p>
         </section>
-        <section className="mt-6 overflow-hidden border-2 border-slate-900" data-testid="expense-voucher-table-wrapper">
+        <section dir="ltr" className="mt-6 overflow-hidden border-2 border-slate-900" data-testid="expense-voucher-table-wrapper">
           <div className="grid grid-cols-[1fr_150px_150px] border-b-2 border-slate-900 text-center text-lg font-extrabold" data-testid="expense-voucher-table-header">
-            <div className="border-l-2 border-slate-900 p-3" data-testid="expense-voucher-header-statement">البيان</div>
-            <div className="border-l-2 border-slate-900" data-testid="expense-voucher-header-partial"><div className="border-b border-slate-900 p-2">المبلغ الجزئي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1">جنيه</span><span className="p-1">قرش</span></div></div>
+            <div dir="rtl" className="border-r-2 border-slate-900 p-3" data-testid="expense-voucher-header-statement">البيان</div>
+            <div dir="rtl" className="border-r-2 border-slate-900" data-testid="expense-voucher-header-partial"><div className="border-b border-slate-900 p-2">المبلغ الجزئي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1">جنيه</span><span className="p-1">قرش</span></div></div>
             <div data-testid="expense-voucher-header-total"><div className="border-b border-slate-900 p-2">المبلغ الكلي</div><div className="grid grid-cols-2"><span className="border-l border-slate-900 p-1">جنيه</span><span className="p-1">قرش</span></div></div>
           </div>
           <div className="grid min-h-[82px] grid-cols-[1fr_150px_150px] border-b border-slate-300" data-testid="expense-voucher-entitlement-row">
-            <div className="border-l-2 border-slate-900 p-3 text-lg font-bold" data-testid="expense-voucher-gross-statement">{item.gross_statement}</div>
-            <div className="grid grid-cols-2 border-l-2 border-slate-900 text-center text-lg font-bold"><span className="border-l border-slate-300 p-3" data-testid="expense-voucher-gross-partial-pounds">—</span><span className="p-3" data-testid="expense-voucher-gross-partial-piastres">—</span></div>
+            <div dir="rtl" className="border-r-2 border-slate-900 p-3 text-right text-lg font-bold" data-testid="expense-voucher-gross-statement">{item.gross_statement}</div>
+            <div className="grid grid-cols-2 border-r-2 border-slate-900 text-center text-lg font-bold"><span className="border-l border-slate-300 p-3" data-testid="expense-voucher-gross-partial-pounds">—</span><span className="p-3" data-testid="expense-voucher-gross-partial-piastres">—</span></div>
             <div className="grid grid-cols-2 text-center text-lg font-extrabold"><span className="border-l border-slate-300 p-3" data-testid="expense-voucher-gross-pounds">{grossParts.pounds}</span><span className="p-3" data-testid="expense-voucher-gross-piastres">{grossParts.piastres}</span></div>
           </div>
           <div className="grid grid-cols-[1fr_150px_150px] border-b border-slate-900" data-testid="expense-voucher-deductions-heading-row">
-            <div className="border-l-2 border-slate-900 p-3 text-center text-xl font-extrabold underline" data-testid="expense-voucher-deductions-title">استقطاعات</div>
-            <div className="border-l-2 border-slate-900 bg-slate-50" />
+            <div dir="rtl" className="border-r-2 border-slate-900 p-3 text-center text-xl font-extrabold underline" data-testid="expense-voucher-deductions-title">استقطاعات</div>
+            <div className="border-r-2 border-slate-900 bg-slate-50" />
             <div className="bg-slate-50" />
           </div>
           {(item.deductions?.length ? item.deductions : [{ amount: 0, statement: "لا توجد استقطاعات" }]).map((deduction, index) => {
             const parts = amountParts(deduction.amount);
             return (
               <div key={`voucher-deduction-${index}`} className="grid min-h-[48px] grid-cols-[1fr_150px_150px] border-b border-dotted border-slate-300" data-testid={`expense-voucher-deduction-row-${index}`}>
-                <div className="border-l-2 border-slate-900 p-3 font-bold" data-testid={`expense-voucher-deduction-${index}-statement`}>{deduction.statement}</div>
-                <div className="grid grid-cols-2 border-l-2 border-slate-900 text-center font-bold"><span className="border-l border-slate-300 p-3" data-testid={`expense-voucher-deduction-${index}-pounds`}>{parts.pounds}</span><span className="p-3" data-testid={`expense-voucher-deduction-${index}-piastres`}>{parts.piastres}</span></div>
+                <div dir="rtl" className="border-r-2 border-slate-900 p-3 text-right font-bold" data-testid={`expense-voucher-deduction-${index}-statement`}>{deduction.statement}</div>
+                <div className="grid grid-cols-2 border-r-2 border-slate-900 text-center font-bold"><span className="border-l border-slate-300 p-3" data-testid={`expense-voucher-deduction-${index}-pounds`}>{parts.pounds}</span><span className="p-3" data-testid={`expense-voucher-deduction-${index}-piastres`}>{parts.piastres}</span></div>
                 <div className="grid grid-cols-2 text-center"><span className="border-l border-slate-300 p-3">—</span><span className="p-3">—</span></div>
               </div>
             );
           })}
           <div className="grid grid-cols-[1fr_150px_150px] bg-slate-50 text-xl font-extrabold" data-testid="expense-voucher-net-row">
-            <div className="border-l-2 border-slate-900 p-4" data-testid="expense-voucher-net-label">الصافي مبلغ وقدره</div>
-            <div className="border-l-2 border-slate-900 p-4 text-center" data-testid="expense-voucher-net-text">{formatCurrency(item.net_amount)}</div>
+            <div dir="rtl" className="border-r-2 border-slate-900 p-4 text-right" data-testid="expense-voucher-net-label">الصافي مبلغ وقدره</div>
+            <div className="border-r-2 border-slate-900 p-4 text-center" data-testid="expense-voucher-net-text">{formatCurrency(item.net_amount)}</div>
             <div className="grid grid-cols-2 text-center"><span className="border-l border-slate-300 p-4" data-testid="expense-voucher-net-pounds">{netParts.pounds}</span><span className="p-4" data-testid="expense-voucher-net-piastres">{netParts.piastres}</span></div>
           </div>
         </section>
-        <footer className="mt-8 grid grid-cols-3 items-end gap-6 text-center text-lg font-extrabold" data-testid="expense-voucher-footer">
-          <div data-testid="expense-voucher-accountant-sign"><p>رئيس الحسابات</p><div className="mt-3 border-2 border-slate-900 p-3">رئيس الصندوق</div></div>
-          <div data-testid="expense-voucher-approval-sign"><p className="mt-14">يعتمد الصرف</p></div>
-          <div data-testid="expense-voucher-employee-sign"><p>تحريراً في : {item.issued_at}</p><p className="mt-5">الموظف المختص</p><div className="mt-3 border-2 border-slate-900 p-3">{item.responsible_employee}</div></div>
+        <footer className="mt-8 flex justify-end text-center text-lg font-extrabold" data-testid="expense-voucher-footer">
+          <div className="w-full max-w-sm" data-testid="expense-voucher-employee-sign"><p>تحريراً في : {item.issued_at}</p><p className="mt-5">الموظف المختص</p><div className="mt-3 border-2 border-slate-900 p-3">{item.responsible_employee}</div></div>
         </footer>
       </article>
     );
@@ -284,12 +296,22 @@ export default function ExpensesPage() {
               <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expense-voucher-actions-title">عرض إذن الصرف التفصيلي</h3>
               <Badge className="bg-red-50 text-red-700 hover:bg-red-50" data-testid="expense-voucher-actions-count">{expenses.length} مصروف</Badge>
             </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="expense-voucher-actions-grid">
-              {expenses.map((item) => (
-                <button key={`voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-right transition-colors hover:border-slate-950 hover:bg-white" data-testid={`view-expense-voucher-button-${item.id}`}>
-                  <span data-testid={`view-expense-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إذن رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">{methodLabels[item.payment_method]} — {formatCurrency(item.net_amount)}</span></span>
-                  <Eye className="h-5 w-5 text-red-700" />
-                </button>
+            <div className="space-y-5" data-testid="expense-voucher-actions-year-groups">
+              {voucherExpenseGroups.map((group) => (
+                <div key={group.year} className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`expense-voucher-year-group-${group.year}`}>
+                  <div className="mb-3 flex items-center justify-between" data-testid={`expense-voucher-year-heading-${group.year}`}>
+                    <h4 className="text-xl font-extrabold text-slate-950" data-testid={`expense-voucher-year-title-${group.year}`}>سنة {group.year}</h4>
+                    <Badge className="bg-white text-slate-700 hover:bg-white" data-testid={`expense-voucher-year-count-${group.year}`}>{group.items.length} إذن</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid={`expense-voucher-year-grid-${group.year}`}>
+                    {group.items.map((item) => (
+                      <button key={`voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 text-right transition-colors hover:border-slate-950" data-testid={`view-expense-voucher-button-${item.id}`}>
+                        <span data-testid={`view-expense-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إذن رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">{methodLabels[item.payment_method]} — {formatCurrency(item.net_amount)}</span></span>
+                        <Eye className="h-5 w-5 text-red-700" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </section>
