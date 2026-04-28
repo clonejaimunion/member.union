@@ -67,6 +67,35 @@ html {
         display: none !important;
     }
 
+    body:has([data-testid="expenses-analysis-preview-modal-overlay"]) [data-testid="expenses-analysis-header"],
+    body:has([data-testid="expenses-analysis-preview-modal-overlay"]) [data-testid="expenses-analysis-content"],
+    body:has([data-testid="expenses-analysis-preview-modal-overlay"]) [data-testid="expenses-analysis-footer"],
+    body:has([data-testid="expenses-analysis-preview-modal-overlay"]) [data-sonner-toaster] {
+        display: none !important;
+    }
+
+    [data-testid="expenses-analysis-preview-modal-overlay"] {
+        position: static !important;
+        inset: auto !important;
+        display: block !important;
+        overflow: visible !important;
+        background: white !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="expenses-analysis-preview-modal"] {
+        width: 100% !important;
+        max-width: none !important;
+        max-height: none !important;
+        overflow: visible !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="expenses-analysis-preview-modal-actions"] {
+        display: none !important;
+    }
+
     [data-testid="expense-invoice-modal-overlay"] {
         position: static !important;
         inset: auto !important;

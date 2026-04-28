@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, BarChart3, Home, LogOut, Printer, RotateCcw } from "lucide-react";
+import { ArrowRight, BarChart3, Eye, Home, LogOut, Printer, RotateCcw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -62,6 +62,7 @@ export default function ExpensesAnalysisPage() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ organization_scope: "social_solidarity_project", period_type: "monthly", year: "", month: "" });
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const loadExpenses = useCallback(() => {
     setLoading(true);
@@ -111,6 +112,11 @@ export default function ExpensesAnalysisPage() {
   }), {}), [analysisRows]);
 
   const grandTotal = useMemo(() => analysisCategories.reduce((sum, category) => sum + Number(categoryTotals[category.key] || 0), 0), [categoryTotals]);
+  const visibleAnalysisRows = useMemo(() => analysisRows.filter((row) => Number(row.analysis_total || 0) > 0), [analysisRows]);
+  const categoryTotalRows = useMemo(() => [
+    ...analysisCategories.map((category) => ({ key: category.key, label: category.label, total: categoryTotals[category.key] || 0 })),
+    { key: "row_total", label: "إجمالي الصف", total: grandTotal },
+  ], [categoryTotals, grandTotal]);
   const hasCompletePeriod = filters.period_type === "yearly" ? Boolean(filters.year) : Boolean(filters.year && filters.month);
   const periodLabel = filters.period_type === "yearly" ? `سنة ${filters.year || "—"}` : `${monthLabels[filters.month] || "—"} / ${filters.year || "—"}`;
 
@@ -121,6 +127,38 @@ export default function ExpensesAnalysisPage() {
       return { ...current, [field]: value };
     });
   };
+
+  const ReportBody = ({ preview = false }) => (
+    <section className={`space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8 ${preview ? "max-h-[78vh] overflow-y-auto" : ""}`} data-testid={preview ? "expenses-analysis-preview-report-section" : "expenses-analysis-report-section"}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid={preview ? "expenses-analysis-preview-report-heading" : "expenses-analysis-report-heading"}>
+        <div><p className="text-sm font-extrabold text-red-700" data-testid={preview ? "expenses-analysis-preview-report-eyebrow" : "expenses-analysis-report-eyebrow"}>{organizationLabels[filters.organization_scope]}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-report-title" : "expenses-analysis-report-title"}>تحليل المصروفات - {periodLabel}</h2></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={preview ? "expenses-analysis-preview-report-kpis" : "expenses-analysis-report-kpis"}><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid={preview ? "expenses-analysis-preview-count-card" : "expenses-analysis-count-card"}><p className="text-xs font-bold text-slate-300">عدد المصروفات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-count-value" : "expenses-analysis-count-value"}>{hasCompletePeriod ? visibleAnalysisRows.length : 0}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid={preview ? "expenses-analysis-preview-grand-total-card" : "expenses-analysis-grand-total-card"}><p className="text-xs font-bold text-red-700">الإجمالي العام للخانات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-grand-total-value" : "expenses-analysis-grand-total-value"}>{hasCompletePeriod ? formatCurrency(grandTotal) : formatCurrency(0)}</p></div></div>
+      </div>
+
+      {!hasCompletePeriod ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid={preview ? "expenses-analysis-preview-required-state" : "expenses-analysis-required-state"}><p className="text-xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-required-title" : "expenses-analysis-required-title"}>اختر الفترة أولاً</p><p className="mt-2 text-sm font-semibold text-slate-500" data-testid={preview ? "expenses-analysis-preview-required-description" : "expenses-analysis-required-description"}>اختر الجهة والسنة، واختر الشهر عند العرض الشهري، لعرض التحليل.</p></div>
+      ) : loading ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid={preview ? "expenses-analysis-preview-loading-state" : "expenses-analysis-loading-state"}><p className="text-xl font-extrabold text-slate-950">جاري تحميل المصروفات...</p></div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-xl border border-slate-200" data-testid={preview ? "expenses-analysis-preview-totals-table-wrapper" : "expenses-analysis-totals-table-wrapper"}>
+            <Table data-testid={preview ? "expenses-analysis-preview-totals-table" : "expenses-analysis-totals-table"}>
+              <TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid={preview ? "expenses-analysis-preview-totals-header-row" : "expenses-analysis-totals-header-row"}><TableHead className="text-right font-extrabold text-white" data-testid={preview ? "expenses-analysis-preview-totals-header-label" : "expenses-analysis-totals-header-label"}>البند</TableHead><TableHead className="text-right font-extrabold text-white" data-testid={preview ? "expenses-analysis-preview-totals-header-value" : "expenses-analysis-totals-header-value"}>الإجمالي العام</TableHead></TableRow></TableHeader>
+              <TableBody>{categoryTotalRows.map((row) => <TableRow key={row.key} className={row.key === "row_total" ? "bg-red-50 font-extrabold" : ""} data-testid={`${preview ? "expenses-analysis-preview-total-row" : "expenses-analysis-total-row"}-${row.key}`}><TableCell className="font-extrabold" data-testid={`${preview ? "expenses-analysis-preview-total-row" : "expenses-analysis-total-row"}-${row.key}-label`}>{row.label}</TableCell><TableCell className="font-extrabold" data-testid={`${preview ? "expenses-analysis-preview-total-row" : "expenses-analysis-total-row"}-${row.key}-value`}>{formatCurrency(row.total)}</TableCell></TableRow>)}</TableBody>
+            </Table>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200" data-testid={preview ? "expenses-analysis-preview-table-wrapper" : "expenses-analysis-table-wrapper"}>
+            <Table data-testid={preview ? "expenses-analysis-preview-table" : "expenses-analysis-table"}>
+              <TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid={preview ? "expenses-analysis-preview-table-header-row" : "expenses-analysis-table-header-row"}><TableHead className="text-right font-extrabold text-white" data-testid={preview ? "expenses-analysis-preview-header-date" : "expenses-analysis-header-date"}>التاريخ</TableHead><TableHead className="text-right font-extrabold text-white" data-testid={preview ? "expenses-analysis-preview-header-statement" : "expenses-analysis-header-statement"}>البيان بالكامل من المصروفات</TableHead>{analysisCategories.map((category) => <TableHead key={category.key} className="text-right font-extrabold text-white" data-testid={`${preview ? "expenses-analysis-preview-header" : "expenses-analysis-header"}-${category.key}`}>{category.label}</TableHead>)}<TableHead className="text-right font-extrabold text-white" data-testid={preview ? "expenses-analysis-preview-header-row-total" : "expenses-analysis-header-row-total"}>إجمالي الصف</TableHead></TableRow></TableHeader>
+              <TableBody>{visibleAnalysisRows.map((row) => <TableRow key={row.id} data-testid={`${preview ? "expenses-analysis-preview-row" : "expenses-analysis-row"}-${row.id}`}><TableCell className="font-bold" data-testid={`${preview ? "expenses-analysis-preview-row" : "expenses-analysis-row"}-${row.id}-date`}>{row.issued_at}</TableCell><TableCell className="min-w-72 font-bold" data-testid={`${preview ? "expenses-analysis-preview-row" : "expenses-analysis-row"}-${row.id}-statement`}><p>{row.gross_statement}</p><p className="mt-1 text-xs text-slate-500">إذن رقم {row.expense_number} — {row.bank_name}</p></TableCell>{analysisCategories.map((category) => <TableCell key={category.key} data-testid={`${preview ? "expenses-analysis-preview-row" : "expenses-analysis-row"}-${row.id}-${category.key}`}>{row.categoryAmounts[category.key] ? formatCurrency(row.categoryAmounts[category.key]) : "—"}</TableCell>)}<TableCell className="font-extrabold" data-testid={`${preview ? "expenses-analysis-preview-row" : "expenses-analysis-row"}-${row.id}-total`}>{formatCurrency(row.analysis_total)}</TableCell></TableRow>)}</TableBody>
+            </Table>
+          </div>
+          {visibleAnalysisRows.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid={preview ? "expenses-analysis-preview-empty-state" : "expenses-analysis-empty-state"}><p className="text-xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-empty-title" : "expenses-analysis-empty-title"}>لا توجد مصروفات مطابقة لهذه الاختيارات</p></div>}
+        </>
+      )}
+    </section>
+  );
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="expenses-analysis-page">
@@ -145,6 +183,7 @@ export default function ExpensesAnalysisPage() {
             <div><h2 className="text-3xl font-extrabold" data-testid="expenses-analysis-filters-title">اختيارات التقرير</h2><p className="mt-1 text-sm font-bold text-slate-500" data-testid="expenses-analysis-filters-description">التقرير يعتمد فقط على المصروفات المسجلة ولا يحتوي على إدخال بيانات.</p></div>
             <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-filter-actions">
               <Button type="button" onClick={loadExpenses} variant="outline" className="h-11 rounded-lg bg-white" data-testid="refresh-expenses-analysis-button"><RotateCcw className="h-4 w-4" /> تحديث</Button>
+              <Button type="button" onClick={() => setPreviewOpen(true)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="preview-expenses-analysis-button"><Eye className="h-4 w-4" /> معاينة التقرير</Button>
               <Button type="button" onClick={() => window.print()} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
             </div>
           </div>
@@ -156,32 +195,22 @@ export default function ExpensesAnalysisPage() {
           </div>
         </section>
 
-        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="expenses-analysis-report-section">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="expenses-analysis-report-heading">
-            <div><p className="text-sm font-extrabold text-red-700" data-testid="expenses-analysis-report-eyebrow">{organizationLabels[filters.organization_scope]}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expenses-analysis-report-title">تحليل المصروفات - {periodLabel}</h2></div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="expenses-analysis-report-kpis"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="expenses-analysis-count-card"><p className="text-xs font-bold text-slate-300">عدد المصروفات</p><p className="text-2xl font-extrabold" data-testid="expenses-analysis-count-value">{hasCompletePeriod ? selectedExpenses.length : 0}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid="expenses-analysis-grand-total-card"><p className="text-xs font-bold text-red-700">الإجمالي العام للخانات</p><p className="text-2xl font-extrabold" data-testid="expenses-analysis-grand-total-value">{hasCompletePeriod ? formatCurrency(grandTotal) : formatCurrency(0)}</p></div></div>
-          </div>
-
-          {!hasCompletePeriod ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expenses-analysis-required-state"><p className="text-xl font-extrabold text-slate-950" data-testid="expenses-analysis-required-title">اختر الفترة أولاً</p><p className="mt-2 text-sm font-semibold text-slate-500" data-testid="expenses-analysis-required-description">اختر الجهة والسنة، واختر الشهر عند العرض الشهري، لعرض التحليل.</p></div>
-          ) : loading ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expenses-analysis-loading-state"><p className="text-xl font-extrabold text-slate-950">جاري تحميل المصروفات...</p></div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="expenses-analysis-category-cards">
-                {analysisCategories.map((category) => <div key={category.key} className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`expenses-analysis-category-card-${category.key}`}><p className="text-sm font-extrabold text-slate-500" data-testid={`expenses-analysis-category-card-${category.key}-label`}>{category.label}</p><p className="mt-2 text-2xl font-extrabold text-slate-950" data-testid={`expenses-analysis-category-card-${category.key}-value`}>{formatCurrency(categoryTotals[category.key] || 0)}</p></div>)}
-              </div>
-              <div className="overflow-hidden rounded-xl border border-slate-200" data-testid="expenses-analysis-table-wrapper">
-                <Table data-testid="expenses-analysis-table">
-                  <TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="expenses-analysis-table-header-row"><TableHead className="text-right font-extrabold text-white" data-testid="expenses-analysis-header-date">التاريخ</TableHead><TableHead className="text-right font-extrabold text-white" data-testid="expenses-analysis-header-statement">البيان بالكامل من المصروفات</TableHead>{analysisCategories.map((category) => <TableHead key={category.key} className="text-right font-extrabold text-white" data-testid={`expenses-analysis-header-${category.key}`}>{category.label}</TableHead>)}<TableHead className="text-right font-extrabold text-white" data-testid="expenses-analysis-header-row-total">إجمالي الصف</TableHead></TableRow></TableHeader>
-                  <TableBody>{analysisRows.map((row) => <TableRow key={row.id} data-testid={`expenses-analysis-row-${row.id}`}><TableCell className="font-bold" data-testid={`expenses-analysis-row-${row.id}-date`}>{row.issued_at}</TableCell><TableCell className="min-w-72 font-bold" data-testid={`expenses-analysis-row-${row.id}-statement`}><p>{row.gross_statement}</p><p className="mt-1 text-xs text-slate-500">إذن رقم {row.expense_number} — {row.bank_name}</p></TableCell>{analysisCategories.map((category) => <TableCell key={category.key} data-testid={`expenses-analysis-row-${row.id}-${category.key}`}>{row.categoryAmounts[category.key] ? formatCurrency(row.categoryAmounts[category.key]) : "—"}</TableCell>)}<TableCell className="font-extrabold" data-testid={`expenses-analysis-row-${row.id}-total`}>{formatCurrency(row.analysis_total)}</TableCell></TableRow>)}</TableBody>
-                </Table>
-              </div>
-              {analysisRows.length === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expenses-analysis-empty-state"><p className="text-xl font-extrabold text-slate-950" data-testid="expenses-analysis-empty-title">لا توجد مصروفات مطابقة لهذه الاختيارات</p></div>}
-            </>
-          )}
-        </section>
+        <ReportBody />
       </section>
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 print:hidden" data-testid="expenses-analysis-preview-modal-overlay">
+          <section className="w-full max-w-7xl rounded-xl bg-white p-4 shadow-2xl" role="dialog" aria-modal="true" data-testid="expenses-analysis-preview-modal">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3" data-testid="expenses-analysis-preview-modal-actions">
+              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expenses-analysis-preview-modal-title">معاينة تقرير تحليل المصروفات</h3>
+              <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-preview-modal-buttons">
+                <Button type="button" onClick={() => window.print()} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-preview-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
+                <Button type="button" onClick={() => setPreviewOpen(false)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="close-expenses-analysis-preview-button"><X className="h-4 w-4" /> خروج من المعاينة</Button>
+              </div>
+            </div>
+            <ReportBody preview />
+          </section>
+        </div>
+      )}
       <footer className="px-4 pb-5 print:hidden" data-testid="expenses-analysis-footer"><CreditLine testId="expenses-analysis-creator-credit" /></footer>
     </main>
   );
