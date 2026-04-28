@@ -46,14 +46,18 @@ const analysisCategories = [
   { key: "effort", label: "بدل جهد", keywords: ["بدل اعباء", "بدل أعباء"] },
   { key: "maintenance", label: "قطع غيار وصيانة", keywords: ["قطع غيار", "صيانة", "صيانه"] },
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
+  { key: "death_benefits", label: "إعانات الوفاة", keywords: ["اعانات الوفاه", "اعانات الوفاة", "إعانات الوفاة", "اعانة وفاة", "إعانة وفاة"], expenseCategory: "death_benefits" },
 ];
 
 const classifyExpense = (expense) => {
+  if (expense.expense_category === "death_benefits") {
+    return analysisCategories.filter((category) => category.expenseCategory === "death_benefits");
+  }
   const searchText = normalizeArabic([
     expense.gross_statement,
     ...(expense.deductions || []).map((deduction) => deduction.statement),
   ].filter(Boolean).join(" "));
-  return analysisCategories.filter((category) => category.keywords.some((keyword) => searchText.includes(normalizeArabic(keyword))));
+  return analysisCategories.filter((category) => !category.expenseCategory && category.keywords.some((keyword) => searchText.includes(normalizeArabic(keyword))));
 };
 
 export default function ExpensesAnalysisPage() {
