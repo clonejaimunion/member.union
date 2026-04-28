@@ -17,12 +17,18 @@
 - `edit_deposits`: allows deposit update API.
 - `manage_reconciliations`: allows creating/editing reconciliation memos.
 - `manage_revenues`: allows creating/editing/deleting revenue records; `view_reports` can view revenue reports only.
+- `manage_expenses`: allows creating/editing/deleting expense records; `view_reports` can view expense reports only.
 - `manage_users`: reserved for user-management permission, while admin role remains required for admin console.
 
 ## Revenue Module Permission Expectations
 - Admin can create, edit, delete, search, view, and print revenues.
 - Data-entry users with `enter_deposits` or `manage_revenues` can create, edit, delete, search, view, and print revenues.
 - View-only users with `view_reports` can view/search/print revenue reports but cannot create, edit, or delete.
+
+## Expense Module Permission Expectations
+- Admin can create, edit, delete, search, view, and print expenses.
+- Data-entry users with `enter_deposits` or `manage_expenses` can create, edit, delete, search, view, and print expenses.
+- View-only users with `view_reports` can view/search/print expense reports but cannot create, edit, or delete.
 
 ## 2FA Testing Safety
 - Test `/api/admin/2fa/setup` for QR/manual secret.

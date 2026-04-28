@@ -15,6 +15,7 @@ import AccruedInterestPage from "@/pages/AccruedInterestPage";
 import BankReconciliationPage from "@/pages/BankReconciliationPage";
 import ModuleSelection from "@/pages/ModuleSelection";
 import RevenuesPage from "@/pages/RevenuesPage";
+import ExpensesPage from "@/pages/ExpensesPage";
 
 function App() {
   useEffect(() => {
@@ -33,6 +34,7 @@ function App() {
             <Route path="/deposits" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports"]}><BankSelection mode="deposits" /></ProtectedRoute>} />
             <Route path="/reconciliations" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_reconciliations"]}><BankSelection mode="reconciliations" /></ProtectedRoute>} />
             <Route path="/revenues" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><RevenuesPage /></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ExpensesPage /></ProtectedRoute>} />
             <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
             <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><DepositRegistration /></ProtectedRoute>} />
             <Route path="/bank/:bankId/current-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="current-year" /></ProtectedRoute>} />

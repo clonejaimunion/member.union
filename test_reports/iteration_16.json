@@ -1,0 +1,66 @@
+{
+  "summary": "Completed backend + frontend testing for expenses module on public URL. All requested expense workflows passed (create cash/check/transfer, uniqueness, deductions/net, search modal, edit/delete, role permissions, print-hide classes, ObjectId-safe responses). Auth playbook hardening checks still fail.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No brute-force lockout after 5 failed attempts; valid admin login still succeeds immediately.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No application auth HttpOnly cookie is issued; token-only JSON response flow is used.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "CORS middleware / preflight",
+        "issue": "Preflight returns access-control-allow-origin: *; does not enforce explicit allowed origins for credentialed auth posture."
+      },
+      {
+        "endpoint": "startup admin seed",
+        "issue": "ensure_default_admin exits early if admin exists, so changed ADMIN_INITIAL_PASSWORD is not reconciled to existing admin."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration16_expenses_module.py",
+    "/app/backend/tests/test_iteration16_seed_users_for_ui.py",
+    "/app/backend/tests/test_iteration16_cleanup_test_records.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Implement failed-login counter + lockout/backoff policy in /api/auth/login.",
+    "Add server-issued app auth cookie (HttpOnly, Secure, SameSite) or supported secure session mode.",
+    "Replace wildcard CORS origin policy with explicit environment-managed origins.",
+    "Make admin seed idempotent for password reconciliation when ADMIN_INITIAL_PASSWORD changes.",
+    "Optional maintainability: split backend/server.py monolith into smaller modules."
+  ],
+  "critical_code_review_comments": [
+    "Expense endpoints correctly exclude MongoDB _id in API responses and no ObjectId serialization issues were reproduced.",
+    "bcrypt implementation uses bcrypt.hashpw (produces $2b$ format), but broader auth hardening requirements remain unmet.",
+    "backend/server.py remains a large monolith (>1600 LOC), increasing regression risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration16_expenses_module.py",
+    "/app/backend/tests/test_iteration16_seed_users_for_ui.py",
+    "/app/backend/tests/test_iteration16_cleanup_test_records.py",
+    "/app/test_reports/iteration_16.json"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 expenses+auth checks in iteration file; cleanup/seed tests passed)",
+    "frontend": "100% (all requested expense flows passed in final run on public URL)"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin/Admin@123. Temporary UI users TEST_view_exp_ui16 and TEST_manage_exp_ui16 were created then cleaned.",
+  "seed_data_creation": "Created temporary TEST_* expenses and TEST_* users during regression; cleanup test removed them and verified removal.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Public URL tested: https://interest-calculator-12.preview.emergentagent.com. Expenses feature set is functionally working end-to-end (card visibility, page access, cash/check/transfer validations, deductions/net, search modal, edit/delete, role-based UI + API behavior, print hide classes). Remaining open items are auth-hardening/CORS posture from playbook checks.",
+  "rca of the issue": "RCA-1: /api/auth/login has no persistent failed-attempt tracking or lock window; repeated failures do not alter subsequent successful login path. RCA-2: auth session is token-in-body + localStorage model; backend does not issue dedicated app HttpOnly session cookie. RCA-3: CORS middleware/runtime currently allows wildcard origin in preflight, not strict explicit-origin policy expected for hardened credentialed flows."
+}

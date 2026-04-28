@@ -1,0 +1,204 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Home, LogOut, MinusCircle, Pencil, Plus, Printer, RotateCcw, Save, Search, SendToBack, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CreditLine } from "@/components/CreditLine";
+import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
+import { fallbackBanks } from "@/lib/banks";
+import { formatCurrency, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
+
+const today = () => new Date().toISOString().slice(0, 10);
+const emptyDeduction = () => ({ amount: "", statement: "" });
+const methodLabels = { cash: "نقداً", check: "شيك", bank_transfer: "تحويل بنكي" };
+const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
+
+const defaultForm = () => ({
+  expense_number: "",
+  payment_method: "cash",
+  payee_name: "",
+  check_number: "",
+  transfer_number: "",
+  transfer_to: "",
+  bank_id: "industrial-development",
+  gross_amount: "",
+  gross_statement: "",
+  deductions: [emptyDeduction()],
+  issued_at: today(),
+  responsible_employee: "يوسف عبدالغني",
+});
+
+export default function ExpensesPage() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const [banks, setBanks] = useState(fallbackBanks);
+  const [expenses, setExpenses] = useState([]);
+  const [form, setForm] = useState(defaultForm);
+  const [filters, setFilters] = useState({ bank_id: "all", payment_method: "all", from_date: "", to_date: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const canManage = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_expenses;
+  const deductionTotal = useMemo(() => form.deductions.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0), [form.deductions]);
+  const netAmount = useMemo(() => Number(sanitizeDecimalInput(form.gross_amount) || 0) - deductionTotal, [deductionTotal, form.gross_amount]);
+  const reportTotals = useMemo(() => expenses.reduce((acc, item) => ({
+    gross: acc.gross + Number(item.gross_amount || 0),
+    deductions: acc.deductions + Number(item.total_deductions || 0),
+    net: acc.net + Number(item.net_amount || 0),
+  }), { gross: 0, deductions: 0, net: 0 }), [expenses]);
+
+  const loadBanks = useCallback(() => {
+    api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
+  }, []);
+
+  const loadExpenses = useCallback(() => {
+    const params = new URLSearchParams();
+    if (filters.bank_id !== "all") params.set("bank_id", filters.bank_id);
+    if (filters.payment_method !== "all") params.set("payment_method", filters.payment_method);
+    if (filters.from_date) params.set("from_date", filters.from_date);
+    if (filters.to_date) params.set("to_date", filters.to_date);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    api.get(`/expenses${query}`).then((response) => setExpenses(response.data)).catch(() => setExpenses([]));
+  }, [filters]);
+
+  useEffect(() => { loadBanks(); }, [loadBanks]);
+  useEffect(() => { loadExpenses(); }, [loadExpenses]);
+
+  const updateForm = (field, value) => {
+    const nextValue = ["expense_number", "check_number", "transfer_number"].includes(field)
+      ? sanitizeDigitsInput(value)
+      : field === "gross_amount"
+        ? sanitizeDecimalInput(value)
+        : value;
+    setForm((current) => ({ ...current, [field]: nextValue }));
+  };
+
+  const updateDeduction = (index, field, value) => {
+    const nextValue = field === "amount" ? sanitizeDecimalInput(value) : value;
+    setForm((current) => ({ ...current, deductions: current.deductions.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item) }));
+  };
+
+  const addDeduction = () => setForm((current) => ({ ...current, deductions: [...current.deductions, emptyDeduction()] }));
+  const removeDeduction = (index) => setForm((current) => ({ ...current, deductions: current.deductions.length === 1 ? [emptyDeduction()] : current.deductions.filter((_, itemIndex) => itemIndex !== index) }));
+  const resetForm = () => { setEditingId(null); setForm(defaultForm()); };
+
+  const payloadFromForm = () => ({
+    ...form,
+    expense_number: sanitizeDigitsInput(form.expense_number),
+    gross_amount: Number(sanitizeDecimalInput(form.gross_amount) || 0),
+    payee_name: ["cash", "check"].includes(form.payment_method) ? form.payee_name.trim() : null,
+    check_number: form.payment_method === "check" ? sanitizeDigitsInput(form.check_number) : null,
+    transfer_number: form.payment_method === "bank_transfer" ? sanitizeDigitsInput(form.transfer_number) : null,
+    transfer_to: form.payment_method === "bank_transfer" ? form.transfer_to.trim() : null,
+    deductions: form.deductions.filter((item) => item.statement.trim() || Number(sanitizeDecimalInput(item.amount) || 0) > 0).map((item) => ({ amount: Number(sanitizeDecimalInput(item.amount) || 0), statement: item.statement.trim() })),
+  });
+
+  const submitExpense = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const payload = payloadFromForm();
+      const response = editingId ? await api.put(`/expenses/${editingId}`, payload) : await api.post("/expenses", payload);
+      toast.success(editingId ? "تم تعديل المصروف" : "تم حفظ المصروف");
+      setEditingId(null);
+      setForm({ ...defaultForm(), bank_id: response.data.bank_id });
+      loadExpenses();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ المصروف");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editExpense = (item) => {
+    setEditingId(item.id);
+    setForm({
+      expense_number: item.expense_number || "",
+      payment_method: item.payment_method || "cash",
+      payee_name: item.payee_name || "",
+      check_number: item.check_number || "",
+      transfer_number: item.transfer_number || "",
+      transfer_to: item.transfer_to || "",
+      bank_id: item.bank_id || "industrial-development",
+      gross_amount: String(item.gross_amount ?? ""),
+      gross_statement: item.gross_statement || "",
+      deductions: item.deductions?.length ? item.deductions.map((deduction) => ({ amount: String(deduction.amount ?? ""), statement: deduction.statement || "" })) : [emptyDeduction()],
+      issued_at: item.issued_at || today(),
+      responsible_employee: item.responsible_employee || "يوسف عبدالغني",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const deleteExpense = async (item) => {
+    if (!window.confirm(`هل تريد حذف المصروف رقم ${item.expense_number}؟`)) return;
+    try {
+      await api.delete(`/expenses/${item.id}`);
+      toast.success("تم حذف المصروف");
+      if (editingId === item.id) resetForm();
+      loadExpenses();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حذف المصروف");
+    }
+  };
+
+  const searchExpense = async (event) => {
+    event.preventDefault();
+    if (!searchQuery.trim()) { toast.error("اكتب رقم الإذن أو الشيك أو التحويل أو اسم الشخص"); return; }
+    try {
+      const response = await api.get(`/expenses/search?query=${encodeURIComponent(searchQuery.trim())}`);
+      setSearchResults(response.data);
+      setSearchOpen(true);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر البحث عن المصروف");
+    }
+  };
+
+  const detailLabel = (item) => item.payment_method === "bank_transfer" ? "تم التحويل إلى" : "يصرف للسيد";
+  const detailValue = (item) => item.payment_method === "bank_transfer" ? item.transfer_to : item.payee_name;
+  const refValue = (item) => item.payment_method === "check" ? item.check_number : item.payment_method === "bank_transfer" ? item.transfer_number : "—";
+
+  const DetailGrid = ({ item, prefix }) => (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid={`${prefix}-details-grid`}>
+      {[["رقم الإذن", item.expense_number], ["طريقة الصرف", methodLabels[item.payment_method]], [detailLabel(item), detailValue(item)], [item.payment_method === "bank_transfer" ? "رقم عملية التحويل" : "رقم الشيك", refValue(item)], ["البنك", item.bank_name], ["المبلغ الكلي", formatCurrency(item.gross_amount)], ["بيان المبلغ", item.gross_statement], ["إجمالي الاستقطاعات", formatCurrency(item.total_deductions)], ["الصافي", formatCurrency(item.net_amount)], ["تحريراً في", item.issued_at], ["الموظف المختص", item.responsible_employee]].map(([label, value], index) => (
+        <div key={`${prefix}-${label}`} className={index === 6 ? "rounded-lg bg-slate-50 p-3 md:col-span-2" : "rounded-lg bg-slate-50 p-3"} data-testid={`${prefix}-detail-${index}`}><p className="text-xs font-bold text-slate-500" data-testid={`${prefix}-detail-${index}-label`}>{label}</p><p className="mt-1 break-words text-base font-extrabold text-slate-950" data-testid={`${prefix}-detail-${index}-value`}>{value || "—"}</p></div>
+      ))}
+      {item.deductions?.length > 0 && <div className="rounded-lg bg-amber-50 p-3 md:col-span-2" data-testid={`${prefix}-deductions-list`}><p className="text-xs font-bold text-amber-700" data-testid={`${prefix}-deductions-title`}>بيانات الاستقطاعات</p>{item.deductions.map((deduction, index) => <p key={`${prefix}-deduction-${index}`} className="mt-2 text-sm font-bold text-slate-800" data-testid={`${prefix}-deduction-${index}`}>{formatCurrency(deduction.amount)} — {deduction.statement}</p>)}</div>}
+    </div>
+  );
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="expenses-page">
+      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl print:hidden" data-testid="expenses-header"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8"><div className="flex items-center gap-3" data-testid="expenses-brand"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="expenses-brand-icon"><SendToBack className="h-5 w-5" /></div><div><p className="text-xs font-extrabold text-red-700" data-testid="expenses-eyebrow">المصروفات</p><h1 className="text-2xl font-extrabold" data-testid="expenses-title">تسجيل وتقرير المصروفات</h1></div></div><div className="flex flex-wrap items-center gap-3" data-testid="expenses-header-actions"><Badge className="border-slate-200 bg-white px-3 py-1 text-slate-700 shadow-sm hover:bg-white" data-testid="expenses-user-badge">{user?.username}</Badge><Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="expenses-home-button"><Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link></Button><Button onClick={() => navigate(-1)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="expenses-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button><Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="expenses-logout-button"><LogOut className="h-4 w-4" /> خروج</Button></div></div></header>
+      <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="expenses-content">
+        {canManage && <form onSubmit={submitExpense} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="expense-form"><div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="expense-form-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expense-form-eyebrow">{editingId ? "تعديل بيانات المصروف" : "إضافة مصروف جديد"}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expense-form-title">بيانات المصروف</h2></div>{editingId && <Button type="button" onClick={resetForm} variant="outline" className="h-11 rounded-lg bg-white" data-testid="cancel-edit-expense-button"><RotateCcw className="h-4 w-4" /> إلغاء التعديل</Button>}</div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="expense-form-grid">
+            <div className="space-y-2" data-testid="expense-number-wrapper"><Label data-testid="expense-number-label">رقم الإذن</Label><Input required inputMode="numeric" value={form.expense_number} onChange={(event) => updateForm("expense_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-number-input" /></div>
+            <div className="space-y-2" data-testid="expense-method-wrapper"><Label data-testid="expense-method-label">طريقة الصرف</Label><select value={form.payment_method} onChange={(event) => updateForm("payment_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-method-select"><option value="cash" data-testid="expense-method-cash-option">نقداً</option><option value="check" data-testid="expense-method-check-option">شيك</option><option value="bank_transfer" data-testid="expense-method-transfer-option">تحويل بنكي</option></select></div>
+            <div className="space-y-2" data-testid="expense-bank-wrapper"><Label data-testid="expense-bank-label">اسم البنك</Label><select value={form.bank_id} onChange={(event) => updateForm("bank_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`expense-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
+            {form.payment_method !== "bank_transfer" && <div className="space-y-2" data-testid="expense-payee-wrapper"><Label data-testid="expense-payee-label">يصرف للسيد</Label><Input required value={form.payee_name} onChange={(event) => updateForm("payee_name", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-payee-input" /></div>}
+            {form.payment_method === "check" && <div className="space-y-2" data-testid="expense-check-wrapper"><Label data-testid="expense-check-label">رقم الشيك</Label><Input required inputMode="numeric" value={form.check_number} onChange={(event) => updateForm("check_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-check-input" /></div>}
+            {form.payment_method === "bank_transfer" && <><div className="space-y-2" data-testid="expense-transfer-wrapper"><Label data-testid="expense-transfer-label">رقم عملية التحويل</Label><Input required inputMode="numeric" value={form.transfer_number} onChange={(event) => updateForm("transfer_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-input" /></div><div className="space-y-2" data-testid="expense-transfer-to-wrapper"><Label data-testid="expense-transfer-to-label">تم التحويل إلى</Label><Input required value={form.transfer_to} onChange={(event) => updateForm("transfer_to", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-to-input" /></div></>}
+            <div className="space-y-2" data-testid="expense-gross-amount-wrapper"><Label data-testid="expense-gross-amount-label">المبلغ الكلي</Label><Input required inputMode="decimal" value={form.gross_amount} onChange={(event) => updateForm("gross_amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-gross-amount-input" /></div>
+            <div className="space-y-2 md:col-span-2" data-testid="expense-gross-statement-wrapper"><Label data-testid="expense-gross-statement-label">بيان المبلغ</Label><Input required value={form.gross_statement} onChange={(event) => updateForm("gross_statement", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-gross-statement-input" /></div>
+          </div>
+          <section className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4" data-testid="expense-deductions-section"><div className="mb-3 flex items-center justify-between gap-3" data-testid="expense-deductions-heading"><h3 className="text-xl font-extrabold text-slate-950" data-testid="expense-deductions-title">استقطاعات</h3><Button type="button" onClick={addDeduction} variant="outline" className="h-10 rounded-lg bg-white" data-testid="add-expense-deduction-button"><Plus className="h-4 w-4" /> إضافة بيان</Button></div>{form.deductions.map((deduction, index) => <div key={`deduction-${index}`} className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_auto]" data-testid={`expense-deduction-row-${index}`}><Input inputMode="decimal" value={deduction.amount} onChange={(event) => updateDeduction(index, "amount", event.target.value)} placeholder="المبلغ" className="h-12 rounded-lg bg-white text-right" data-testid={`expense-deduction-${index}-amount-input`} /><Input value={deduction.statement} onChange={(event) => updateDeduction(index, "statement", event.target.value)} placeholder="بيان المبلغ" className="h-12 rounded-lg bg-white text-right" data-testid={`expense-deduction-${index}-statement-input`} /><button type="button" onClick={() => removeDeduction(index)} className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-extrabold text-red-700" data-testid={`remove-expense-deduction-${index}-button`}><MinusCircle className="h-4 w-4" /> حذف</button></div>)}<div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="expense-calculation-summary"><div className="rounded-lg bg-white p-4" data-testid="expense-total-deductions-card"><p className="text-xs font-bold text-slate-500">إجمالي الاستقطاعات</p><p className="text-2xl font-extrabold text-red-700" data-testid="expense-total-deductions-value">{formatCurrency(deductionTotal)}</p></div><div className="rounded-lg bg-slate-950 p-4 text-white" data-testid="expense-net-card"><p className="text-xs font-bold text-slate-300">الصافي</p><p className="text-2xl font-extrabold" data-testid="expense-net-value">{formatCurrency(netAmount)}</p></div></div></section>
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="expense-final-fields"><div className="space-y-2" data-testid="expense-issued-wrapper"><Label data-testid="expense-issued-label">تحريراً في</Label><Input required type="date" value={form.issued_at} onChange={(event) => updateForm("issued_at", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-issued-input" /></div><div className="space-y-2" data-testid="expense-employee-wrapper"><Label data-testid="expense-employee-label">الموظف المختص</Label><select value={form.responsible_employee} onChange={(event) => updateForm("responsible_employee", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-employee-select">{employeeOptions.map((name) => <option key={name} value={name} data-testid={`expense-employee-option-${name}`}>{name}</option>)}</select></div></div>
+          <Button type="submit" disabled={saving} className="mt-6 h-12 rounded-lg bg-slate-950 px-7 text-white" data-testid="save-expense-button"><Save className="h-4 w-4" /> {saving ? "جاري الحفظ..." : editingId ? "حفظ تعديل المصروف" : "حفظ المصروف"}</Button></form>}
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="expenses-tools-section"><div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]" data-testid="expenses-tools-grid"><form onSubmit={searchExpense} className="flex flex-col gap-3 sm:flex-row" data-testid="expense-search-form"><Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="بحث برقم الإذن أو الشيك أو التحويل أو اسم الشخص" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-search-input" /><Button type="submit" className="h-12 rounded-lg bg-red-700 px-6 text-white hover:bg-red-800" data-testid="expense-search-button"><Search className="h-4 w-4" /> بحث</Button></form><Button type="button" onClick={() => window.print()} className="h-12 rounded-lg bg-slate-950 px-6 text-white" data-testid="print-expenses-report-button"><Printer className="h-4 w-4" /> طباعة PDF</Button></div><div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="expenses-filters-grid"><select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-filter-bank-select"><option value="all" data-testid="expenses-filter-bank-all-option">كل البنوك</option>{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`expenses-filter-bank-${bank.id}`}>{bank.name}</option>)}</select><select value={filters.payment_method} onChange={(event) => setFilters((current) => ({ ...current, payment_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-filter-method-select"><option value="all" data-testid="expenses-filter-method-all-option">كل طرق الصرف</option><option value="cash" data-testid="expenses-filter-method-cash-option">نقداً</option><option value="check" data-testid="expenses-filter-method-check-option">شيك</option><option value="bank_transfer" data-testid="expenses-filter-method-transfer-option">تحويل بنكي</option></select><Input type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expenses-filter-from-date-input" /><Input type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expenses-filter-to-date-input" /></div></section>
+
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="expenses-report-section"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="expenses-report-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expenses-report-eyebrow">تقرير المصروفات</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expenses-report-title">بيان المصروفات المسجلة</h2></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="expenses-report-kpis"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="expenses-gross-card"><p className="text-xs font-bold text-slate-300">إجمالي الاستحقاقات</p><p className="text-xl font-extrabold" data-testid="expenses-gross-value">{formatCurrency(reportTotals.gross)}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid="expenses-deductions-card"><p className="text-xs font-bold text-red-700">إجمالي الاستقطاعات</p><p className="text-xl font-extrabold" data-testid="expenses-deductions-value">{formatCurrency(reportTotals.deductions)}</p></div><div className="rounded-xl bg-emerald-50 p-4 text-emerald-900" data-testid="expenses-net-total-card"><p className="text-xs font-bold text-emerald-700">إجمالي الصافي</p><p className="text-xl font-extrabold" data-testid="expenses-net-total-value">{formatCurrency(reportTotals.net)}</p></div></div></div><div className="overflow-hidden rounded-xl border border-slate-200" data-testid="expenses-table-wrapper"><Table data-testid="expenses-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="expenses-table-header-row">{["رقم الإذن", "طريقة الصرف", "بيان الصرف", "المرجع", "البنك", "المبلغ الكلي", "إجمالي الاستقطاعات", "الصافي", "تحريراً في", "الموظف"].map((title) => <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`expenses-header-${title}`}>{title}</TableHead>)}{canManage && <TableHead className="text-right font-extrabold text-white print:hidden" data-testid="expenses-header-actions">إجراءات</TableHead>}</TableRow></TableHeader><TableBody>{expenses.map((item) => <TableRow key={item.id} data-testid={`expense-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-number`}>{item.expense_number}</TableCell><TableCell data-testid={`expense-row-${item.id}-method`}>{methodLabels[item.payment_method]}</TableCell><TableCell data-testid={`expense-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-reference`}>{refValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`expense-row-${item.id}-gross`}>{formatCurrency(item.gross_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-deductions`}>{formatCurrency(item.total_deductions)}</TableCell><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-net`}>{formatCurrency(item.net_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`expense-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`expense-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`expense-row-${item.id}-manage-actions`}><button type="button" onClick={() => editExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-expense-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button><button type="button" onClick={() => deleteExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-expense-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody></Table></div></section>
+      </section>
+      {searchOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 print:hidden" data-testid="expense-search-modal-overlay"><section className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" data-testid="expense-search-modal"><div className="mb-5 flex items-center justify-between gap-3" data-testid="expense-search-modal-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expense-search-modal-eyebrow">نتيجة البحث</p><h3 className="text-2xl font-extrabold text-slate-950" data-testid="expense-search-modal-title">بيانات المصروف</h3></div><button type="button" onClick={() => setSearchOpen(false)} className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white" data-testid="close-expense-search-modal-button"><X className="h-4 w-4" /></button></div>{searchResults.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center" data-testid="expense-search-empty-state"><p className="text-xl font-extrabold text-slate-950" data-testid="expense-search-empty-title">لا توجد نتيجة مطابقة</p></div> : <div className="space-y-4" data-testid="expense-search-results-list">{searchResults.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 p-4" data-testid={`expense-search-result-${item.id}`}><DetailGrid item={item} prefix={`expense-search-result-${item.id}`} /></article>)}</div>}</section></div>}
+      <footer className="px-4 pb-5 print:hidden" data-testid="expenses-footer"><CreditLine testId="expenses-creator-credit" /></footer>
+    </main>
+  );
+}
