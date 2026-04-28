@@ -53,6 +53,11 @@ html {
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-header"],
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-content"],
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-footer"],
+    body[data-expense-voucher-open="true"] [data-testid="expenses-header"],
+    body[data-expense-voucher-open="true"] [data-testid="expenses-content"],
+    body[data-expense-voucher-open="true"] [data-testid="expenses-report-section"],
+    body[data-expense-voucher-open="true"] [data-testid="expenses-footer"],
+    body[data-expense-voucher-open="true"] [data-sonner-toaster],
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-sonner-toaster] {
         display: none !important;
     }

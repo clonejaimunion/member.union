@@ -78,6 +78,15 @@ export default function ExpensesPage() {
   useEffect(() => { loadBanks(); }, [loadBanks]);
   useEffect(() => { loadExpenses(); }, [loadExpenses]);
 
+  useEffect(() => {
+    if (selectedExpense) {
+      document.body.setAttribute("data-expense-voucher-open", "true");
+    } else {
+      document.body.removeAttribute("data-expense-voucher-open");
+    }
+    return () => document.body.removeAttribute("data-expense-voucher-open");
+  }, [selectedExpense]);
+
   const updateForm = (field, value) => {
     const nextValue = ["expense_number", "check_number", "transfer_number"].includes(field)
       ? sanitizeDigitsInput(value)
