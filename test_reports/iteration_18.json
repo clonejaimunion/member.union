@@ -1,0 +1,58 @@
+{
+  "summary": "Executed backend + frontend regression on expenses scope/category changes using public preview URL. Requested expense features passed end-to-end; auth playbook checks still show known hardening gaps.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No brute-force lockout after 5 failed logins (valid login still succeeds immediately after failures)."
+      },
+      {
+        "endpoint": "CORS preflight",
+        "issue": "access-control-allow-origin is '*' (not explicit allowlist for credentialed auth posture)."
+      },
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No app-issued HttpOnly auth session cookie observed; auth remains token-in-body flow."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration18_expenses_scope_category.py",
+    "/app/backend/tests/test_iteration18_cleanup_test_records.py",
+    "/app/test_reports/pytest/pytest_results_iter18_backend.xml",
+    "/app/test_reports/pytest/pytest_results_iter18_auth_checks.xml",
+    "/app/test_reports/pytest/pytest_results_iter18_cleanup.xml",
+    "/app/test_reports/iter18_cors_options_headers.txt"
+  ],
+  "action_items": [
+    "Implement brute-force lockout/rate-limit on /api/auth/login after repeated failed attempts.",
+    "Replace wildcard CORS with explicit origin allowlist aligned with credentialed auth policy.",
+    "If cookie-based auth is required by security policy, implement app-issued HttpOnly cookie flow."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is still a large monolith (~1600+ LOC), increasing regression risk and reducing testability.",
+    "Password hashing implementation uses bcrypt.hashpw(...), compatible with expected $2b$ bcrypt format.",
+    "ensure_default_admin() returns early when admin exists, so changed ADMIN_INITIAL_PASSWORD does not update existing admin record (seed_admin non-idempotent vs requested behavior)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration18_expenses_scope_category.py",
+    "/app/backend/tests/test_iteration18_cleanup_test_records.py",
+    "/app/test_reports/iteration_18.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin/Admin@123.",
+  "seed_data_creation": "Created temporary TEST ITER18 expense records through API/UI flows and cleaned them with /app/backend/tests/test_iteration18_cleanup_test_records.py.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Requested expense scope/category behavior is passing in both API and UI (including separate voucher panels by year and death-benefit-only fields). Remaining open items are auth hardening deviations (lockout, wildcard CORS, no HttpOnly app auth cookie).",
+  "rca of the issue": "Auth RCA: login handler performs direct credential verification but has no failed-attempt counter/lockout branch; CORS middleware currently responds with wildcard allow-origin; auth response returns JWT in JSON body without setting an application session cookie. Repro: run iter18 auth checks + inspect OPTIONS headers file."
+}

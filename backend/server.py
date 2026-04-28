@@ -340,11 +340,16 @@ class ExpenseDeduction(BaseModel):
 
 class ExpenseBase(BaseModel):
     expense_number: str = Field(..., min_length=1)
+    organization_scope: Literal["general_union", "social_solidarity_project"] = "social_solidarity_project"
+    expense_category: Literal["general_expenses", "death_benefits"] = "general_expenses"
     payment_method: Literal["cash", "check", "bank_transfer"]
     payee_name: Optional[str] = None
     check_number: Optional[str] = None
     transfer_number: Optional[str] = None
     transfer_to: Optional[str] = None
+    membership_number: Optional[str] = None
+    committee: Optional[str] = None
+    governorate: Optional[str] = None
     bank_id: str
     gross_amount: float = Field(..., gt=0)
     gross_statement: str = Field(..., min_length=1)
@@ -545,6 +550,14 @@ async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str
         if await db.expenses.find_one({"transfer_number": transfer_number, **base_exclusion}, {"_id": 0, "id": 1}):
             raise HTTPException(status_code=400, detail="رقم عملية التحويل موجود بالفعل داخل المصروفات ولا يمكن تكراره")
 
+    if payload.expense_category == "death_benefits":
+        if not payload.membership_number or not payload.membership_number.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال رقم العضوية عند اختيار إعانات وفاة")
+        if not payload.committee or not payload.committee.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال اللجنة عند اختيار إعانات وفاة")
+        if not payload.governorate or not payload.governorate.strip():
+            raise HTTPException(status_code=400, detail="يجب إدخال المحافظة عند اختيار إعانات وفاة")
+
 
 async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
@@ -559,11 +572,16 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
     net_amount = round(gross_amount - total_deductions, 2)
     return {
         "expense_number": normalize_digit_text(payload.expense_number),
+        "organization_scope": payload.organization_scope,
+        "expense_category": payload.expense_category,
         "payment_method": payload.payment_method,
         "payee_name": payload.payee_name.strip() if payload.payment_method in ["cash", "check"] and payload.payee_name else None,
         "check_number": normalize_digit_text(payload.check_number) if payload.payment_method == "check" else None,
         "transfer_number": normalize_digit_text(payload.transfer_number) if payload.payment_method == "bank_transfer" else None,
         "transfer_to": payload.transfer_to.strip() if payload.payment_method == "bank_transfer" and payload.transfer_to else None,
+        "membership_number": normalize_digit_text(payload.membership_number) if payload.expense_category == "death_benefits" and payload.membership_number else None,
+        "committee": payload.committee.strip() if payload.expense_category == "death_benefits" and payload.committee else None,
+        "governorate": payload.governorate.strip() if payload.expense_category == "death_benefits" and payload.governorate else None,
         "bank_id": payload.bank_id,
         "bank_name": bank["name"],
         "gross_amount": gross_amount,

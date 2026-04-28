@@ -16,6 +16,8 @@ import { formatCurrency, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyDeduction = () => ({ amount: "", statement: "" });
 const methodLabels = { cash: "نقداً", check: "شيك", bank_transfer: "تحويل بنكي" };
+const organizationLabels = { general_union: "النقابة العامة", social_solidarity_project: "مشروع التكافل الاجتماعي" };
+const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة" };
 const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
 
 const amountParts = (value) => {
@@ -25,11 +27,16 @@ const amountParts = (value) => {
 
 const defaultForm = () => ({
   expense_number: "",
+  organization_scope: "social_solidarity_project",
+  expense_category: "general_expenses",
   payment_method: "cash",
   payee_name: "",
   check_number: "",
   transfer_number: "",
   transfer_to: "",
+  membership_number: "",
+  committee: "",
+  governorate: "",
   bank_id: "industrial-development",
   gross_amount: "",
   gross_statement: "",
@@ -51,7 +58,8 @@ export default function ExpensesPage() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedExpense, setSelectedExpense] = useState(null);
-  const [selectedVoucherYear, setSelectedVoucherYear] = useState("");
+  const [selectedGeneralVoucherYear, setSelectedGeneralVoucherYear] = useState("");
+  const [selectedDeathBenefitYear, setSelectedDeathBenefitYear] = useState("");
 
   const canManage = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_expenses;
   const deductionTotal = useMemo(() => form.deductions.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0), [form.deductions]);
@@ -61,8 +69,8 @@ export default function ExpensesPage() {
     deductions: acc.deductions + Number(item.total_deductions || 0),
     net: acc.net + Number(item.net_amount || 0),
   }), { gross: 0, deductions: 0, net: 0 }), [expenses]);
-  const voucherExpenseGroups = useMemo(() => {
-    const groups = expenses.reduce((acc, item) => {
+  const buildVoucherGroups = useCallback((items) => {
+    const groups = items.reduce((acc, item) => {
       const year = String(item.issued_at || "").slice(0, 4) || "بدون سنة";
       if (!acc[year]) acc[year] = [];
       acc[year].push(item);
@@ -74,8 +82,11 @@ export default function ExpensesPage() {
         year,
         items: items.sort((a, b) => String(b.issued_at || "").localeCompare(String(a.issued_at || ""))),
       }));
-  }, [expenses]);
-  const selectedVoucherGroup = useMemo(() => voucherExpenseGroups.find((group) => group.year === selectedVoucherYear), [selectedVoucherYear, voucherExpenseGroups]);
+  }, []);
+  const generalVoucherGroups = useMemo(() => buildVoucherGroups(expenses.filter((item) => (item.expense_category || "general_expenses") === "general_expenses")), [buildVoucherGroups, expenses]);
+  const deathBenefitGroups = useMemo(() => buildVoucherGroups(expenses.filter((item) => item.expense_category === "death_benefits")), [buildVoucherGroups, expenses]);
+  const selectedGeneralVoucherGroup = useMemo(() => generalVoucherGroups.find((group) => group.year === selectedGeneralVoucherYear), [selectedGeneralVoucherYear, generalVoucherGroups]);
+  const selectedDeathBenefitGroup = useMemo(() => deathBenefitGroups.find((group) => group.year === selectedDeathBenefitYear), [selectedDeathBenefitYear, deathBenefitGroups]);
 
   const loadBanks = useCallback(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
@@ -104,7 +115,7 @@ export default function ExpensesPage() {
   }, [selectedExpense]);
 
   const updateForm = (field, value) => {
-    const nextValue = ["expense_number", "check_number", "transfer_number"].includes(field)
+    const nextValue = ["expense_number", "check_number", "transfer_number", "membership_number"].includes(field)
       ? sanitizeDigitsInput(value)
       : field === "gross_amount"
         ? sanitizeDecimalInput(value)
@@ -125,6 +136,9 @@ export default function ExpensesPage() {
     ...form,
     expense_number: sanitizeDigitsInput(form.expense_number),
     gross_amount: Number(sanitizeDecimalInput(form.gross_amount) || 0),
+    membership_number: form.expense_category === "death_benefits" ? sanitizeDigitsInput(form.membership_number) : null,
+    committee: form.expense_category === "death_benefits" ? form.committee.trim() : null,
+    governorate: form.expense_category === "death_benefits" ? form.governorate.trim() : null,
     payee_name: ["cash", "check"].includes(form.payment_method) ? form.payee_name.trim() : null,
     check_number: form.payment_method === "check" ? sanitizeDigitsInput(form.check_number) : null,
     transfer_number: form.payment_method === "bank_transfer" ? sanitizeDigitsInput(form.transfer_number) : null,
@@ -153,11 +167,16 @@ export default function ExpensesPage() {
     setEditingId(item.id);
     setForm({
       expense_number: item.expense_number || "",
+      organization_scope: item.organization_scope || "social_solidarity_project",
+      expense_category: item.expense_category || "general_expenses",
       payment_method: item.payment_method || "cash",
       payee_name: item.payee_name || "",
       check_number: item.check_number || "",
       transfer_number: item.transfer_number || "",
       transfer_to: item.transfer_to || "",
+      membership_number: item.membership_number || "",
+      committee: item.committee || "",
+      governorate: item.governorate || "",
       bank_id: item.bank_id || "industrial-development",
       gross_amount: String(item.gross_amount ?? ""),
       gross_statement: item.gross_statement || "",
@@ -198,7 +217,7 @@ export default function ExpensesPage() {
 
   const DetailGrid = ({ item, prefix }) => (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid={`${prefix}-details-grid`}>
-      {[["رقم الإذن", item.expense_number], ["طريقة الصرف", methodLabels[item.payment_method]], [detailLabel(item), detailValue(item)], [item.payment_method === "bank_transfer" ? "رقم عملية التحويل" : "رقم الشيك", refValue(item)], ["البنك", item.bank_name], ["المبلغ الكلي", formatCurrency(item.gross_amount)], ["بيان المبلغ", item.gross_statement], ["إجمالي الاستقطاعات", formatCurrency(item.total_deductions)], ["الصافي", formatCurrency(item.net_amount)], ["تحريراً في", item.issued_at], ["الموظف المختص", item.responsible_employee]].map(([label, value], index) => (
+      {[["رقم الإذن", item.expense_number], ["الجهة", organizationLabels[item.organization_scope || "social_solidarity_project"]], ["نوع المصروف", categoryLabels[item.expense_category || "general_expenses"]], ["طريقة الصرف", methodLabels[item.payment_method]], [detailLabel(item), detailValue(item)], [item.payment_method === "bank_transfer" ? "رقم عملية التحويل" : "رقم الشيك", refValue(item)], ["البنك", item.bank_name], ...((item.expense_category === "death_benefits") ? [["رقم العضوية", item.membership_number], ["لجنة", item.committee], ["محافظة", item.governorate]] : []), ["المبلغ الكلي", formatCurrency(item.gross_amount)], ["بيان المبلغ", item.gross_statement], ["إجمالي الاستقطاعات", formatCurrency(item.total_deductions)], ["الصافي", formatCurrency(item.net_amount)], ["تحريراً في", item.issued_at], ["الموظف المختص", item.responsible_employee]].map(([label, value], index) => (
         <div key={`${prefix}-${label}`} className={index === 6 ? "rounded-lg bg-slate-50 p-3 md:col-span-2" : "rounded-lg bg-slate-50 p-3"} data-testid={`${prefix}-detail-${index}`}><p className="text-xs font-bold text-slate-500" data-testid={`${prefix}-detail-${index}-label`}>{label}</p><p className="mt-1 break-words text-base font-extrabold text-slate-950" data-testid={`${prefix}-detail-${index}-value`}>{value || "—"}</p></div>
       ))}
       {item.deductions?.length > 0 && <div className="rounded-lg bg-amber-50 p-3 md:col-span-2" data-testid={`${prefix}-deductions-list`}><p className="text-xs font-bold text-amber-700" data-testid={`${prefix}-deductions-title`}>بيانات الاستقطاعات</p>{item.deductions.map((deduction, index) => <p key={`${prefix}-deduction-${index}`} className="mt-2 text-sm font-bold text-slate-800" data-testid={`${prefix}-deduction-${index}`}>{formatCurrency(deduction.amount)} — {deduction.statement}</p>)}</div>}
@@ -209,11 +228,12 @@ export default function ExpensesPage() {
     const grossParts = amountParts(item.gross_amount);
     const netParts = amountParts(item.net_amount);
     const voucherTitle = item.payment_method === "check" ? "إذن صرف شيك" : item.payment_method === "bank_transfer" ? "إذن تحويل بنكي" : "إذن صرف نقدي";
+    const isDeathBenefit = item.expense_category === "death_benefits";
     return (
       <article className="mx-auto w-full max-w-5xl bg-white p-6 text-slate-950 print:max-w-none print:p-0" data-testid="expense-voucher-document">
         <header className="text-center leading-7" data-testid="expense-voucher-header">
           <p className="text-sm font-extrabold" data-testid="expense-voucher-union-name">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الأراضي</p>
-          <p className="text-sm font-bold" data-testid="expense-voucher-fund-name">صندوق التكافل الاجتماعي</p>
+          {item.organization_scope === "social_solidarity_project" && <p className="text-sm font-bold" data-testid="expense-voucher-fund-name">صندوق التكافل الاجتماعي</p>}
           <p className="text-xs font-bold text-slate-600" data-testid="expense-voucher-address">١٧٠ شارع بورسعيد - السيدة زينب - القاهرة</p>
         </header>
         <div className="mt-5 grid grid-cols-3 items-center" data-testid="expense-voucher-title-row">
@@ -223,9 +243,9 @@ export default function ExpensesPage() {
         </div>
         <section className="mt-6 grid grid-cols-1 gap-4 text-lg font-extrabold md:grid-cols-2" data-testid="expense-voucher-party-section">
           <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-payee-line">{detailLabel(item)} : <span className="font-bold">{detailValue(item) || "................................"}</span></p>
-          <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-membership-line">رقم العضوية : <span className="font-bold">........................</span></p>
-          <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-committee-line">لجنة : <span className="font-bold">........................</span></p>
-          <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-governorate-line">محافظة : <span className="font-bold">........................</span></p>
+          {isDeathBenefit && <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-membership-line">رقم العضوية : <span className="font-bold">{item.membership_number}</span></p>}
+          {isDeathBenefit && <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-committee-line">لجنة : <span className="font-bold">{item.committee}</span></p>}
+          {isDeathBenefit && <p className="border-b border-dotted border-slate-400 pb-2" data-testid="expense-voucher-governorate-line">محافظة : <span className="font-bold">{item.governorate}</span></p>}
           <p className="border-b border-dotted border-slate-400 pb-2 md:col-span-2" data-testid="expense-voucher-reference-line">
             {item.payment_method === "check" ? "شيك رقم" : item.payment_method === "bank_transfer" ? "عملية تحويل رقم" : "طريقة الصرف"} : <span className="font-bold">{refValue(item)}</span>
             <span className="mx-4">على بنك :</span><span className="font-bold">{item.bank_name}</span>
@@ -276,12 +296,15 @@ export default function ExpensesPage() {
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="expenses-content">
         {canManage && <form onSubmit={submitExpense} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="expense-form"><div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="expense-form-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expense-form-eyebrow">{editingId ? "تعديل بيانات المصروف" : "إضافة مصروف جديد"}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expense-form-title">بيانات المصروف</h2></div>{editingId && <Button type="button" onClick={resetForm} variant="outline" className="h-11 rounded-lg bg-white" data-testid="cancel-edit-expense-button"><RotateCcw className="h-4 w-4" /> إلغاء التعديل</Button>}</div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="expense-form-grid">
+            <div className="space-y-2" data-testid="expense-organization-wrapper"><Label data-testid="expense-organization-label">الجهة</Label><select value={form.organization_scope} onChange={(event) => updateForm("organization_scope", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-organization-select"><option value="general_union" data-testid="expense-organization-general-union-option">النقابة العامة</option><option value="social_solidarity_project" data-testid="expense-organization-social-project-option">مشروع التكافل الاجتماعي</option></select></div>
+            <div className="space-y-2" data-testid="expense-category-wrapper"><Label data-testid="expense-category-label">نوع المصروف</Label><select value={form.expense_category} onChange={(event) => updateForm("expense_category", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-category-select"><option value="general_expenses" data-testid="expense-category-general-option">مصروفات عمومية</option><option value="death_benefits" data-testid="expense-category-death-option">إعانات وفاة</option></select></div>
             <div className="space-y-2" data-testid="expense-number-wrapper"><Label data-testid="expense-number-label">رقم الإذن</Label><Input required inputMode="numeric" value={form.expense_number} onChange={(event) => updateForm("expense_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-number-input" /></div>
             <div className="space-y-2" data-testid="expense-method-wrapper"><Label data-testid="expense-method-label">طريقة الصرف</Label><select value={form.payment_method} onChange={(event) => updateForm("payment_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-method-select"><option value="cash" data-testid="expense-method-cash-option">نقداً</option><option value="check" data-testid="expense-method-check-option">شيك</option><option value="bank_transfer" data-testid="expense-method-transfer-option">تحويل بنكي</option></select></div>
             <div className="space-y-2" data-testid="expense-bank-wrapper"><Label data-testid="expense-bank-label">اسم البنك</Label><select value={form.bank_id} onChange={(event) => updateForm("bank_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`expense-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
             {form.payment_method !== "bank_transfer" && <div className="space-y-2" data-testid="expense-payee-wrapper"><Label data-testid="expense-payee-label">يصرف للسيد</Label><Input required value={form.payee_name} onChange={(event) => updateForm("payee_name", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-payee-input" /></div>}
             {form.payment_method === "check" && <div className="space-y-2" data-testid="expense-check-wrapper"><Label data-testid="expense-check-label">رقم الشيك</Label><Input required inputMode="numeric" value={form.check_number} onChange={(event) => updateForm("check_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-check-input" /></div>}
             {form.payment_method === "bank_transfer" && <><div className="space-y-2" data-testid="expense-transfer-wrapper"><Label data-testid="expense-transfer-label">رقم عملية التحويل</Label><Input required inputMode="numeric" value={form.transfer_number} onChange={(event) => updateForm("transfer_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-input" /></div><div className="space-y-2" data-testid="expense-transfer-to-wrapper"><Label data-testid="expense-transfer-to-label">تم التحويل إلى</Label><Input required value={form.transfer_to} onChange={(event) => updateForm("transfer_to", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-to-input" /></div></>}
+            {form.expense_category === "death_benefits" && <><div className="space-y-2" data-testid="expense-membership-wrapper"><Label data-testid="expense-membership-label">رقم العضوية</Label><Input required inputMode="numeric" value={form.membership_number} onChange={(event) => updateForm("membership_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-membership-input" /></div><div className="space-y-2" data-testid="expense-committee-wrapper"><Label data-testid="expense-committee-label">لجنة</Label><Input required value={form.committee} onChange={(event) => updateForm("committee", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-committee-input" /></div><div className="space-y-2" data-testid="expense-governorate-wrapper"><Label data-testid="expense-governorate-label">محافظة</Label><Input required value={form.governorate} onChange={(event) => updateForm("governorate", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-governorate-input" /></div></>}
             <div className="space-y-2" data-testid="expense-gross-amount-wrapper"><Label data-testid="expense-gross-amount-label">المبلغ الكلي</Label><Input required inputMode="decimal" value={form.gross_amount} onChange={(event) => updateForm("gross_amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-gross-amount-input" /></div>
             <div className="space-y-2 md:col-span-2" data-testid="expense-gross-statement-wrapper"><Label data-testid="expense-gross-statement-label">بيان المبلغ</Label><Input required value={form.gross_statement} onChange={(event) => updateForm("gross_statement", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-gross-statement-input" /></div>
           </div>
@@ -291,49 +314,27 @@ export default function ExpensesPage() {
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="expenses-tools-section"><div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]" data-testid="expenses-tools-grid"><form onSubmit={searchExpense} className="flex flex-col gap-3 sm:flex-row" data-testid="expense-search-form"><Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="بحث برقم الإذن أو الشيك أو التحويل أو اسم الشخص" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-search-input" /><Button type="submit" className="h-12 rounded-lg bg-red-700 px-6 text-white hover:bg-red-800" data-testid="expense-search-button"><Search className="h-4 w-4" /> بحث</Button></form><Button type="button" onClick={() => window.print()} className="h-12 rounded-lg bg-slate-950 px-6 text-white" data-testid="print-expenses-report-button"><Printer className="h-4 w-4" /> طباعة PDF</Button></div><div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="expenses-filters-grid"><select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-filter-bank-select"><option value="all" data-testid="expenses-filter-bank-all-option">كل البنوك</option>{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`expenses-filter-bank-${bank.id}`}>{bank.name}</option>)}</select><select value={filters.payment_method} onChange={(event) => setFilters((current) => ({ ...current, payment_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-filter-method-select"><option value="all" data-testid="expenses-filter-method-all-option">كل طرق الصرف</option><option value="cash" data-testid="expenses-filter-method-cash-option">نقداً</option><option value="check" data-testid="expenses-filter-method-check-option">شيك</option><option value="bank_transfer" data-testid="expenses-filter-method-transfer-option">تحويل بنكي</option></select><Input type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expenses-filter-from-date-input" /><Input type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expenses-filter-to-date-input" /></div></section>
 
-        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="expenses-report-section"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="expenses-report-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expenses-report-eyebrow">تقرير المصروفات</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expenses-report-title">بيان المصروفات المسجلة</h2></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="expenses-report-kpis"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="expenses-gross-card"><p className="text-xs font-bold text-slate-300">إجمالي الاستحقاقات</p><p className="text-xl font-extrabold" data-testid="expenses-gross-value">{formatCurrency(reportTotals.gross)}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid="expenses-deductions-card"><p className="text-xs font-bold text-red-700">إجمالي الاستقطاعات</p><p className="text-xl font-extrabold" data-testid="expenses-deductions-value">{formatCurrency(reportTotals.deductions)}</p></div><div className="rounded-xl bg-emerald-50 p-4 text-emerald-900" data-testid="expenses-net-total-card"><p className="text-xs font-bold text-emerald-700">إجمالي الصافي</p><p className="text-xl font-extrabold" data-testid="expenses-net-total-value">{formatCurrency(reportTotals.net)}</p></div></div></div><div className="overflow-hidden rounded-xl border border-slate-200" data-testid="expenses-table-wrapper"><Table data-testid="expenses-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="expenses-table-header-row">{["رقم الإذن", "طريقة الصرف", "بيان الصرف", "المرجع", "البنك", "المبلغ الكلي", "إجمالي الاستقطاعات", "الصافي", "تحريراً في", "الموظف"].map((title) => <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`expenses-header-${title}`}>{title}</TableHead>)}{canManage && <TableHead className="text-right font-extrabold text-white print:hidden" data-testid="expenses-header-actions">إجراءات</TableHead>}</TableRow></TableHeader><TableBody>{expenses.map((item) => <TableRow key={item.id} data-testid={`expense-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-number`}>{item.expense_number}</TableCell><TableCell data-testid={`expense-row-${item.id}-method`}>{methodLabels[item.payment_method]}</TableCell><TableCell data-testid={`expense-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-reference`}>{refValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`expense-row-${item.id}-gross`}>{formatCurrency(item.gross_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-deductions`}>{formatCurrency(item.total_deductions)}</TableCell><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-net`}>{formatCurrency(item.net_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`expense-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`expense-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`expense-row-${item.id}-manage-actions`}><button type="button" onClick={() => editExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-expense-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button><button type="button" onClick={() => deleteExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-expense-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody></Table></div></section>
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8" data-testid="expenses-report-section"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid="expenses-report-heading"><div><p className="text-sm font-extrabold text-red-700" data-testid="expenses-report-eyebrow">تقرير المصروفات</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid="expenses-report-title">بيان المصروفات المسجلة</h2></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="expenses-report-kpis"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="expenses-gross-card"><p className="text-xs font-bold text-slate-300">إجمالي الاستحقاقات</p><p className="text-xl font-extrabold" data-testid="expenses-gross-value">{formatCurrency(reportTotals.gross)}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid="expenses-deductions-card"><p className="text-xs font-bold text-red-700">إجمالي الاستقطاعات</p><p className="text-xl font-extrabold" data-testid="expenses-deductions-value">{formatCurrency(reportTotals.deductions)}</p></div><div className="rounded-xl bg-emerald-50 p-4 text-emerald-900" data-testid="expenses-net-total-card"><p className="text-xs font-bold text-emerald-700">إجمالي الصافي</p><p className="text-xl font-extrabold" data-testid="expenses-net-total-value">{formatCurrency(reportTotals.net)}</p></div></div></div><div className="overflow-hidden rounded-xl border border-slate-200" data-testid="expenses-table-wrapper"><Table data-testid="expenses-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="expenses-table-header-row">{["رقم الإذن", "الجهة", "نوع المصروف", "طريقة الصرف", "بيان الصرف", "المرجع", "البنك", "المبلغ الكلي", "إجمالي الاستقطاعات", "الصافي", "تحريراً في", "الموظف"].map((title) => <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`expenses-header-${title}`}>{title}</TableHead>)}{canManage && <TableHead className="text-right font-extrabold text-white print:hidden" data-testid="expenses-header-actions">إجراءات</TableHead>}</TableRow></TableHeader><TableBody>{expenses.map((item) => <TableRow key={item.id} data-testid={`expense-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-number`}>{item.expense_number}</TableCell><TableCell data-testid={`expense-row-${item.id}-organization`}>{organizationLabels[item.organization_scope || "social_solidarity_project"]}</TableCell><TableCell data-testid={`expense-row-${item.id}-category`}>{categoryLabels[item.expense_category || "general_expenses"]}</TableCell><TableCell data-testid={`expense-row-${item.id}-method`}>{methodLabels[item.payment_method]}</TableCell><TableCell data-testid={`expense-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-reference`}>{refValue(item)}</TableCell><TableCell data-testid={`expense-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`expense-row-${item.id}-gross`}>{formatCurrency(item.gross_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-deductions`}>{formatCurrency(item.total_deductions)}</TableCell><TableCell className="font-extrabold" data-testid={`expense-row-${item.id}-net`}>{formatCurrency(item.net_amount)}</TableCell><TableCell data-testid={`expense-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`expense-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`expense-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`expense-row-${item.id}-manage-actions`}><button type="button" onClick={() => editExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-expense-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button><button type="button" onClick={() => deleteExpense(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-expense-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody></Table></div></section>
         {expenses.length > 0 && (
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="expense-voucher-actions-section">
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="expense-voucher-actions-heading">
               <div>
                 <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expense-voucher-actions-title">عرض إذن الصرف التفصيلي</h3>
-                <p className="mt-1 text-sm font-bold text-slate-500" data-testid="expense-voucher-actions-description">اختر سنة التحرير لعرض الأذون المحفوظة.</p>
+                <p className="mt-1 text-sm font-bold text-slate-500" data-testid="expense-voucher-actions-description">اختر سنة التحرير لعرض الأذون المحفوظة، وتظهر إعانات الوفاة في مجموعة مستقلة.</p>
               </div>
               <Badge className="w-fit bg-red-50 text-red-700 hover:bg-red-50" data-testid="expense-voucher-actions-count">{expenses.length} مصروف</Badge>
             </div>
-            <div className="mb-5 max-w-xs" data-testid="expense-voucher-year-filter-wrapper">
-              <Label data-testid="expense-voucher-year-filter-label">اختيار السنة</Label>
-              <select value={selectedVoucherYear} onChange={(event) => setSelectedVoucherYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="expense-voucher-year-filter-select">
-                <option value="" data-testid="expense-voucher-year-filter-placeholder-option">اختر السنة لعرض الأذون</option>
-                {voucherExpenseGroups.map((group) => <option key={group.year} value={group.year} data-testid={`expense-voucher-year-filter-option-${group.year}`}>{group.year}</option>)}
-              </select>
-            </div>
-            <div className="space-y-5" data-testid="expense-voucher-actions-year-groups">
-              {!selectedVoucherYear ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expense-voucher-year-required-state">
-                  <p className="text-lg font-extrabold text-slate-950" data-testid="expense-voucher-year-required-title">اختر السنة أولاً</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="expense-voucher-year-required-description">لن تظهر أذون الصرف المحفوظة إلا بعد تحديد سنة التحرير.</p>
-                </div>
-              ) : selectedVoucherGroup ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`expense-voucher-year-group-${selectedVoucherGroup.year}`}>
-                  <div className="mb-3 flex items-center justify-between" data-testid={`expense-voucher-year-heading-${selectedVoucherGroup.year}`}>
-                    <h4 className="text-xl font-extrabold text-slate-950" data-testid={`expense-voucher-year-title-${selectedVoucherGroup.year}`}>سنة {selectedVoucherGroup.year}</h4>
-                    <Badge className="bg-white text-slate-700 hover:bg-white" data-testid={`expense-voucher-year-count-${selectedVoucherGroup.year}`}>{selectedVoucherGroup.items.length} إذن</Badge>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid={`expense-voucher-year-grid-${selectedVoucherGroup.year}`}>
-                    {selectedVoucherGroup.items.map((item) => (
-                      <button key={`voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 text-right transition-colors hover:border-slate-950" data-testid={`view-expense-voucher-button-${item.id}`}>
-                        <span data-testid={`view-expense-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إذن رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">{methodLabels[item.payment_method]} — {formatCurrency(item.net_amount)}</span></span>
-                        <Eye className="h-5 w-5 text-red-700" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center" data-testid="expense-voucher-year-empty-state">
-                  <p className="text-lg font-extrabold text-slate-950" data-testid="expense-voucher-year-empty-title">لا توجد أذون لهذه السنة</p>
-                </div>
-              )}
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2" data-testid="expense-voucher-category-panels">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="general-expense-voucher-panel">
+                <h4 className="text-xl font-extrabold text-slate-950" data-testid="general-expense-voucher-title">مصروفات عمومية</h4>
+                <div className="mt-3 max-w-xs" data-testid="general-expense-voucher-year-filter-wrapper"><Label data-testid="general-expense-voucher-year-filter-label">اختيار السنة</Label><select value={selectedGeneralVoucherYear} onChange={(event) => setSelectedGeneralVoucherYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="general-expense-voucher-year-filter-select"><option value="" data-testid="general-expense-voucher-year-placeholder-option">اختر السنة لعرض الأذون</option>{generalVoucherGroups.map((group) => <option key={group.year} value={group.year} data-testid={`general-expense-voucher-year-option-${group.year}`}>{group.year}</option>)}</select></div>
+                <div className="mt-4" data-testid="general-expense-voucher-results">{!selectedGeneralVoucherYear ? <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center" data-testid="general-expense-voucher-year-required-state"><p className="font-extrabold text-slate-950">اختر السنة أولاً</p></div> : selectedGeneralVoucherGroup ? <div className="grid grid-cols-1 gap-3" data-testid={`general-expense-voucher-year-grid-${selectedGeneralVoucherGroup.year}`}>{selectedGeneralVoucherGroup.items.map((item) => <button key={`voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-4 text-right transition-colors hover:border-slate-950" data-testid={`view-expense-voucher-button-${item.id}`}><span data-testid={`view-expense-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إذن رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">{methodLabels[item.payment_method]} — {formatCurrency(item.net_amount)}</span></span><Eye className="h-5 w-5 text-red-700" /></button>)}</div> : <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center" data-testid="general-expense-voucher-year-empty-state"><p className="font-extrabold text-slate-950">لا توجد أذون لهذه السنة</p></div>}</div>
+              </div>
+              <div className="rounded-xl border border-red-100 bg-red-50 p-4" data-testid="death-benefit-voucher-panel">
+                <h4 className="text-xl font-extrabold text-slate-950" data-testid="death-benefit-voucher-title">إعانات وفاة</h4>
+                <div className="mt-3 max-w-xs" data-testid="death-benefit-voucher-year-filter-wrapper"><Label data-testid="death-benefit-voucher-year-filter-label">اختيار السنة</Label><select value={selectedDeathBenefitYear} onChange={(event) => setSelectedDeathBenefitYear(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="death-benefit-voucher-year-filter-select"><option value="" data-testid="death-benefit-voucher-year-placeholder-option">اختر السنة لعرض إعانات الوفاة</option>{deathBenefitGroups.map((group) => <option key={group.year} value={group.year} data-testid={`death-benefit-voucher-year-option-${group.year}`}>{group.year}</option>)}</select></div>
+                <div className="mt-4" data-testid="death-benefit-voucher-results">{!selectedDeathBenefitYear ? <div className="rounded-xl border border-dashed border-red-200 bg-white p-6 text-center" data-testid="death-benefit-voucher-year-required-state"><p className="font-extrabold text-slate-950">اختر سنة إعانات الوفاة أولاً</p></div> : selectedDeathBenefitGroup ? <div className="grid grid-cols-1 gap-3" data-testid={`death-benefit-voucher-year-grid-${selectedDeathBenefitGroup.year}`}>{selectedDeathBenefitGroup.items.map((item) => <button key={`death-voucher-${item.id}`} type="button" onClick={() => setSelectedExpense(item)} className="flex items-center justify-between gap-3 rounded-lg border border-red-100 bg-white p-4 text-right transition-colors hover:border-red-700" data-testid={`view-death-benefit-voucher-button-${item.id}`}><span data-testid={`view-death-benefit-voucher-button-${item.id}-text`}><span className="block text-sm font-extrabold text-slate-950">عرض إعانة وفاة رقم {item.expense_number}</span><span className="mt-1 block text-xs font-bold text-slate-500">عضوية {item.membership_number} — {formatCurrency(item.net_amount)}</span></span><Eye className="h-5 w-5 text-red-700" /></button>)}</div> : <div className="rounded-xl border border-dashed border-red-200 bg-white p-6 text-center" data-testid="death-benefit-voucher-year-empty-state"><p className="font-extrabold text-slate-950">لا توجد إعانات وفاة لهذه السنة</p></div>}</div>
+              </div>
             </div>
           </section>
         )}
