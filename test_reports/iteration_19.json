@@ -1,0 +1,75 @@
+{
+  "summary": "Ran backend + frontend regression for new Expenses Analysis module on public preview URL. API seed/list/cleanup flows passed and UI reached analysis page with correct monthly cards/table for seeded dataset; full print/yearly runtime recheck was partially blocked by Playwright Arabic-number parsing assertions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No brute-force lockout after 5 failed attempts (401x5 then valid login returns 200)."
+      },
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No app-issued HttpOnly auth session cookie observed; login still token-in-body flow (only Cloudflare cookie present)."
+      },
+      {
+        "endpoint": "CORS preflight",
+        "issue": "access-control-allow-origin is '*' instead of explicit allowlist origin posture for credentialed auth hardening."
+      },
+      {
+        "endpoint": "startup ensure_default_admin",
+        "issue": "Existing admin is returned early and not updated when ADMIN_INITIAL_PASSWORD changes (seed admin not idempotent)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Expenses analysis full automation run",
+        "issue": "Runtime validation for yearly/scope/print in this iteration is partial because Playwright assertions failed on Arabic numeral parsing in the test script after page data loaded correctly.",
+        "affected_selectors": [
+          "[data-testid='expenses-analysis-count-value']",
+          "[data-testid='expenses-analysis-grand-total-value']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration19_expenses_analysis.py",
+    "/app/backend/tests/test_iteration19_seed_expenses_analysis_ui.py",
+    "/app/test_reports/pytest/pytest_results_iter19_backend.xml",
+    "/app/test_reports/pytest/pytest_results_iter19_seed.xml",
+    "/app/test_reports/pytest/pytest_results_iter19_cleanup.xml",
+    "/app/test_reports/pytest/pytest_results_iter19_auth_checks.xml",
+    "/app/test_reports/iter19_login_headers.txt",
+    "/app/test_reports/iter19_cors_options_headers.txt",
+    "/app/test_reports/iter19_lockout_statuses.txt"
+  ],
+  "action_items": [
+    "Re-run one clean Playwright pass for yearly/scope/print assertions with robust Arabic numeral normalization in the test script.",
+    "Implement brute-force lockout/rate-limit on /api/auth/login.",
+    "If security policy requires cookie sessions, add app-issued HttpOnly auth cookie flow.",
+    "Replace wildcard CORS with explicit allowed origins aligned to credentialed auth policy.",
+    "Make admin seeding idempotent by reconciling existing admin password hash when env password changes."
+  ],
+  "critical_code_review_comments": [
+    "ExpensesAnalysisPage classification and aggregation logic is frontend-only over /api/expenses (no dedicated backend reporting endpoint), so large datasets may shift computation burden to client.",
+    "bcrypt hashing path uses bcrypt.hashpw(...bcrypt.gensalt(rounds=12)) which is compatible with expected $2b$ hash format.",
+    "backend/server.py remains a large monolith, increasing maintenance and regression risk."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration19_expenses_analysis.py",
+    "/app/backend/tests/test_iteration19_seed_expenses_analysis_ui.py",
+    "/app/test_reports/iteration_19.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "75%"
+  },
+  "seed_data_creation": "Created temporary TEST ITER19 expense rows (7 records, year 2031/month 04) for UI/API validation and removed them with cleanup test.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "UI run confirmed module card, page load, filters-only layout, monthly seeded rows and visible totals/table content on /expenses-analysis. Automation aborted before completing yearly/scope/print assertions due Arabic numeral parsing mismatch in test script; app screenshot shows expected monthly values. Test seed data has been cleaned.",
+  "rca of the issue": "Auth RCA: login handler validates credentials directly without failed-attempt state/lockout branch; CORS middleware responds with wildcard allow-origin; response does not set app auth cookie. Seed admin RCA: ensure_default_admin exits when any admin exists, so env password changes do not reconcile existing admin record."
+}

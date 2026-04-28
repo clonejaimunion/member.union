@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, BarChart3, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -42,6 +42,13 @@ export default function ModuleSelection() {
       icon: SendToBack,
       testId: "module-expenses-card",
     },
+    canUseExpenses && {
+      title: "تحليل المصروفات",
+      description: "تحليل شهري وسنوي لبنود المصروفات حسب الجهة المسجلة.",
+      path: "/expenses-analysis",
+      icon: BarChart3,
+      testId: "module-expenses-analysis-card",
+    },
   ].filter(Boolean);
 
   return (
@@ -77,7 +84,7 @@ export default function ModuleSelection() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4" data-testid="module-cards-grid">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5" data-testid="module-cards-grid">
           {modules.map((module) => {
             const Icon = module.icon;
             return (
