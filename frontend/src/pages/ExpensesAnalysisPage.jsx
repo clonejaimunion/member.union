@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatEgpLabel } from "@/lib/format";
 
 const organizationLabels = {
   general_union: "النقابة العامة",
@@ -132,7 +132,7 @@ export default function ExpensesAnalysisPage() {
     <section className={`space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8 ${preview ? "max-h-[78vh] overflow-y-auto" : ""}`} data-testid={preview ? "expenses-analysis-preview-report-section" : "expenses-analysis-report-section"}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid={preview ? "expenses-analysis-preview-report-heading" : "expenses-analysis-report-heading"}>
         <div><p className="text-sm font-extrabold text-red-700" data-testid={preview ? "expenses-analysis-preview-report-eyebrow" : "expenses-analysis-report-eyebrow"}>{organizationLabels[filters.organization_scope]}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-report-title" : "expenses-analysis-report-title"}>تحليل المصروفات - {periodLabel}</h2></div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={preview ? "expenses-analysis-preview-report-kpis" : "expenses-analysis-report-kpis"}><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid={preview ? "expenses-analysis-preview-count-card" : "expenses-analysis-count-card"}><p className="text-xs font-bold text-slate-300">عدد المصروفات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-count-value" : "expenses-analysis-count-value"}>{hasCompletePeriod ? visibleAnalysisRows.length : 0}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid={preview ? "expenses-analysis-preview-grand-total-card" : "expenses-analysis-grand-total-card"}><p className="text-xs font-bold text-red-700">الإجمالي العام للخانات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-grand-total-value" : "expenses-analysis-grand-total-value"}>{hasCompletePeriod ? formatCurrency(grandTotal) : formatCurrency(0)}</p></div></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={preview ? "expenses-analysis-preview-report-kpis" : "expenses-analysis-report-kpis"}><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid={preview ? "expenses-analysis-preview-count-card" : "expenses-analysis-count-card"}><p className="text-xs font-bold text-slate-300">عدد المصروفات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-count-value" : "expenses-analysis-count-value"}>{hasCompletePeriod ? visibleAnalysisRows.length : 0}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid={preview ? "expenses-analysis-preview-grand-total-card" : "expenses-analysis-grand-total-card"}><p className="text-xs font-bold text-red-700">الإجمالي العام للخانات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-grand-total-value" : "expenses-analysis-grand-total-value"}>{hasCompletePeriod ? formatEgpLabel(grandTotal) : formatEgpLabel(0)}</p></div></div>
       </div>
 
       {!hasCompletePeriod ? (
@@ -149,8 +149,8 @@ export default function ExpensesAnalysisPage() {
                 <TableRow className="bg-red-50 font-extrabold hover:bg-red-50" data-testid={preview ? "expenses-analysis-preview-grand-total-row" : "expenses-analysis-grand-total-row"}>
                   <TableCell data-testid={preview ? "expenses-analysis-preview-grand-total-date" : "expenses-analysis-grand-total-date"}>—</TableCell>
                   <TableCell className="text-lg" data-testid={preview ? "expenses-analysis-preview-grand-total-label" : "expenses-analysis-grand-total-label"}>الإجمالي العام</TableCell>
-                  {analysisCategories.map((category) => <TableCell key={category.key} className="text-lg" data-testid={`${preview ? "expenses-analysis-preview-grand-total" : "expenses-analysis-grand-total"}-${category.key}`}>{formatCurrency(categoryTotals[category.key] || 0)}</TableCell>)}
-                  <TableCell className="text-lg" data-testid={preview ? "expenses-analysis-preview-grand-total-row-total" : "expenses-analysis-grand-total-row-total"}>{formatCurrency(grandTotal)}</TableCell>
+                  {analysisCategories.map((category) => <TableCell key={category.key} className="text-lg" data-testid={`${preview ? "expenses-analysis-preview-grand-total" : "expenses-analysis-grand-total"}-${category.key}`}>{formatEgpLabel(categoryTotals[category.key] || 0)}</TableCell>)}
+                  <TableCell className="text-lg" data-testid={preview ? "expenses-analysis-preview-grand-total-row-total" : "expenses-analysis-grand-total-row-total"}>{formatEgpLabel(grandTotal)}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>
