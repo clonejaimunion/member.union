@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 import os
 import logging
 from pathlib import Path
@@ -68,6 +69,7 @@ ORGANIZATIONS = {
 
 MODULE_DEFINITIONS = {
     "deposits": "فوائد الودائع",
+    "journal_entries": "القيود اليومية",
     "reconciliations": "التسويات البنكية",
     "revenues": "الإيرادات",
     "expenses": "المصروفات",
@@ -407,6 +409,40 @@ class AccruedInterestReport(BaseModel):
     total_accrued_interest: float
     deposits_count: int
     rows: List[AccruedInterestRow]
+
+
+class JournalLine(BaseModel):
+    account_name: str = Field(..., min_length=2)
+    debit: float = Field(default=0, ge=0)
+    credit: float = Field(default=0, ge=0)
+    notes: Optional[str] = None
+
+
+class JournalEntryCreate(BaseModel):
+    entry_date: date
+    description: str = Field(..., min_length=2)
+    reference: Optional[str] = None
+    lines: List[JournalLine] = Field(..., min_length=2)
+
+
+class JournalEntryResponse(BaseModel):
+    id: str
+    organization_id: str
+    entry_number: int
+    entry_date: date
+    description: str
+    reference: Optional[str] = None
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation"] = "manual"
+    source_id: Optional[str] = None
+    status: Literal["approved"] = "approved"
+    is_auto: bool = False
+    lines: List[JournalLine]
+    total_debit: float
+    total_credit: float
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ReconciliationCheck(BaseModel):
@@ -1078,6 +1114,166 @@ def hydrate_deposit(document: dict) -> dict:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     return clean
+
+
+def hydrate_journal_entry(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    if isinstance(clean.get("entry_date"), str):
+        clean["entry_date"] = date.fromisoformat(clean["entry_date"])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float, float]:
+    normalized = []
+    for line in lines:
+        account_name = str(line.get("account_name") or "").strip()
+        debit = round(float(line.get("debit") or 0), 2)
+        credit = round(float(line.get("credit") or 0), 2)
+        if not account_name or (debit <= 0 and credit <= 0):
+            continue
+        if debit > 0 and credit > 0:
+            raise HTTPException(status_code=400, detail="كل سطر في القيد يجب أن يكون مدين أو دائن فقط")
+        normalized.append({"account_name": account_name, "debit": debit, "credit": credit, "notes": line.get("notes")})
+    total_debit = round(sum(line["debit"] for line in normalized), 2)
+    total_credit = round(sum(line["credit"] for line in normalized), 2)
+    if len(normalized) < 2 or total_debit <= 0 or total_debit != total_credit:
+        raise HTTPException(status_code=400, detail="القيد غير متوازن: إجمالي المدين يجب أن يساوي إجمالي الدائن")
+    return normalized, total_debit, total_credit
+
+
+async def next_journal_entry_number(organization_id: str) -> int:
+    counter = await db.journal_counters.find_one_and_update(
+        {"organization_id": organization_id},
+        {"$inc": {"next_number": 1}, "$setOnInsert": {"organization_id": organization_id}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int(counter.get("next_number", 1))
+
+
+async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None) -> dict:
+    organization_id = organization_id_or_default()
+    normalized_lines, total_debit, total_credit = normalize_journal_lines(lines)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    query = with_organization({"source_type": source_type, "source_id": source_id}, organization_id) if source_id else None
+    existing = await db.journal_entries.find_one(query, {"_id": 0}) if query else None
+    entry_number = int(existing["entry_number"]) if existing else await next_journal_entry_number(organization_id)
+    document = {
+        "id": existing.get("id") if existing else str(uuid.uuid4()),
+        "organization_id": organization_id,
+        "entry_number": entry_number,
+        "entry_date": entry_date.isoformat(),
+        "description": description.strip(),
+        "reference": reference,
+        "source_type": source_type,
+        "source_id": source_id,
+        "status": "approved",
+        "is_auto": is_auto,
+        "lines": normalized_lines,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "created_by": existing.get("created_by") if existing else (current_user or {}).get("id"),
+        "created_by_name": existing.get("created_by_name") if existing else (real_name_for_user(current_user or {}) if current_user else None),
+        "created_at": existing.get("created_at") if existing else now_iso,
+        "updated_at": now_iso,
+    }
+    await db.journal_entries.update_one(with_organization({"id": document["id"]}, organization_id), {"$set": document}, upsert=True)
+    return document
+
+
+async def delete_journal_for_source(source_type: str, source_id: str):
+    await db.journal_entries.delete_many(with_organization({"source_type": source_type, "source_id": source_id}))
+
+
+async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None):
+    amount = round(float(revenue.get("amount") or 0), 2)
+    if amount <= 0:
+        return
+    debit_account = "البنك" if (revenue.get("bank_collection_status") or "under_collection") == "collected" else "شيكات تحت التحصيل"
+    await save_journal_entry_document(
+        entry_date=revenue.get("issued_at") if isinstance(revenue.get("issued_at"), date) else date.fromisoformat(str(revenue.get("issued_at") or revenue.get("dated"))),
+        description=f"قيد تلقائي لإيراد رقم {revenue.get('receipt_number')}",
+        reference=revenue.get("receipt_number"),
+        source_type="revenue",
+        source_id=revenue.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[{"account_name": debit_account, "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
+    )
+
+
+async def journal_for_expense(expense: dict, current_user: Optional[dict] = None):
+    amount = round(float(expense.get("net_amount") or expense.get("total_amount") or 0), 2)
+    if amount <= 0:
+        return
+    credit_account = "البنك" if (expense.get("bank_payment_status") or "not_presented") == "paid" else "شيكات صادرة"
+    await save_journal_entry_document(
+        entry_date=expense.get("issued_at") if isinstance(expense.get("issued_at"), date) else date.fromisoformat(str(expense.get("issued_at"))),
+        description=f"قيد تلقائي لمصروف رقم {expense.get('expense_number')}",
+        reference=expense.get("expense_number"),
+        source_type="expense",
+        source_id=expense.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[{"account_name": "المصروفات", "debit": amount, "credit": 0}, {"account_name": credit_account, "debit": 0, "credit": amount}],
+    )
+
+
+async def journal_for_banking_expense(document: dict, current_user: Optional[dict] = None):
+    total = round(sum(float(item.get("total") if item.get("total") is not None else float(item.get("count") or 1) * float(item.get("amount") or 0)) for item in document.get("items", [])), 2)
+    source_id = f"{document.get('bank_id')}-{document.get('year')}-{document.get('month')}"
+    if total <= 0:
+        await delete_journal_for_source("banking_expense", source_id)
+        return
+    await save_journal_entry_document(
+        entry_date=date(int(document["year"]), int(document["month"]), 1),
+        description=f"قيد تلقائي لمصروفات بنكية {document.get('bank_name')} {document.get('month')}/{document.get('year')}",
+        reference=f"{document.get('year')}/{str(document.get('month')).zfill(2)}",
+        source_type="banking_expense",
+        source_id=source_id,
+        is_auto=True,
+        current_user=current_user,
+        lines=[{"account_name": "المصروفات البنكية", "debit": total, "credit": 0}, {"account_name": "البنك", "debit": 0, "credit": total}],
+    )
+
+
+async def journal_for_deposit_interest(deposit: dict, current_user: Optional[dict] = None):
+    amount = round(float(deposit.get("amount") or 0) * float(deposit.get("monthly_interest_rate") or 0) / 100, 2)
+    if amount <= 0:
+        return
+    created_value = deposit.get("creation_datetime")
+    entry_date = created_value.date() if isinstance(created_value, datetime) else datetime.fromisoformat(str(created_value)).date()
+    await save_journal_entry_document(
+        entry_date=entry_date,
+        description=f"قيد تلقائي لإثبات عوائد وديعة رقم {deposit.get('deposit_number')}",
+        reference=deposit.get("deposit_number"),
+        source_type="deposit_interest",
+        source_id=deposit.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[{"account_name": "عوائد ودائع مستحقة", "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
+    )
+
+
+async def journal_for_reconciliation(document: dict, current_user: Optional[dict] = None):
+    difference = round(abs(float(document.get("difference") or 0)), 2)
+    if difference <= 0:
+        await delete_journal_for_source("reconciliation", document.get("id"))
+        return
+    lines = [{"account_name": "المصروفات", "debit": difference, "credit": 0}, {"account_name": "البنك", "debit": 0, "credit": difference}] if float(document.get("difference") or 0) > 0 else [{"account_name": "البنك", "debit": difference, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": difference}]
+    await save_journal_entry_document(
+        entry_date=datetime.fromisoformat(document.get("created_at")).date(),
+        description=f"قيد تلقائي لفروق تسوية بنكية {document.get('period_label') or ''}".strip(),
+        reference=document.get("period_label") or document.get("id"),
+        source_type="reconciliation",
+        source_id=document.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=lines,
+    )
 
 
 def hydrate_reconciliation(document: dict) -> dict:
@@ -2311,7 +2507,7 @@ async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
 async def create_deposit(
     bank_id: str,
     payload: DepositCreate,
-    _: dict = Depends(require_permission("enter_deposits")),
+    current_user: dict = Depends(require_permission("enter_deposits")),
 ):
     await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
@@ -2340,6 +2536,7 @@ async def create_deposit(
         document[field_name] = serialize_datetime(document[field_name])
 
     await db.deposits.insert_one(document)
+    await journal_for_deposit_interest(document, current_user)
     return deposit
 
 
@@ -2360,7 +2557,7 @@ async def update_deposit(
     bank_id: str,
     deposit_id: str,
     payload: DepositCreate,
-    _: dict = Depends(require_permission("edit_deposits")),
+    current_user: dict = Depends(require_permission("edit_deposits")),
 ):
     await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
@@ -2382,6 +2579,7 @@ async def update_deposit(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
     updated = await db.deposits.find_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"_id": 0})
+    await journal_for_deposit_interest(updated, current_user)
     return Deposit(**hydrate_deposit(updated))
 
 
@@ -2398,6 +2596,7 @@ async def delete_deposit(
     result = await db.deposits.delete_one(with_organization({"id": deposit_id, "bank_id": bank_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
+    await delete_journal_for_source("deposit_interest", deposit_id)
     return {"message": "تم حذف الوديعة بالكامل", "deleted_deposit_id": deposit_id}
 
 
@@ -2582,7 +2781,7 @@ async def get_accrued_interest_report(
 async def create_bank_reconciliation(
     bank_id: str,
     payload: BankReconciliationCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
 ):
     await ensure_bank_async(bank_id)
     now = datetime.now(timezone.utc)
@@ -2602,6 +2801,7 @@ async def create_bank_reconciliation(
         }
     )
     await db.reconciliations.insert_one(document)
+    await journal_for_reconciliation(document, current_user)
     return BankReconciliation(**hydrate_reconciliation(document))
 
 
@@ -2635,7 +2835,7 @@ async def update_bank_reconciliation(
     bank_id: str,
     reconciliation_id: str,
     payload: BankReconciliationCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
 ):
     await ensure_bank_async(bank_id)
     existing = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
@@ -2650,6 +2850,7 @@ async def update_bank_reconciliation(
     updates.update({**computed, "updated_at": serialize_datetime(datetime.now(timezone.utc))})
     await db.reconciliations.update_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"$set": updates})
     updated = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
+    await journal_for_reconciliation(updated, current_user)
     return BankReconciliation(**hydrate_reconciliation(updated))
 
 
@@ -2663,18 +2864,20 @@ async def delete_bank_reconciliation(
     result = await db.reconciliations.delete_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
+    await delete_journal_for_source("reconciliation", reconciliation_id)
     return {"message": "تم حذف مذكرة التسوية", "deleted_reconciliation_id": reconciliation_id}
 
 
 @api_router.post("/revenues", response_model=Revenue)
 async def create_revenue(
     payload: RevenueCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
     now = datetime.now(timezone.utc)
     document = await revenue_document_from_payload(payload)
     document.update({"id": str(uuid.uuid4()), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
     await db.revenues.insert_one(document)
+    await journal_for_revenue(document, current_user)
     return Revenue(**hydrate_revenue(document))
 
 
@@ -2733,7 +2936,7 @@ async def get_revenue(
 async def update_revenue(
     revenue_id: str,
     payload: RevenueCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
     existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not existing:
@@ -2743,6 +2946,7 @@ async def update_revenue(
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
     await db.revenues.update_one(with_organization({"id": revenue_id}), {"$set": updates})
     updated = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
+    await journal_for_revenue(updated, current_user)
     return Revenue(**hydrate_revenue(updated))
 
 
@@ -2750,7 +2954,7 @@ async def update_revenue(
 async def update_revenue_banking_status(
     revenue_id: str,
     payload: RevenueBankingStatusUpdate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
     existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not existing:
@@ -2760,6 +2964,7 @@ async def update_revenue_banking_status(
         {"$set": {"bank_collection_status": payload.bank_collection_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
     )
     updated = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
+    await journal_for_revenue(updated, current_user)
     return Revenue(**hydrate_revenue(updated))
 
 
@@ -2774,18 +2979,20 @@ async def delete_revenue(
     result = await db.revenues.delete_one(with_organization({"id": revenue_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    await delete_journal_for_source("revenue", revenue_id)
     return {"message": "تم حذف الإيراد", "deleted_revenue_id": revenue_id}
 
 
 @api_router.post("/expenses", response_model=Expense)
 async def create_expense(
     payload: ExpenseCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
     now = datetime.now(timezone.utc)
     document = await expense_document_from_payload(payload)
     document.update({"id": str(uuid.uuid4()), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
     await db.expenses.insert_one(document)
+    await journal_for_expense(document, current_user)
     return Expense(**hydrate_expense(document))
 
 
@@ -2846,7 +3053,7 @@ async def get_expense(
 async def update_expense(
     expense_id: str,
     payload: ExpenseCreate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
     existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not existing:
@@ -2856,6 +3063,7 @@ async def update_expense(
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
     await db.expenses.update_one(with_organization({"id": expense_id}), {"$set": updates})
     updated = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
+    await journal_for_expense(updated, current_user)
     return Expense(**hydrate_expense(updated))
 
 
@@ -2863,7 +3071,7 @@ async def update_expense(
 async def update_expense_banking_status(
     expense_id: str,
     payload: ExpenseBankingStatusUpdate,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
     existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not existing:
@@ -2873,6 +3081,7 @@ async def update_expense_banking_status(
         {"$set": {"bank_payment_status": payload.bank_payment_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
     )
     updated = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
+    await journal_for_expense(updated, current_user)
     return Expense(**hydrate_expense(updated))
 
 
@@ -2887,6 +3096,7 @@ async def delete_expense(
     result = await db.expenses.delete_one(with_organization({"id": expense_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    await delete_journal_for_source("expense", expense_id)
     return {"message": "تم حذف المصروف", "deleted_expense_id": expense_id}
 
 
@@ -2916,7 +3126,7 @@ async def get_banking_manual_charges(
 @api_router.put("/banking-expenses/manual", response_model=BankingManualChargesResponse)
 async def save_banking_manual_charges(
     payload: BankingManualCharges,
-    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"])),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"])),
 ):
     bank = await ensure_bank_async(payload.bank_id)
     now = datetime.now(timezone.utc)
@@ -2943,7 +3153,65 @@ async def save_banking_manual_charges(
         {"$set": document},
         upsert=True,
     )
+    await journal_for_banking_expense(document, current_user)
     return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
+
+
+@api_router.get("/journal-entries", response_model=List[JournalEntryResponse])
+async def list_journal_entries(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    source_type: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if from_date or to_date:
+        query["entry_date"] = {}
+        if from_date:
+            query["entry_date"]["$gte"] = from_date.isoformat()
+        if to_date:
+            query["entry_date"]["$lte"] = to_date.isoformat()
+    if source_type:
+        query["source_type"] = source_type
+    documents = await db.journal_entries.find(query, {"_id": 0}).sort("entry_number", -1).to_list(2000)
+    return [JournalEntryResponse(**hydrate_journal_entry(document)) for document in documents]
+
+
+@api_router.post("/journal-entries", response_model=JournalEntryResponse)
+async def create_manual_journal_entry(payload: JournalEntryCreate, current_user: dict = Depends(require_admin)):
+    document = await save_journal_entry_document(
+        entry_date=payload.entry_date,
+        description=payload.description,
+        reference=payload.reference,
+        source_type="manual",
+        source_id=None,
+        is_auto=False,
+        current_user=current_user,
+        lines=[line.model_dump() for line in payload.lines],
+    )
+    return JournalEntryResponse(**hydrate_journal_entry(document))
+
+
+@api_router.put("/journal-entries/{entry_id}", response_model=JournalEntryResponse)
+async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, current_user: dict = Depends(require_admin)):
+    existing = await db.journal_entries.find_one(with_organization({"id": entry_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="القيد غير موجود")
+    normalized_lines, total_debit, total_credit = normalize_journal_lines([line.model_dump() for line in payload.lines])
+    updates = {
+        "entry_date": payload.entry_date.isoformat(),
+        "description": payload.description.strip(),
+        "reference": payload.reference,
+        "lines": normalized_lines,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "updated_by": current_user.get("id"),
+        "updated_by_name": real_name_for_user(current_user),
+        "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+    }
+    await db.journal_entries.update_one(with_organization({"id": entry_id}), {"$set": updates})
+    updated = await db.journal_entries.find_one(with_organization({"id": entry_id}), {"_id": 0})
+    return JournalEntryResponse(**hydrate_journal_entry(updated))
 
 
 @api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)

@@ -1,5 +1,6 @@
 export const moduleDefinitions = {
   deposits: "فوائد الودائع",
+  journal_entries: "القيود اليومية",
   reconciliations: "التسويات البنكية",
   revenues: "الإيرادات",
   expenses: "المصروفات",

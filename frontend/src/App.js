@@ -20,6 +20,7 @@ import ExpensesPage from "@/pages/ExpensesPage";
 import ExpensesAnalysisPage from "@/pages/ExpensesAnalysisPage";
 import BankingExpensesPage from "@/pages/BankingExpensesPage";
 import LedgerPage from "@/pages/LedgerPage";
+import JournalEntriesPage from "@/pages/JournalEntriesPage";
 import ElectronicInvoicePage from "@/pages/ElectronicInvoicePage";
 import { isModuleEnabled } from "@/lib/modules";
 
@@ -35,6 +36,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/expenses-analysis", title: `تحليل المصروفات - ${appTitle}` },
   { test: (path) => path === "/banking-expenses", title: `المصروفات البنكية - ${appTitle}` },
   { test: (path) => path === "/ledger", title: `دفتر الأستاذ - ${appTitle}` },
+  { test: (path) => path === "/journal-entries", title: `القيود اليومية - ${appTitle}` },
   { test: (path) => path === "/electronic-invoice", title: `الفاتورة الإلكترونية - ${appTitle}` },
   { test: (path) => path === "/secure-admin-control-panel", title: `لوحة الأدمن - ${appTitle}` },
   { test: (path) => path.endsWith("/register"), title: `تسجيل الودائع - ${appTitle}` },
@@ -101,6 +103,7 @@ function App() {
               <Route path="/expenses-analysis" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ModuleRoute moduleKey="expenses_analysis"><ExpensesAnalysisPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/banking-expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="banking_expenses"><BankingExpensesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/ledger" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="ledger"><LedgerPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/journal-entries" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="journal_entries"><JournalEntriesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/electronic-invoice" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ModuleRoute moduleKey="electronic_invoice"><ElectronicInvoicePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
               <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><ModuleRoute moduleKey="deposits"><DepositRegistration /></ModuleRoute></ProtectedRoute>} />
