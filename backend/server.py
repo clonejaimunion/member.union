@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +45,7 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
 ADMIN_USERNAME = os.environ['ADMIN_USERNAME']
 ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
+CORS_ORIGINS = [origin.strip() for origin in os.environ['CORS_ORIGINS'].split(',') if origin.strip()]
 APP_ASSETS_DIR = ROOT_DIR.parent / "app_assets"
 APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 APP_ICON_PATH = APP_ASSETS_DIR / "accounting_app_custom.ico"
@@ -1382,6 +1383,35 @@ def create_access_token(user: dict, purpose: str = "access", minutes: int = 480)
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def login_attempt_identifier(username: str, organization_id: str) -> str:
+    return f"{organization_id}:{username.strip().lower()}"
+
+
+async def ensure_login_not_locked(username: str, organization_id: str):
+    attempt = await db.login_attempts.find_one({"identifier": login_attempt_identifier(username, organization_id)}, {"_id": 0})
+    if not attempt or not attempt.get("locked_until"):
+        return
+    locked_until = datetime.fromisoformat(attempt["locked_until"])
+    if locked_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=429, detail="تم إيقاف تسجيل الدخول مؤقتاً بسبب محاولات خاطئة متكررة. حاول بعد دقيقة.")
+    await db.login_attempts.delete_one({"identifier": attempt["identifier"]})
+
+
+async def record_failed_login(username: str, organization_id: str):
+    identifier = login_attempt_identifier(username, organization_id)
+    now = datetime.now(timezone.utc)
+    attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"count": 0}
+    count = int(attempt.get("count", 0)) + 1
+    update = {"identifier": identifier, "username": username.strip(), "organization_id": organization_id, "count": count, "updated_at": serialize_datetime(now)}
+    if count >= 5:
+        update["locked_until"] = serialize_datetime(now + timedelta(seconds=60))
+    await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"created_at": serialize_datetime(now)}}, upsert=True)
+
+
+async def clear_failed_login(username: str, organization_id: str):
+    await db.login_attempts.delete_one({"identifier": login_attempt_identifier(username, organization_id)})
+
+
 async def get_current_user(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="يجب تسجيل الدخول أولاً")
@@ -1701,6 +1731,9 @@ async def ensure_default_admin():
             "updated_at": serialize_datetime(now),
         }
         if existing:
+            if not verify_password(ADMIN_INITIAL_PASSWORD, existing.get("password_hash", "")):
+                document["password_hash"] = hash_password(ADMIN_INITIAL_PASSWORD)
+                document["must_change_password"] = True
             await db.users.update_one({"id": existing["id"]}, {"$set": document})
             continue
         document.update({"id": str(uuid.uuid4()), "password_hash": hash_password(ADMIN_INITIAL_PASSWORD), "created_at": serialize_datetime(now)})
@@ -1733,6 +1766,7 @@ async def startup_tasks():
     await db.expenses.create_index("expense_number")
     await db.expenses.create_index("check_number")
     await db.expenses.create_index("transfer_number")
+    await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -1753,12 +1787,14 @@ async def download_setup_file():
 
 
 @api_router.post("/auth/login", response_model=AuthResponse)
-async def login(payload: LoginRequest):
+async def login(payload: LoginRequest, response: Response):
     organization_id = payload.organization_id.strip()
     if organization_id not in ORGANIZATIONS:
         raise HTTPException(status_code=400, detail="اختر جهة صحيحة قبل تسجيل الدخول")
+    await ensure_login_not_locked(payload.username, organization_id)
     user = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
+        await record_failed_login(payload.username, organization_id)
         raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
     if not user.get("is_active", False):
         raise HTTPException(status_code=403, detail="هذا المستخدم غير نشط")
@@ -1772,9 +1808,20 @@ async def login(payload: LoginRequest):
             )
         totp = pyotp.TOTP(user.get("totp_secret"))
         if not totp.verify(payload.otp_code, valid_window=1):
+            await record_failed_login(payload.username, organization_id)
             raise HTTPException(status_code=401, detail="كود المصادقة الثنائية غير صحيح")
 
     token = create_access_token(user)
+    await clear_failed_login(payload.username, organization_id)
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=480 * 60,
+        path="/",
+    )
     return AuthResponse(
         token=token,
         user=public_user(user),
@@ -3030,7 +3077,7 @@ if FRONTEND_BUILD_DIR.exists():
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +21,7 @@ import json
 import hashlib
 import secrets
 import subprocess
+from contextvars import ContextVar
 
 import bcrypt
 import jwt
@@ -44,10 +45,26 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
 ADMIN_USERNAME = os.environ['ADMIN_USERNAME']
 ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
+CORS_ORIGINS = [origin.strip() for origin in os.environ['CORS_ORIGINS'].split(',') if origin.strip()]
 APP_ASSETS_DIR = ROOT_DIR.parent / "app_assets"
 APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 APP_ICON_PATH = APP_ASSETS_DIR / "accounting_app_custom.ico"
 DEFAULT_SYSTEM_NAME = "نظام محاسبي متكامل"
+DEFAULT_ORGANIZATION_ID = "social-solidarity"
+CURRENT_ORGANIZATION_ID: ContextVar[Optional[str]] = ContextVar("current_organization_id", default=None)
+
+ORGANIZATIONS = {
+    "social-solidarity": {
+        "id": "social-solidarity",
+        "name": "مشروع التكافل الاجتماعي",
+        "login_label": "مشروع التكافل الاجتماعي",
+    },
+    "general-union": {
+        "id": "general-union",
+        "name": "النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الاراضي",
+        "login_label": "النقابة العامة",
+    },
+}
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -213,6 +230,8 @@ class UserPublic(BaseModel):
     id: str
     username: str
     role: str
+    organization_id: str
+    organization_name: str
     permissions: UserPermissions
     is_active: bool
     totp_enabled: bool = False
@@ -224,6 +243,7 @@ class UserPublic(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+    organization_id: str
     otp_code: Optional[str] = None
 
 
@@ -256,6 +276,9 @@ class ChangePasswordRequest(BaseModel):
 
 class AppSettingsResponse(BaseModel):
     system_name: str
+    organization_id: Optional[str] = None
+    organization_name: Optional[str] = None
+    organization_login_label: Optional[str] = None
     shortcut_icon_url: Optional[str] = None
     shortcut_icon_updated_at: Optional[str] = None
     shortcut_update_status: Optional[str] = None
@@ -264,6 +287,13 @@ class AppSettingsResponse(BaseModel):
 
 class AppSettingsUpdate(BaseModel):
     system_name: str = Field(..., min_length=2, max_length=120)
+    organization_name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+
+
+class OrganizationResponse(BaseModel):
+    id: str
+    name: str
+    login_label: str
 
 
 class TwoFactorSetupResponse(BaseModel):
@@ -666,11 +696,12 @@ def slugify_bank_name(name: str) -> str:
 
 
 async def get_all_banks() -> List[dict]:
-    deleted_documents = await db.deleted_banks.find({}, {"_id": 0, "id": 1}).to_list(500)
+    organization_id = organization_id_or_default()
+    deleted_documents = await db.deleted_banks.find(with_organization({}, organization_id), {"_id": 0, "id": 1}).to_list(500)
     deleted_ids = {document["id"] for document in deleted_documents}
-    settings_documents = await db.bank_settings.find({}, {"_id": 0}).to_list(500)
+    settings_documents = await db.bank_settings.find(with_organization({}, organization_id), {"_id": 0}).to_list(500)
     opening_balances = {document["bank_id"]: float(document.get("opening_balance", 0) or 0) for document in settings_documents}
-    custom_banks = await db.banks.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    custom_banks = await db.banks.find(with_organization({}, organization_id), {"_id": 0}).sort("created_at", 1).to_list(500)
     merged = list(BANKS.values()) + custom_banks
     seen = set()
     result = []
@@ -684,19 +715,20 @@ async def get_all_banks() -> List[dict]:
 
 
 async def ensure_bank_async(bank_id: str) -> dict:
-    deleted_bank = await db.deleted_banks.find_one({"id": bank_id}, {"_id": 0})
+    organization_id = organization_id_or_default()
+    deleted_bank = await db.deleted_banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0})
     if deleted_bank:
         raise HTTPException(status_code=404, detail="البنك محذوف أو غير موجود")
     bank = BANKS.get(bank_id)
     if bank:
-        setting = await db.bank_settings.find_one({"bank_id": bank_id}, {"_id": 0})
+        setting = await db.bank_settings.find_one(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0})
         clean_bank = dict(bank)
         clean_bank["opening_balance"] = float(setting.get("opening_balance", 0) or 0) if setting else 0
         return clean_bank
-    custom_bank = await db.banks.find_one({"id": bank_id}, {"_id": 0})
+    custom_bank = await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0})
     if not custom_bank:
         raise HTTPException(status_code=404, detail="البنك غير موجود")
-    setting = await db.bank_settings.find_one({"bank_id": bank_id}, {"_id": 0})
+    setting = await db.bank_settings.find_one(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0})
     custom_bank["opening_balance"] = float(setting.get("opening_balance", custom_bank.get("opening_balance", 0)) or 0) if setting else float(custom_bank.get("opening_balance", 0) or 0)
     return custom_bank
 
@@ -849,10 +881,10 @@ def build_tariff_document(bank: dict, rules: BankingTariffRules, source_type: st
 
 async def get_tariff_document(bank_id: str) -> dict:
     bank = await ensure_bank_async(bank_id)
-    document = await db.banking_tariffs.find_one({"bank_id": bank_id, "account_type": "companies"}, {"_id": 0})
+    document = await db.banking_tariffs.find_one(with_organization({"bank_id": bank_id, "account_type": "companies"}), {"_id": 0})
     if document:
         return document
-    return build_tariff_document(bank, default_tariff_rules(bank_id), notes="القيم الافتراضية الحالية", status="default")
+    return attach_organization(build_tariff_document(bank, default_tariff_rules(bank_id), notes="القيم الافتراضية الحالية", status="default"))
 
 
 def normalize_datetime(value: datetime) -> datetime:
@@ -863,6 +895,37 @@ def normalize_datetime(value: datetime) -> datetime:
 
 def serialize_datetime(value: datetime) -> str:
     return normalize_datetime(value).isoformat()
+
+
+def organization_id_or_default() -> str:
+    return CURRENT_ORGANIZATION_ID.get() or DEFAULT_ORGANIZATION_ID
+
+
+def with_organization(query: Optional[dict] = None, organization_id: Optional[str] = None) -> dict:
+    next_query = dict(query or {})
+    next_query["organization_id"] = organization_id or organization_id_or_default()
+    return next_query
+
+
+def attach_organization(document: dict, organization_id: Optional[str] = None) -> dict:
+    document["organization_id"] = organization_id or organization_id_or_default()
+    return document
+
+
+async def get_organization_document(organization_id: Optional[str] = None) -> dict:
+    org_id = organization_id or organization_id_or_default()
+    base = ORGANIZATIONS.get(org_id)
+    if not base:
+        raise HTTPException(status_code=404, detail="الجهة غير موجودة")
+    custom = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    return {**base, **(custom or {})}
+
+
+async def list_organization_documents() -> List[dict]:
+    result = []
+    for org_id in ORGANIZATIONS:
+        result.append(await get_organization_document(org_id))
+    return result
 
 
 def app_icon_url(updated_at: Optional[str] = None) -> Optional[str]:
@@ -892,8 +955,14 @@ async def get_app_settings_document() -> dict:
 
 
 def build_app_settings_response(document: dict) -> AppSettingsResponse:
+    organization_id = organization_id_or_default()
+    organization_name = document.get("organization_name")
+    organization_login_label = document.get("organization_login_label")
     return AppSettingsResponse(
         system_name=document.get("system_name") or DEFAULT_SYSTEM_NAME,
+        organization_id=organization_id,
+        organization_name=organization_name,
+        organization_login_label=organization_login_label,
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
         shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
         shortcut_update_status=document.get("shortcut_update_status"),
@@ -1013,13 +1082,13 @@ def hydrate_einvoice_document(document: dict) -> dict:
 
 
 async def get_einvoice_settings_document() -> dict:
-    document = await db.einvoice_settings.find_one({"id": "default"}, {"_id": 0})
+    document = await db.einvoice_settings.find_one(with_organization({"id": "default"}), {"_id": 0})
     if document:
         return document
     now = datetime.now(timezone.utc)
-    return {
+    return attach_organization({
         "id": "default",
-        "organization_name": "النقابة العامة للعاملين بالزراعة والري",
+        "organization_name": (await get_organization_document())["name"],
         "tax_registration_number": None,
         "address": None,
         "governorate": None,
@@ -1027,15 +1096,15 @@ async def get_einvoice_settings_document() -> dict:
         "default_tax_rate": 0,
         "auto_generate_from_collected_revenues": True,
         "updated_at": serialize_datetime(now),
-    }
+    })
 
 
 async def get_default_service_code(settings: dict) -> dict:
-    service = await db.einvoice_service_codes.find_one({"is_default": True}, {"_id": 0})
+    service = await db.einvoice_service_codes.find_one(with_organization({"is_default": True}), {"_id": 0})
     if service:
         return service
     now = datetime.now(timezone.utc)
-    service = {
+    service = attach_organization({
         "id": str(uuid.uuid4()),
         "code": "EGS-SERVICE-001",
         "name": "خدمة عامة",
@@ -1043,18 +1112,18 @@ async def get_default_service_code(settings: dict) -> dict:
         "is_default": True,
         "created_at": serialize_datetime(now),
         "updated_at": serialize_datetime(now),
-    }
+    })
     await db.einvoice_service_codes.insert_one(service.copy())
     return service
 
 
 async def find_or_create_einvoice_customer(name: str) -> dict:
     clean_name = (name or "عميل غير محدد").strip() or "عميل غير محدد"
-    customer = await db.einvoice_customers.find_one({"name": clean_name}, {"_id": 0})
+    customer = await db.einvoice_customers.find_one(with_organization({"name": clean_name}), {"_id": 0})
     if customer:
         return customer
     now = datetime.now(timezone.utc)
-    customer = {
+    customer = attach_organization({
         "id": str(uuid.uuid4()),
         "name": clean_name,
         "tax_number": None,
@@ -1065,7 +1134,7 @@ async def find_or_create_einvoice_customer(name: str) -> dict:
         "email": None,
         "created_at": serialize_datetime(now),
         "updated_at": serialize_datetime(now),
-    }
+    })
     await db.einvoice_customers.insert_one(customer.copy())
     return customer
 
@@ -1109,10 +1178,10 @@ def period_key(period_type: str, year: int, month: Optional[int] = None) -> str:
 async def is_period_locked(target_date: date) -> Optional[dict]:
     year = target_date.year
     month = target_date.month
-    yearly = await db.financial_periods.find_one({"period_type": "yearly", "year": year, "is_locked": True}, {"_id": 0})
+    yearly = await db.financial_periods.find_one(with_organization({"period_type": "yearly", "year": year, "is_locked": True}), {"_id": 0})
     if yearly:
         return yearly
-    monthly = await db.financial_periods.find_one({"period_type": "monthly", "year": year, "month": month, "is_locked": True}, {"_id": 0})
+    monthly = await db.financial_periods.find_one(with_organization({"period_type": "monthly", "year": year, "month": month, "is_locked": True}), {"_id": 0})
     return monthly
 
 
@@ -1143,7 +1212,7 @@ async def ensure_revenue_unique(payload: RevenueCreate, revenue_id: Optional[str
     if not receipt_number or not receipt_number.isdigit():
         raise HTTPException(status_code=400, detail="رقم الإذن يجب أن يكون أرقام فقط")
     base_exclusion = {"id": {"$ne": revenue_id}} if revenue_id else {}
-    if await db.revenues.find_one({"receipt_number": receipt_number, **base_exclusion}, {"_id": 0, "id": 1}):
+    if await db.revenues.find_one(with_organization({"receipt_number": receipt_number, **base_exclusion}), {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="رقم الإذن موجود بالفعل ولا يمكن تكراره")
 
     if payload.collection_method == "cash":
@@ -1153,13 +1222,13 @@ async def ensure_revenue_unique(payload: RevenueCreate, revenue_id: Optional[str
         check_number = normalize_digit_text(payload.check_number)
         if not check_number or not check_number.isdigit():
             raise HTTPException(status_code=400, detail="يجب إدخال رقم شيك صحيح عند اختيار شيك")
-        if await db.revenues.find_one({"check_number": check_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        if await db.revenues.find_one(with_organization({"check_number": check_number, **base_exclusion}), {"_id": 0, "id": 1}):
             raise HTTPException(status_code=400, detail="رقم الشيك موجود بالفعل ولا يمكن تكراره")
     elif payload.collection_method == "payment_order":
         payment_order_number = normalize_digit_text(payload.payment_order_number)
         if not payment_order_number or not payment_order_number.isdigit():
             raise HTTPException(status_code=400, detail="يجب إدخال رقم أمر الدفع عند اختيار أمر دفع")
-        if await db.revenues.find_one({"payment_order_number": payment_order_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        if await db.revenues.find_one(with_organization({"payment_order_number": payment_order_number, **base_exclusion}), {"_id": 0, "id": 1}):
             raise HTTPException(status_code=400, detail="رقم أمر الدفع موجود بالفعل ولا يمكن تكراره")
 
 
@@ -1170,6 +1239,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
     method = payload.collection_method
     return {
         "receipt_number": normalize_digit_text(payload.receipt_number),
+        "organization_id": organization_id_or_default(),
         "amount": round(float(payload.amount), 2),
         "collection_method": method,
         "supplier_name": payload.supplier_name.strip() if method == "cash" and payload.supplier_name else None,
@@ -1191,7 +1261,7 @@ async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str
     if not expense_number or not expense_number.isdigit():
         raise HTTPException(status_code=400, detail="رقم الإذن يجب أن يكون أرقام فقط")
     base_exclusion = {"id": {"$ne": expense_id}} if expense_id else {}
-    if await db.expenses.find_one({"expense_number": expense_number, **base_exclusion}, {"_id": 0, "id": 1}):
+    if await db.expenses.find_one(with_organization({"expense_number": expense_number, **base_exclusion}), {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="رقم الإذن موجود بالفعل داخل المصروفات ولا يمكن تكراره")
 
     if payload.payment_method == "cash":
@@ -1203,7 +1273,7 @@ async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str
             raise HTTPException(status_code=400, detail="يجب إدخال رقم شيك صحيح")
         if not payload.payee_name or not payload.payee_name.strip():
             raise HTTPException(status_code=400, detail="يجب إدخال اسم يصرف للسيد")
-        if await db.expenses.find_one({"check_number": check_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        if await db.expenses.find_one(with_organization({"check_number": check_number, **base_exclusion}), {"_id": 0, "id": 1}):
             raise HTTPException(status_code=400, detail="رقم الشيك موجود بالفعل داخل المصروفات ولا يمكن تكراره")
     elif payload.payment_method == "bank_transfer":
         transfer_number = normalize_digit_text(payload.transfer_number)
@@ -1211,7 +1281,7 @@ async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str
             raise HTTPException(status_code=400, detail="يجب إدخال رقم عملية التحويل")
         if not payload.transfer_to or not payload.transfer_to.strip():
             raise HTTPException(status_code=400, detail="يجب إدخال اسم الجهة التي تم التحويل إليها")
-        if await db.expenses.find_one({"transfer_number": transfer_number, **base_exclusion}, {"_id": 0, "id": 1}):
+        if await db.expenses.find_one(with_organization({"transfer_number": transfer_number, **base_exclusion}), {"_id": 0, "id": 1}):
             raise HTTPException(status_code=400, detail="رقم عملية التحويل موجود بالفعل داخل المصروفات ولا يمكن تكراره")
 
     if payload.expense_category == "death_benefits":
@@ -1237,6 +1307,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
     net_amount = round(gross_amount - total_deductions, 2)
     return {
         "expense_number": normalize_digit_text(payload.expense_number),
+        "organization_id": organization_id_or_default(),
         "organization_scope": payload.organization_scope,
         "expense_category": payload.expense_category,
         "payment_method": payload.payment_method,
@@ -1279,6 +1350,8 @@ def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
 
 def hydrate_user(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key not in {"_id", "password_hash", "totp_secret", "totp_pending_secret"}}
+    clean["organization_id"] = clean.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    clean["organization_name"] = clean.get("organization_name") or ORGANIZATIONS.get(clean["organization_id"], ORGANIZATIONS[DEFAULT_ORGANIZATION_ID])["name"]
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -1302,11 +1375,41 @@ def create_access_token(user: dict, purpose: str = "access", minutes: int = 480)
         "sub": user["id"],
         "username": user["username"],
         "role": user["role"],
+        "organization_id": user.get("organization_id") or DEFAULT_ORGANIZATION_ID,
         "purpose": purpose,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=minutes)).timestamp()),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def login_attempt_identifier(username: str, organization_id: str) -> str:
+    return f"{organization_id}:{username.strip().lower()}"
+
+
+async def ensure_login_not_locked(username: str, organization_id: str):
+    attempt = await db.login_attempts.find_one({"identifier": login_attempt_identifier(username, organization_id)}, {"_id": 0})
+    if not attempt or not attempt.get("locked_until"):
+        return
+    locked_until = datetime.fromisoformat(attempt["locked_until"])
+    if locked_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=429, detail="تم إيقاف تسجيل الدخول مؤقتاً بسبب محاولات خاطئة متكررة. حاول بعد دقيقة.")
+    await db.login_attempts.delete_one({"identifier": attempt["identifier"]})
+
+
+async def record_failed_login(username: str, organization_id: str):
+    identifier = login_attempt_identifier(username, organization_id)
+    now = datetime.now(timezone.utc)
+    attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"count": 0}
+    count = int(attempt.get("count", 0)) + 1
+    update = {"identifier": identifier, "username": username.strip(), "organization_id": organization_id, "count": count, "updated_at": serialize_datetime(now)}
+    if count >= 5:
+        update["locked_until"] = serialize_datetime(now + timedelta(seconds=60))
+    await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"created_at": serialize_datetime(now)}}, upsert=True)
+
+
+async def clear_failed_login(username: str, organization_id: str):
+    await db.login_attempts.delete_one({"identifier": login_attempt_identifier(username, organization_id)})
 
 
 async def get_current_user(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> dict:
@@ -1325,6 +1428,8 @@ async def get_current_user(authorization: Optional[str] = Header(default=None, a
     user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
     if not user or not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="المستخدم غير نشط أو غير موجود")
+    user["organization_id"] = user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    CURRENT_ORGANIZATION_ID.set(user["organization_id"])
     return user
 
 
@@ -1340,6 +1445,11 @@ async def get_public_app_settings():
     return build_app_settings_response(document)
 
 
+@api_router.get("/organizations/public", response_model=List[OrganizationResponse])
+async def list_public_organizations():
+    return [OrganizationResponse(**document) for document in await list_organization_documents()]
+
+
 @api_router.get("/app-settings/icon")
 async def get_app_icon():
     if not APP_ICON_PATH.exists():
@@ -1348,23 +1458,40 @@ async def get_app_icon():
 
 
 @api_router.get("/admin/app-settings", response_model=AppSettingsResponse)
-async def get_admin_app_settings(_: dict = Depends(require_admin)):
+async def get_admin_app_settings(admin_user: dict = Depends(require_admin)):
     document = await get_app_settings_document()
+    organization = await get_organization_document(admin_user.get("organization_id"))
+    document["organization_name"] = organization["name"]
+    document["organization_login_label"] = organization["login_label"]
     return build_app_settings_response(document)
 
 
 @api_router.put("/admin/app-settings", response_model=AppSettingsResponse)
-async def update_admin_app_settings(payload: AppSettingsUpdate, _: dict = Depends(require_admin)):
+async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict = Depends(require_admin)):
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     system_name = payload.system_name.strip()
     if len(system_name) < 2:
         raise HTTPException(status_code=400, detail="اسم النظام مطلوب")
+    organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
     await db.app_settings.update_one(
         {"id": "global"},
         {"$set": {"system_name": system_name, "updated_at": now_iso}, "$setOnInsert": {"id": "global", "created_at": now_iso}},
         upsert=True,
     )
+    if payload.organization_name is not None:
+        organization_name = payload.organization_name.strip()
+        if len(organization_name) < 2:
+            raise HTTPException(status_code=400, detail="اسم الجهة مطلوب")
+        await db.organizations.update_one(
+            {"id": organization_id},
+            {"$set": {"name": organization_name, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "login_label": ORGANIZATIONS[organization_id]["login_label"], "created_at": now_iso}},
+            upsert=True,
+        )
+        await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_name": organization_name, "updated_at": now_iso}})
     document = await get_app_settings_document()
+    organization = await get_organization_document(organization_id)
+    document["organization_name"] = organization["name"]
+    document["organization_login_label"] = organization["login_label"]
     return build_app_settings_response(document)
 
 
@@ -1524,7 +1651,7 @@ def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
 
 async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) -> Deposit:
     await ensure_bank_async(bank_id)
-    query = {"bank_id": bank_id}
+    query = with_organization({"bank_id": bank_id})
     if deposit_id:
         query["id"] = deposit_id
 
@@ -1537,7 +1664,7 @@ async def get_deposit_or_latest(bank_id: str, deposit_id: Optional[str] = None) 
 
 async def get_bank_deposits(bank_id: str) -> List[Deposit]:
     await ensure_bank_async(bank_id)
-    documents = await db.deposits.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    documents = await db.deposits.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
 
@@ -1565,11 +1692,13 @@ def calculate_previous_years(deposit: Deposit, current_year: int) -> tuple[List[
 
 
 async def ensure_default_admin():
-    await db.users.create_index("username", unique=True)
-    existing_admin = await db.users.find_one({"role": "admin"}, {"_id": 0})
-    if existing_admin:
-        return
-
+    try:
+        await db.users.drop_index("username_1")
+    except Exception:
+        pass
+    await db.users.update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID, "organization_name": ORGANIZATIONS[DEFAULT_ORGANIZATION_ID]["name"]}})
+    await db.users.create_index([("organization_id", 1), ("username", 1)], unique=True)
+    await ensure_organization_seed_data()
     now = datetime.now(timezone.utc)
     admin_permissions = UserPermissions(
         enter_deposits=True,
@@ -1580,33 +1709,64 @@ async def ensure_default_admin():
         manage_revenues=True,
         manage_expenses=True,
     ).model_dump()
-    await db.users.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "username": ADMIN_USERNAME,
-            "password_hash": hash_password(ADMIN_INITIAL_PASSWORD),
+    admin_accounts = [
+        (ADMIN_USERNAME, DEFAULT_ORGANIZATION_ID),
+        ("admin_takaful", "social-solidarity"),
+        ("admin_union", "general-union"),
+    ]
+    for username, organization_id in admin_accounts:
+        organization = await get_organization_document(organization_id)
+        existing = await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
+        document = {
+            "username": username,
+            "organization_id": organization_id,
+            "organization_name": organization["name"],
             "role": "admin",
             "permissions": admin_permissions,
             "is_active": True,
-            "totp_enabled": False,
-            "totp_secret": None,
-            "totp_pending_secret": None,
-            "must_change_password": True,
-            "created_at": serialize_datetime(now),
+            "totp_enabled": existing.get("totp_enabled", False) if existing else False,
+            "totp_secret": existing.get("totp_secret") if existing else None,
+            "totp_pending_secret": existing.get("totp_pending_secret") if existing else None,
+            "must_change_password": existing.get("must_change_password", True) if existing else True,
             "updated_at": serialize_datetime(now),
         }
-    )
+        if existing:
+            if not verify_password(ADMIN_INITIAL_PASSWORD, existing.get("password_hash", "")):
+                document["password_hash"] = hash_password(ADMIN_INITIAL_PASSWORD)
+                document["must_change_password"] = True
+            await db.users.update_one({"id": existing["id"]}, {"$set": document})
+            continue
+        document.update({"id": str(uuid.uuid4()), "password_hash": hash_password(ADMIN_INITIAL_PASSWORD), "created_at": serialize_datetime(now)})
+        await db.users.insert_one(document)
+
+
+async def ensure_organization_seed_data():
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    for organization in ORGANIZATIONS.values():
+        await db.organizations.update_one(
+            {"id": organization["id"]},
+            {"$setOnInsert": {**organization, "created_at": now_iso, "updated_at": now_iso}},
+            upsert=True,
+        )
+    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+    for collection_name in tenant_collections:
+        await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
 
 
 @app.on_event("startup")
 async def startup_tasks():
     await ensure_default_admin()
-    await db.revenues.create_index("receipt_number", unique=True)
-    await db.revenues.create_index("check_number")
-    await db.revenues.create_index("payment_order_number")
+    try:
+        await db.revenues.drop_index("receipt_number_1")
+    except Exception:
+        pass
+    await db.revenues.create_index([("organization_id", 1), ("receipt_number", 1)], unique=True)
+    await db.revenues.create_index([("organization_id", 1), ("check_number", 1)])
+    await db.revenues.create_index([("organization_id", 1), ("payment_order_number", 1)])
     await db.expenses.create_index("expense_number")
     await db.expenses.create_index("check_number")
     await db.expenses.create_index("transfer_number")
+    await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
@@ -1627,9 +1787,14 @@ async def download_setup_file():
 
 
 @api_router.post("/auth/login", response_model=AuthResponse)
-async def login(payload: LoginRequest):
-    user = await db.users.find_one({"username": payload.username.strip()}, {"_id": 0})
+async def login(payload: LoginRequest, response: Response):
+    organization_id = payload.organization_id.strip()
+    if organization_id not in ORGANIZATIONS:
+        raise HTTPException(status_code=400, detail="اختر جهة صحيحة قبل تسجيل الدخول")
+    await ensure_login_not_locked(payload.username, organization_id)
+    user = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
+        await record_failed_login(payload.username, organization_id)
         raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
     if not user.get("is_active", False):
         raise HTTPException(status_code=403, detail="هذا المستخدم غير نشط")
@@ -1643,9 +1808,20 @@ async def login(payload: LoginRequest):
             )
         totp = pyotp.TOTP(user.get("totp_secret"))
         if not totp.verify(payload.otp_code, valid_window=1):
+            await record_failed_login(payload.username, organization_id)
             raise HTTPException(status_code=401, detail="كود المصادقة الثنائية غير صحيح")
 
     token = create_access_token(user)
+    await clear_failed_login(payload.username, organization_id)
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=480 * 60,
+        path="/",
+    )
     return AuthResponse(
         token=token,
         user=public_user(user),
@@ -1660,20 +1836,24 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/admin/users", response_model=List[UserPublic])
-async def list_users(_: dict = Depends(require_admin)):
-    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def list_users(admin_user: dict = Depends(require_admin)):
+    users = await db.users.find(with_organization({}, admin_user.get("organization_id")), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [public_user(user) for user in users]
 
 
 @api_router.post("/admin/users", response_model=UserPublic)
-async def create_user(payload: UserCreate, _: dict = Depends(require_admin)):
-    existing = await db.users.find_one({"username": payload.username.strip()}, {"_id": 0})
+async def create_user(payload: UserCreate, admin_user: dict = Depends(require_admin)):
+    organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    organization = await get_organization_document(organization_id)
+    existing = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="اسم المستخدم موجود بالفعل")
     now = datetime.now(timezone.utc)
     document = {
         "id": str(uuid.uuid4()),
         "username": payload.username.strip(),
+        "organization_id": organization_id,
+        "organization_name": organization["name"],
         "password_hash": hash_password(payload.password),
         "role": "user",
         "permissions": payload.permissions.model_dump(),
@@ -1691,7 +1871,7 @@ async def create_user(payload: UserCreate, _: dict = Depends(require_admin)):
 
 @api_router.put("/admin/users/{user_id}", response_model=UserPublic)
 async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depends(require_admin)):
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     if user.get("role") == "admin" and user.get("id") != admin_user.get("id"):
@@ -1706,19 +1886,19 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
     if payload.is_active is not None and user.get("role") != "admin":
         updates["is_active"] = payload.is_active
 
-    await db.users.update_one({"id": user_id}, {"$set": updates})
-    updated = await db.users.find_one({"id": user_id}, {"_id": 0})
+    await db.users.update_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"$set": updates})
+    updated = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
     return public_user(updated)
 
 
 @api_router.delete("/admin/users/{user_id}")
 async def delete_user(user_id: str, admin_user: dict = Depends(require_admin)):
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     if user.get("role") == "admin" or user.get("id") == admin_user.get("id"):
         raise HTTPException(status_code=403, detail="لا يمكن حذف حساب الأدمن")
-    result = await db.users.delete_one({"id": user_id})
+    result = await db.users.delete_one(with_organization({"id": user_id}, admin_user.get("organization_id")))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     return {"message": "تم حذف المستخدم", "deleted_user_id": user_id}
@@ -1785,16 +1965,18 @@ async def get_banks(_: dict = Depends(get_current_user)):
 
 @api_router.post("/admin/banks", response_model=Bank)
 async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
     bank_id_base = slugify_bank_name(payload.name)
     bank_id = bank_id_base
     suffix = 1
-    while BANKS.get(bank_id) or await db.banks.find_one({"id": bank_id}, {"_id": 0}):
+    while BANKS.get(bank_id) or await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0}):
         suffix += 1
         bank_id = f"{bank_id_base}-{suffix}"
 
     now = datetime.now(timezone.utc)
     bank_doc = {
         "id": bank_id,
+        "organization_id": organization_id,
         "name": payload.name.strip(),
         "short_name": (payload.code or payload.name[:3]).strip().upper(),
         "code": (payload.code or bank_id.upper()).strip().upper(),
@@ -1807,8 +1989,9 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
     }
     await db.banks.insert_one(bank_doc)
     default_tariff = build_tariff_document(bank_doc, default_tariff_rules(bank_id), notes="تعريفة افتراضية لبنك جديد لحين رفع ملف التعريفة", status="default")
+    default_tariff = attach_organization(default_tariff, organization_id)
     await db.banking_tariffs.update_one(
-        {"bank_id": bank_id, "account_type": "companies"},
+        with_organization({"bank_id": bank_id, "account_type": "companies"}, organization_id),
         {"$set": default_tariff},
         upsert=True,
     )
@@ -1817,16 +2000,17 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
 
 @api_router.put("/admin/banks/{bank_id}/opening-balance", response_model=Bank)
 async def update_bank_opening_balance(bank_id: str, payload: BankOpeningBalanceUpdate, _: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
     bank = await ensure_bank_async(bank_id)
     opening_balance = round(float(payload.opening_balance or 0), 2)
     now = datetime.now(timezone.utc)
     await db.bank_settings.update_one(
-        {"bank_id": bank_id},
-        {"$set": {"bank_id": bank_id, "opening_balance": opening_balance, "updated_at": serialize_datetime(now)}},
+        with_organization({"bank_id": bank_id}, organization_id),
+        {"$set": {"bank_id": bank_id, "organization_id": organization_id, "opening_balance": opening_balance, "updated_at": serialize_datetime(now)}},
         upsert=True,
     )
-    if await db.banks.find_one({"id": bank_id}, {"_id": 0}):
-        await db.banks.update_one({"id": bank_id}, {"$set": {"opening_balance": opening_balance, "updated_at": serialize_datetime(now)}})
+    if await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0}):
+        await db.banks.update_one(with_organization({"id": bank_id}, organization_id), {"$set": {"opening_balance": opening_balance, "updated_at": serialize_datetime(now)}})
     bank["opening_balance"] = opening_balance
     return Bank(**{key: value for key, value in bank.items() if key not in {"created_at", "updated_at"}})
 
@@ -1863,8 +2047,8 @@ async def save_admin_banking_tariff(bank_id: str, rules: BankingTariffRules, _: 
     )
     document["created_at"] = existing.get("created_at") or document["created_at"]
     await db.banking_tariffs.update_one(
-        {"bank_id": bank_id, "account_type": "companies"},
-        {"$set": document},
+        with_organization({"bank_id": bank_id, "account_type": "companies"}),
+        {"$set": attach_organization(document)},
         upsert=True,
     )
     return BankingTariffResponse(**hydrate_banking_manual_charges(document))
@@ -1909,8 +2093,8 @@ async def extract_admin_banking_tariff(
             status="extracted",
         )
         await db.banking_tariffs.update_one(
-            {"bank_id": bank_id, "account_type": "companies"},
-            {"$set": document},
+            with_organization({"bank_id": bank_id, "account_type": "companies"}),
+            {"$set": attach_organization(document)},
             upsert=True,
         )
         return BankingTariffResponse(**hydrate_banking_manual_charges(document))
@@ -1928,8 +2112,8 @@ async def extract_admin_banking_tariff(
             status="failed",
         )
         await db.banking_tariffs.update_one(
-            {"bank_id": bank_id, "account_type": "companies"},
-            {"$set": document},
+            with_organization({"bank_id": bank_id, "account_type": "companies"}),
+            {"$set": attach_organization(document)},
             upsert=True,
         )
         return BankingTariffResponse(**hydrate_banking_manual_charges(document))
@@ -1937,22 +2121,23 @@ async def extract_admin_banking_tariff(
 
 @api_router.delete("/admin/banks/{bank_id}")
 async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
-    bank = BANKS.get(bank_id) or await db.banks.find_one({"id": bank_id}, {"_id": 0})
+    organization_id = organization_id_or_default()
+    bank = BANKS.get(bank_id) or await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0})
     if not bank:
         raise HTTPException(status_code=404, detail="البنك غير موجود")
 
     now = datetime.now(timezone.utc)
     await db.deleted_banks.update_one(
-        {"id": bank_id},
-        {"$set": {"id": bank_id, "name": bank.get("name"), "deleted_at": serialize_datetime(now)}},
+        with_organization({"id": bank_id}, organization_id),
+        {"$set": {"id": bank_id, "organization_id": organization_id, "name": bank.get("name"), "deleted_at": serialize_datetime(now)}},
         upsert=True,
     )
-    await db.banks.delete_one({"id": bank_id})
-    await db.banking_tariffs.delete_many({"bank_id": bank_id})
-    deposits_result = await db.deposits.delete_many({"bank_id": bank_id})
-    reconciliations_result = await db.reconciliations.delete_many({"bank_id": bank_id})
-    revenues_result = await db.revenues.delete_many({"bank_id": bank_id})
-    expenses_result = await db.expenses.delete_many({"bank_id": bank_id})
+    await db.banks.delete_one(with_organization({"id": bank_id}, organization_id))
+    await db.banking_tariffs.delete_many(with_organization({"bank_id": bank_id}, organization_id))
+    deposits_result = await db.deposits.delete_many(with_organization({"bank_id": bank_id}, organization_id))
+    reconciliations_result = await db.reconciliations.delete_many(with_organization({"bank_id": bank_id}, organization_id))
+    revenues_result = await db.revenues.delete_many(with_organization({"bank_id": bank_id}, organization_id))
+    expenses_result = await db.expenses.delete_many(with_organization({"bank_id": bank_id}, organization_id))
     return {
         "message": "تم حذف البنك وكل بياناته بالكامل",
         "deleted_bank_id": bank_id,
@@ -1991,6 +2176,7 @@ async def create_deposit(
         updated_at=now,
     )
     document = deposit.model_dump()
+    attach_organization(document)
     for field_name in ["creation_datetime", "maturity_datetime", "created_at", "updated_at"]:
         document[field_name] = serialize_datetime(document[field_name])
 
@@ -2001,7 +2187,7 @@ async def create_deposit(
 @api_router.get("/banks/{bank_id}/deposits", response_model=List[Deposit])
 async def list_deposits(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
     await ensure_bank_async(bank_id)
-    documents = await db.deposits.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    documents = await db.deposits.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
 
@@ -2033,10 +2219,10 @@ async def update_deposit(
         "monthly_interest_rate": payload.monthly_interest_rate,
         "updated_at": serialize_datetime(datetime.now(timezone.utc)),
     }
-    result = await db.deposits.update_one({"id": deposit_id, "bank_id": bank_id}, {"$set": updates})
+    result = await db.deposits.update_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
-    updated = await db.deposits.find_one({"id": deposit_id, "bank_id": bank_id}, {"_id": 0})
+    updated = await db.deposits.find_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"_id": 0})
     return Deposit(**hydrate_deposit(updated))
 
 
@@ -2047,10 +2233,10 @@ async def delete_deposit(
     _: dict = Depends(require_admin),
 ):
     await ensure_bank_async(bank_id)
-    existing = await db.deposits.find_one({"id": deposit_id, "bank_id": bank_id}, {"_id": 0})
+    existing = await db.deposits.find_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"_id": 0})
     if existing and existing.get("creation_datetime"):
         await ensure_period_is_open(datetime.fromisoformat(existing["creation_datetime"]).date())
-    result = await db.deposits.delete_one({"id": deposit_id, "bank_id": bank_id})
+    result = await db.deposits.delete_one(with_organization({"id": deposit_id, "bank_id": bank_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
     return {"message": "تم حذف الوديعة بالكامل", "deleted_deposit_id": deposit_id}
@@ -2250,6 +2436,7 @@ async def create_bank_reconciliation(
         {
             "id": str(uuid.uuid4()),
             "bank_id": bank_id,
+            "organization_id": organization_id_or_default(),
             **computed,
             "created_at": serialize_datetime(now),
             "updated_at": serialize_datetime(now),
@@ -2262,14 +2449,14 @@ async def create_bank_reconciliation(
 @api_router.get("/banks/{bank_id}/reconciliations", response_model=List[BankReconciliation])
 async def list_bank_reconciliations(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
-    documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    documents = await db.reconciliations.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [BankReconciliation(**hydrate_reconciliation(document)) for document in documents]
 
 
 @api_router.get("/banks/{bank_id}/reconciliations/latest", response_model=BankReconciliation)
 async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
-    documents = await db.reconciliations.find({"bank_id": bank_id}, {"_id": 0}).sort("created_at", -1).to_list(1)
+    documents = await db.reconciliations.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(1)
     if not documents:
         raise HTTPException(status_code=404, detail="لا توجد مذكرات تسوية لهذا البنك")
     return BankReconciliation(**hydrate_reconciliation(documents[0]))
@@ -2278,7 +2465,7 @@ async def get_latest_bank_reconciliation(bank_id: str, _: dict = Depends(require
 @api_router.get("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
 async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
-    document = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    document = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
     if not document:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
     return BankReconciliation(**hydrate_reconciliation(document))
@@ -2292,7 +2479,7 @@ async def update_bank_reconciliation(
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_reconciliations"])),
 ):
     await ensure_bank_async(bank_id)
-    existing = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    existing = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
 
@@ -2302,8 +2489,8 @@ async def update_bank_reconciliation(
         for item in updates[list_name]:
             item["check_date"] = serialize_datetime(item["check_date"])
     updates.update({**computed, "updated_at": serialize_datetime(datetime.now(timezone.utc))})
-    await db.reconciliations.update_one({"bank_id": bank_id, "id": reconciliation_id}, {"$set": updates})
-    updated = await db.reconciliations.find_one({"bank_id": bank_id, "id": reconciliation_id}, {"_id": 0})
+    await db.reconciliations.update_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"$set": updates})
+    updated = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
     return BankReconciliation(**hydrate_reconciliation(updated))
 
 
@@ -2314,7 +2501,7 @@ async def delete_bank_reconciliation(
     _: dict = Depends(require_admin),
 ):
     await ensure_bank_async(bank_id)
-    result = await db.reconciliations.delete_one({"bank_id": bank_id, "id": reconciliation_id})
+    result = await db.reconciliations.delete_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
     return {"message": "تم حذف مذكرة التسوية", "deleted_reconciliation_id": reconciliation_id}
@@ -2340,7 +2527,7 @@ async def list_revenues(
     to_date: Optional[date] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
 ):
-    query = {}
+    query = with_organization({})
     if bank_id:
         await ensure_bank_async(bank_id)
         query["bank_id"] = bank_id
@@ -2368,7 +2555,7 @@ async def search_revenues(
         {"check_number": digit_query},
         {"payment_order_number": digit_query},
     ]
-    documents = await db.revenues.find({"$or": conditions}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    documents = await db.revenues.find(with_organization({"$or": conditions}), {"_id": 0}).sort("created_at", -1).to_list(50)
     return [Revenue(**hydrate_revenue(document)) for document in documents]
 
 
@@ -2377,7 +2564,7 @@ async def get_revenue(
     revenue_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
 ):
-    document = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    document = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not document:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
     return Revenue(**hydrate_revenue(document))
@@ -2389,14 +2576,14 @@ async def update_revenue(
     payload: RevenueCreate,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
-    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
     await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     updates = await revenue_document_from_payload(payload, revenue_id)
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
-    await db.revenues.update_one({"id": revenue_id}, {"$set": updates})
-    updated = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    await db.revenues.update_one(with_organization({"id": revenue_id}), {"$set": updates})
+    updated = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     return Revenue(**hydrate_revenue(updated))
 
 
@@ -2406,14 +2593,14 @@ async def update_revenue_banking_status(
     payload: RevenueBankingStatusUpdate,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
-    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
     await db.revenues.update_one(
-        {"id": revenue_id},
+        with_organization({"id": revenue_id}),
         {"$set": {"bank_collection_status": payload.bank_collection_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
     )
-    updated = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    updated = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     return Revenue(**hydrate_revenue(updated))
 
 
@@ -2422,10 +2609,10 @@ async def delete_revenue(
     revenue_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
-    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if existing and existing.get("issued_at"):
         await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
-    result = await db.revenues.delete_one({"id": revenue_id})
+    result = await db.revenues.delete_one(with_organization({"id": revenue_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
     return {"message": "تم حذف الإيراد", "deleted_revenue_id": revenue_id}
@@ -2451,7 +2638,7 @@ async def list_expenses(
     to_date: Optional[date] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
 ):
-    query = {}
+    query = with_organization({})
     if bank_id:
         await ensure_bank_async(bank_id)
         query["bank_id"] = bank_id
@@ -2481,7 +2668,7 @@ async def search_expenses(
         {"payee_name": {"$regex": cleaned, "$options": "i"}},
         {"transfer_to": {"$regex": cleaned, "$options": "i"}},
     ]
-    documents = await db.expenses.find({"$or": conditions}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    documents = await db.expenses.find(with_organization({"$or": conditions}), {"_id": 0}).sort("created_at", -1).to_list(50)
     return [Expense(**hydrate_expense(document)) for document in documents]
 
 
@@ -2490,7 +2677,7 @@ async def get_expense(
     expense_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
 ):
-    document = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    document = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not document:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
     return Expense(**hydrate_expense(document))
@@ -2502,14 +2689,14 @@ async def update_expense(
     payload: ExpenseCreate,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
-    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
     await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     updates = await expense_document_from_payload(payload, expense_id)
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
-    await db.expenses.update_one({"id": expense_id}, {"$set": updates})
-    updated = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    await db.expenses.update_one(with_organization({"id": expense_id}), {"$set": updates})
+    updated = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     return Expense(**hydrate_expense(updated))
 
 
@@ -2519,14 +2706,14 @@ async def update_expense_banking_status(
     payload: ExpenseBankingStatusUpdate,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
-    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
     await db.expenses.update_one(
-        {"id": expense_id},
+        with_organization({"id": expense_id}),
         {"$set": {"bank_payment_status": payload.bank_payment_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
     )
-    updated = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    updated = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     return Expense(**hydrate_expense(updated))
 
 
@@ -2535,10 +2722,10 @@ async def delete_expense(
     expense_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
-    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if existing and existing.get("issued_at"):
         await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
-    result = await db.expenses.delete_one({"id": expense_id})
+    result = await db.expenses.delete_one(with_organization({"id": expense_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
     return {"message": "تم حذف المصروف", "deleted_expense_id": expense_id}
@@ -2552,10 +2739,11 @@ async def get_banking_manual_charges(
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
     bank = await ensure_bank_async(bank_id)
-    document = await db.banking_manual_charges.find_one({"bank_id": bank_id, "year": year, "month": month}, {"_id": 0})
+    document = await db.banking_manual_charges.find_one(with_organization({"bank_id": bank_id, "year": year, "month": month}), {"_id": 0})
     if not document:
         document = {
             "id": f"{bank_id}-{year}-{month}",
+            "organization_id": organization_id_or_default(),
             "bank_id": bank_id,
             "bank_name": bank["name"],
             "year": year,
@@ -2579,6 +2767,7 @@ async def save_banking_manual_charges(
     now = datetime.now(timezone.utc)
     document = {
         "id": f"{payload.bank_id}-{payload.year}-{payload.month}",
+        "organization_id": organization_id_or_default(),
         "bank_id": payload.bank_id,
         "bank_name": bank["name"],
         "year": payload.year,
@@ -2591,7 +2780,7 @@ async def save_banking_manual_charges(
         "updated_at": serialize_datetime(now),
     }
     await db.banking_manual_charges.update_one(
-        {"bank_id": payload.bank_id, "year": payload.year, "month": payload.month},
+        with_organization({"bank_id": payload.bank_id, "year": payload.year, "month": payload.month}),
         {"$set": document},
         upsert=True,
     )
@@ -2606,33 +2795,33 @@ async def get_electronic_invoice_settings(_: dict = Depends(get_current_user)):
 @api_router.put("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
 async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _: dict = Depends(require_admin)):
     now = datetime.now(timezone.utc)
-    document = {"id": "default", **payload.model_dump(), "updated_at": serialize_datetime(now)}
-    await db.einvoice_settings.update_one({"id": "default"}, {"$set": document}, upsert=True)
+    document = attach_organization({"id": "default", **payload.model_dump(), "updated_at": serialize_datetime(now)})
+    await db.einvoice_settings.update_one(with_organization({"id": "default"}), {"$set": document}, upsert=True)
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(document))
 
 
 @api_router.get("/electronic-invoice/customers", response_model=List[ElectronicCustomer])
 async def list_electronic_customers(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
-    documents = await db.einvoice_customers.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    documents = await db.einvoice_customers.find(with_organization({}), {"_id": 0}).sort("name", 1).to_list(1000)
     return [ElectronicCustomer(**hydrate_einvoice_document(document)) for document in documents]
 
 
 @api_router.post("/electronic-invoice/customers", response_model=ElectronicCustomer)
 async def create_electronic_customer(payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
     now = datetime.now(timezone.utc)
-    document = {"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)}
+    document = attach_organization({"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
     await db.einvoice_customers.insert_one(document.copy())
     return ElectronicCustomer(**hydrate_einvoice_document(document))
 
 
 @api_router.put("/electronic-invoice/customers/{customer_id}", response_model=ElectronicCustomer)
 async def update_electronic_customer(customer_id: str, payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
-    existing = await db.einvoice_customers.find_one({"id": customer_id}, {"_id": 0})
+    existing = await db.einvoice_customers.find_one(with_organization({"id": customer_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="العميل غير موجود")
     updates = {**payload.model_dump(), "updated_at": serialize_datetime(datetime.now(timezone.utc))}
-    await db.einvoice_customers.update_one({"id": customer_id}, {"$set": updates})
-    updated = await db.einvoice_customers.find_one({"id": customer_id}, {"_id": 0})
+    await db.einvoice_customers.update_one(with_organization({"id": customer_id}), {"$set": updates})
+    updated = await db.einvoice_customers.find_one(with_organization({"id": customer_id}), {"_id": 0})
     return ElectronicCustomer(**hydrate_einvoice_document(updated))
 
 
@@ -2640,7 +2829,7 @@ async def update_electronic_customer(customer_id: str, payload: ElectronicCustom
 async def list_electronic_service_codes(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
     settings = await get_einvoice_settings_document()
     await get_default_service_code(settings)
-    documents = await db.einvoice_service_codes.find({}, {"_id": 0}).sort("is_default", -1).sort("name", 1).to_list(1000)
+    documents = await db.einvoice_service_codes.find(with_organization({}), {"_id": 0}).sort("is_default", -1).sort("name", 1).to_list(1000)
     return [ElectronicServiceCode(**hydrate_einvoice_document(document)) for document in documents]
 
 
@@ -2648,8 +2837,8 @@ async def list_electronic_service_codes(_: dict = Depends(require_any_permission
 async def create_electronic_service_code(payload: ElectronicServiceCodeCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
     now = datetime.now(timezone.utc)
     if payload.is_default:
-        await db.einvoice_service_codes.update_many({}, {"$set": {"is_default": False}})
-    document = {"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)}
+        await db.einvoice_service_codes.update_many(with_organization({}), {"$set": {"is_default": False}})
+    document = attach_organization({"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
     await db.einvoice_service_codes.insert_one(document.copy())
     return ElectronicServiceCode(**hydrate_einvoice_document(document))
 
@@ -2661,7 +2850,7 @@ async def list_electronic_invoices(
     to_date: Optional[date] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
 ):
-    query = {}
+    query = with_organization({})
     if status and status != "all":
         query["status"] = status
     if from_date or to_date:
@@ -2678,11 +2867,11 @@ async def list_electronic_invoices(
 async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
     settings = await get_einvoice_settings_document()
     service = await get_default_service_code(settings)
-    revenues = await db.revenues.find({"bank_collection_status": "collected"}, {"_id": 0}).sort("issued_at", 1).to_list(1000)
+    revenues = await db.revenues.find(with_organization({"bank_collection_status": "collected"}), {"_id": 0}).sort("issued_at", 1).to_list(1000)
     generated = []
     now = datetime.now(timezone.utc)
     for revenue in revenues:
-        if await db.electronic_invoices.find_one({"revenue_id": revenue["id"]}, {"_id": 0, "id": 1}):
+        if await db.electronic_invoices.find_one(with_organization({"revenue_id": revenue["id"]}), {"_id": 0, "id": 1}):
             continue
         bank = await ensure_bank_async(revenue["bank_id"])
         customer_name = revenue.get("supplier_name") or revenue.get("value") or "عميل غير محدد"
@@ -2693,6 +2882,7 @@ async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_a
         status, notes = invoice_status_from_data(settings, customer, service)
         document = {
             "id": str(uuid.uuid4()),
+            "organization_id": organization_id_or_default(),
             "revenue_id": revenue["id"],
             "invoice_number": f"EINV-{revenue.get('receipt_number')}",
             "issue_date": revenue.get("issued_at") or revenue.get("dated"),
@@ -2721,23 +2911,23 @@ async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_a
 
 @api_router.patch("/electronic-invoices/{invoice_id}/status", response_model=ElectronicInvoice)
 async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicInvoiceStatusUpdate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
-    existing = await db.electronic_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    existing = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
-    await db.electronic_invoices.update_one({"id": invoice_id}, {"$set": {"status": payload.status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
-    updated = await db.electronic_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    await db.electronic_invoices.update_one(with_organization({"id": invoice_id}), {"$set": {"status": payload.status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    updated = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
     return ElectronicInvoice(**hydrate_einvoice_document(updated))
 
 
 @api_router.get("/admin/security/audit-logs", response_model=List[AuditLogResponse])
 async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000), _: dict = Depends(require_admin)):
-    documents = await db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    documents = await db.audit_logs.find(with_organization({}), {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     return [AuditLogResponse(**hydrate_einvoice_document(document)) for document in documents]
 
 
 @api_router.get("/admin/security/periods", response_model=List[PeriodLockResponse])
 async def list_financial_periods(_: dict = Depends(get_current_user)):
-    documents = await db.financial_periods.find({}, {"_id": 0}).sort("year", -1).sort("month", -1).to_list(1000)
+    documents = await db.financial_periods.find(with_organization({}), {"_id": 0}).sort("year", -1).sort("month", -1).to_list(1000)
     return [PeriodLockResponse(**hydrate_einvoice_document(document)) for document in documents]
 
 
@@ -2754,7 +2944,8 @@ async def save_financial_period(payload: PeriodLockCreate, current_user: dict = 
         raise HTTPException(status_code=400, detail="يجب كتابة سبب فتح الفترة")
     now = datetime.now(timezone.utc)
     document = {
-        "id": period_key(payload.period_type, payload.year, payload.month),
+        "id": f"{organization_id_or_default()}-{period_key(payload.period_type, payload.year, payload.month)}",
+        "organization_id": organization_id_or_default(),
         "period_type": payload.period_type,
         "year": payload.year,
         "month": payload.month if payload.period_type == "monthly" else None,
@@ -2765,16 +2956,16 @@ async def save_financial_period(payload: PeriodLockCreate, current_user: dict = 
         "created_at": serialize_datetime(now),
         "updated_at": serialize_datetime(now),
     }
-    existing = await db.financial_periods.find_one({"id": document["id"]}, {"_id": 0})
+    existing = await db.financial_periods.find_one(with_organization({"id": document["id"]}), {"_id": 0})
     if existing:
         document["created_at"] = existing.get("created_at", document["created_at"])
-    await db.financial_periods.update_one({"id": document["id"]}, {"$set": document}, upsert=True)
+    await db.financial_periods.update_one(with_organization({"id": document["id"]}), {"$set": document}, upsert=True)
     return PeriodLockResponse(**hydrate_einvoice_document(document))
 
 
 @api_router.get("/admin/security/report-approvals", response_model=List[ReportApprovalResponse])
 async def list_report_approvals(_: dict = Depends(require_admin)):
-    documents = await db.report_approvals.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    documents = await db.report_approvals.find(with_organization({}), {"_id": 0}).sort("created_at", -1).to_list(1000)
     return [ReportApprovalResponse(**hydrate_einvoice_document(document)) for document in documents]
 
 
@@ -2785,6 +2976,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     approver_name = real_name_for_user(current_user)
     document = {
         "id": str(uuid.uuid4()),
+        "organization_id": organization_id_or_default(),
         "approval_number": approval_number,
         "report_type": payload.report_type,
         "report_name": payload.report_name,
@@ -2810,7 +3002,7 @@ BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "deposi
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
 async def list_backups(_: dict = Depends(require_admin)):
-    documents = await db.backup_records.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    documents = await db.backup_records.find(with_organization({}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [BackupRecord(**hydrate_einvoice_document(document)) for document in documents]
 
 
@@ -2818,7 +3010,10 @@ async def list_backups(_: dict = Depends(require_admin)):
 async def create_backup(payload: BackupCreate, current_user: dict = Depends(require_admin)):
     export_data = {}
     for collection_name in BACKUP_COLLECTIONS:
-        export_data[collection_name] = await db[collection_name].find({}, {"_id": 0}).to_list(100000)
+        if collection_name == "app_settings":
+            export_data[collection_name] = await db[collection_name].find({}, {"_id": 0}).to_list(100000)
+        else:
+            export_data[collection_name] = await db[collection_name].find(with_organization({}, current_user.get("organization_id")), {"_id": 0}).to_list(100000)
     raw = json.dumps(export_data, ensure_ascii=False, default=str).encode()
     salt = secrets.token_bytes(16)
     encrypted = fernet_from_password(payload.password, salt).encrypt(raw)
@@ -2827,14 +3022,14 @@ async def create_backup(payload: BackupCreate, current_user: dict = Depends(requ
     path = BACKUP_DIR / file_name
     path.write_bytes(base64.b64encode(salt) + b"\n" + encrypted)
     now = datetime.now(timezone.utc)
-    record = {"id": backup_id, "file_name": file_name, "file_size": path.stat().st_size, "encrypted": True, "created_by": current_user["id"], "created_by_name": real_name_for_user(current_user), "created_at": serialize_datetime(now)}
+    record = {"id": backup_id, "organization_id": current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID, "file_name": file_name, "file_size": path.stat().st_size, "encrypted": True, "created_by": current_user["id"], "created_by_name": real_name_for_user(current_user), "created_at": serialize_datetime(now)}
     await db.backup_records.insert_one(record.copy())
     return BackupRecord(**hydrate_einvoice_document(record))
 
 
 @api_router.get("/admin/security/backups/{backup_id}/download")
 async def download_backup(backup_id: str, _: dict = Depends(require_admin)):
-    record = await db.backup_records.find_one({"id": backup_id}, {"_id": 0})
+    record = await db.backup_records.find_one(with_organization({"id": backup_id}), {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
     path = BACKUP_DIR / record["file_name"]
@@ -2844,7 +3039,7 @@ async def download_backup(backup_id: str, _: dict = Depends(require_admin)):
 
 
 @api_router.post("/admin/security/backups/restore")
-async def restore_backup(password: str = Form(...), backup_file: UploadFile = File(...), _: dict = Depends(require_admin)):
+async def restore_backup(password: str = Form(...), backup_file: UploadFile = File(...), admin_user: dict = Depends(require_admin)):
     content = await backup_file.read()
     try:
         salt_line, encrypted = content.split(b"\n", 1)
@@ -2856,9 +3051,12 @@ async def restore_backup(password: str = Form(...), backup_file: UploadFile = Fi
     for collection_name, documents in data.items():
         if collection_name not in BACKUP_COLLECTIONS:
             continue
-        await db[collection_name].delete_many({})
-        if documents:
-            await db[collection_name].insert_many(documents)
+        if collection_name == "app_settings":
+            continue
+        await db[collection_name].delete_many(with_organization({}, admin_user.get("organization_id")))
+        scoped_documents = [attach_organization(document, admin_user.get("organization_id")) for document in documents]
+        if scoped_documents:
+            await db[collection_name].insert_many(scoped_documents)
     return {"message": "تمت استعادة النسخة الاحتياطية وتسجيل العملية في سجل التدقيق", "collections": list(data.keys())}
 
 # Include the router in the main app
@@ -2879,7 +3077,7 @@ if FRONTEND_BUILD_DIR.exists():
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -2903,19 +3101,23 @@ async def audit_event(request: Request, status_code: int, body: Optional[dict] =
         return
     user_id = None
     username = None
+    organization_id = DEFAULT_ORGANIZATION_ID
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
             payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
-            user = await db.users.find_one({"id": user_id}, {"_id": 0, "username": 1})
+            organization_id = payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
+            user = await db.users.find_one({"id": user_id}, {"_id": 0, "username": 1, "organization_id": 1})
             username = user.get("username") if user else None
+            organization_id = user.get("organization_id", organization_id) if user else organization_id
         except Exception:
             pass
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "username": username,
         "user_id": user_id,
+        "organization_id": organization_id,
         "method": request.method,
         "path": request.url.path,
         "action": f"{request.method} {request.url.path}",
