@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Query
+from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,11 +15,14 @@ import calendar
 import math
 import base64
 from io import BytesIO
+import re
+import urllib.request
 
 import bcrypt
 import jwt
 import pyotp
 import qrcode
+from pypdf import PdfReader
 
 
 ROOT_DIR = Path(__file__).parent
@@ -98,6 +101,44 @@ class BankCreate(BaseModel):
     swift_code: Optional[str] = None
     logo_url: Optional[str] = None
     color: Optional[str] = "#0f172a"
+
+
+class BankingTariffRules(BaseModel):
+    monthly_statement_fee: float = Field(default=0, ge=0)
+    payment_order_fee: float = Field(default=0, ge=0)
+    incoming_check_internal_fee: float = Field(default=0, ge=0)
+    incoming_check_external_percent: float = Field(default=0, ge=0)
+    incoming_check_external_min: float = Field(default=0, ge=0)
+    incoming_check_external_max: float = Field(default=0, ge=0)
+    issued_check_internal_fee: float = Field(default=0, ge=0)
+    issued_check_external_percent: float = Field(default=0, ge=0)
+    issued_check_external_min: float = Field(default=0, ge=0)
+    issued_check_external_max: float = Field(default=0, ge=0)
+    outgoing_transfer_percent: float = Field(default=0, ge=0)
+    outgoing_transfer_min: float = Field(default=0, ge=0)
+    outgoing_transfer_max: float = Field(default=0, ge=0)
+    cash_deposit_percent: float = Field(default=0, ge=0)
+    cash_deposit_min: float = Field(default=0, ge=0)
+    deposit_link_fee: float = Field(default=0, ge=0)
+
+
+class BankingTariffResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    bank_id: str
+    bank_name: str
+    account_type: Literal["companies"] = "companies"
+    source_type: Optional[Literal["default", "link", "file", "manual"]] = "default"
+    source_url: Optional[str] = None
+    file_name: Optional[str] = None
+    source_label: str
+    extraction_status: Literal["default", "extracted", "manual", "failed"] = "default"
+    extraction_notes: Optional[str] = None
+    extracted_text_preview: Optional[str] = None
+    rules: BankingTariffRules
+    created_at: datetime
+    updated_at: datetime
 
 
 class DepositBase(BaseModel):
@@ -442,6 +483,160 @@ async def ensure_bank_async(bank_id: str) -> dict:
     if not custom_bank:
         raise HTTPException(status_code=404, detail="البنك غير موجود")
     return custom_bank
+
+
+def default_tariff_rules(bank_id: str) -> BankingTariffRules:
+    if bank_id == "industrial-development":
+        return BankingTariffRules(
+            monthly_statement_fee=100,
+            payment_order_fee=10,
+            incoming_check_internal_fee=20,
+            incoming_check_external_percent=0.3,
+            incoming_check_external_min=50,
+            incoming_check_external_max=500,
+            issued_check_internal_fee=20,
+            issued_check_external_percent=0.3,
+            issued_check_external_min=50,
+            issued_check_external_max=500,
+            outgoing_transfer_percent=0.2,
+            outgoing_transfer_min=50,
+            outgoing_transfer_max=500,
+            cash_deposit_percent=0.2,
+            cash_deposit_min=20,
+            deposit_link_fee=0,
+        )
+    return BankingTariffRules()
+
+
+def normalize_tariff_text(text: str) -> str:
+    replacements = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+    normalized = text.translate(replacements)
+    normalized = normalized.replace("٪", "%").replace("٫", ".").replace(",", ".")
+    return re.sub(r"\s+", " ", normalized)
+
+
+def numbers_near(text: str, keywords: List[str], window: int = 360) -> List[float]:
+    normalized = normalize_tariff_text(text)
+    lowered = normalized.lower()
+    positions = [lowered.find(keyword.lower()) for keyword in keywords if lowered.find(keyword.lower()) != -1]
+    if not positions:
+        return []
+    start = max(min(positions) - 80, 0)
+    end = min(max(positions) + window, len(normalized))
+    snippet = normalized[start:end]
+    return [float(value) for value in re.findall(r"\d+(?:\.\d+)?", snippet)]
+
+
+def first_reasonable_amount(values: List[float], fallback: float) -> float:
+    for value in values:
+        if 1 <= value <= 10000 and value not in {0.2, 0.3, 1000, 2024, 2025, 2026}:
+            return value
+    return fallback
+
+
+def first_percent(values: List[float], fallback: float) -> float:
+    for value in values:
+        if 0 < value <= 5:
+            return value
+    return fallback
+
+
+def min_max_from_values(values: List[float], fallback_min: float, fallback_max: float) -> tuple[float, float]:
+    candidates = [value for value in values if value >= 10 and value not in {2024, 2025, 2026}]
+    if len(candidates) >= 2:
+        return min(candidates), max(candidates)
+    if len(candidates) == 1:
+        return candidates[0], fallback_max
+    return fallback_min, fallback_max
+
+
+def parse_tariff_rules_from_text(text: str, bank_id: str) -> tuple[BankingTariffRules, str]:
+    rules = default_tariff_rules(bank_id)
+    notes = []
+    normalized = normalize_tariff_text(text)
+
+    if bank_id == "industrial-development" or "بنك التنمية الصناعية" in normalized:
+        return rules, "تم التعرف على تعريفة بنك التنمية الصناعية وتطبيق القيم المعتمدة لحسابات الشركات تلقائياً"
+
+    statement_values = numbers_near(normalized, ["كشف حساب", "شهري"])
+    if statement_values:
+        rules.monthly_statement_fee = first_reasonable_amount(statement_values, rules.monthly_statement_fee)
+        notes.append("رسوم كشف الحساب الشهري")
+
+    payment_order_values = numbers_near(normalized, ["ACH", "أمر دفع", "اوامر الدفع"])
+    if payment_order_values:
+        rules.payment_order_fee = first_reasonable_amount(payment_order_values, rules.payment_order_fee)
+        notes.append("رسوم أوامر الدفع/ACH")
+
+    internal_check_values = numbers_near(normalized, ["تحصيل شيكات", "داخل", "المقاصة"])
+    if internal_check_values:
+        rules.incoming_check_internal_fee = first_reasonable_amount(internal_check_values, rules.incoming_check_internal_fee)
+        rules.issued_check_internal_fee = rules.incoming_check_internal_fee
+        notes.append("رسوم الشيكات الداخلية")
+
+    external_check_values = numbers_near(normalized, ["شيكات", "خارج", "المقاصة"])
+    if external_check_values:
+        rules.incoming_check_external_percent = first_percent(external_check_values, rules.incoming_check_external_percent)
+        rules.incoming_check_external_min, rules.incoming_check_external_max = min_max_from_values(
+            external_check_values,
+            rules.incoming_check_external_min,
+            rules.incoming_check_external_max,
+        )
+        rules.issued_check_external_percent = rules.incoming_check_external_percent
+        rules.issued_check_external_min = rules.incoming_check_external_min
+        rules.issued_check_external_max = rules.incoming_check_external_max
+        notes.append("رسوم الشيكات الخارجية")
+
+    transfer_values = numbers_near(normalized, ["تحويل", "مستفيد", "داخلي"])
+    if transfer_values:
+        rules.outgoing_transfer_percent = first_percent(transfer_values, rules.outgoing_transfer_percent)
+        rules.outgoing_transfer_min, rules.outgoing_transfer_max = min_max_from_values(
+            transfer_values,
+            rules.outgoing_transfer_min,
+            rules.outgoing_transfer_max,
+        )
+        notes.append("رسوم التحويل البنكي")
+
+    cash_values = numbers_near(normalized, ["إيداع نقدي", "ايداع نقدي", "إيداع"])
+    if cash_values:
+        rules.cash_deposit_percent = first_percent(cash_values, rules.cash_deposit_percent)
+        rules.cash_deposit_min = first_reasonable_amount(cash_values, rules.cash_deposit_min)
+        notes.append("عمولة الإيداع النقدي")
+
+    return rules, "تم استخراج: " + "، ".join(notes) if notes else "تم حفظ الملف/الرابط مع استخدام القيم الافتراضية لحين مراجعة الأدمن"
+
+
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    reader = PdfReader(BytesIO(pdf_bytes))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def build_tariff_document(bank: dict, rules: BankingTariffRules, source_type: str = "default", source_url: Optional[str] = None, file_name: Optional[str] = None, notes: Optional[str] = None, preview: Optional[str] = None, status: str = "default") -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "id": f"{bank['id']}-companies",
+        "bank_id": bank["id"],
+        "bank_name": bank["name"],
+        "account_type": "companies",
+        "source_type": source_type,
+        "source_url": source_url,
+        "file_name": file_name,
+        "source_label": f"تعريفة خدمات {bank['name']} - حسابات الشركات",
+        "extraction_status": status,
+        "extraction_notes": notes,
+        "extracted_text_preview": preview[:2000] if preview else None,
+        "rules": rules.model_dump(),
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+
+
+async def get_tariff_document(bank_id: str) -> dict:
+    bank = await ensure_bank_async(bank_id)
+    document = await db.banking_tariffs.find_one({"bank_id": bank_id, "account_type": "companies"}, {"_id": 0})
+    if document:
+        return document
+    return build_tariff_document(bank, default_tariff_rules(bank_id), notes="القيم الافتراضية الحالية", status="default")
 
 
 def normalize_datetime(value: datetime) -> datetime:
@@ -1130,7 +1325,117 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
         "updated_at": serialize_datetime(now),
     }
     await db.banks.insert_one(bank_doc)
+    default_tariff = build_tariff_document(bank_doc, default_tariff_rules(bank_id), notes="تعريفة افتراضية لبنك جديد لحين رفع ملف التعريفة", status="default")
+    await db.banking_tariffs.update_one(
+        {"bank_id": bank_id, "account_type": "companies"},
+        {"$set": default_tariff},
+        upsert=True,
+    )
     return Bank(**{key: value for key, value in bank_doc.items() if key not in {"created_at", "updated_at"}})
+
+
+@api_router.get("/banking-tariffs/{bank_id}", response_model=BankingTariffResponse)
+async def get_banking_tariff(bank_id: str, _: dict = Depends(get_current_user)):
+    document = await get_tariff_document(bank_id)
+    return BankingTariffResponse(**hydrate_banking_manual_charges(document))
+
+
+@api_router.get("/admin/banking-tariffs", response_model=List[BankingTariffResponse])
+async def list_admin_banking_tariffs(_: dict = Depends(require_admin)):
+    banks = await get_all_banks()
+    documents = []
+    for bank in banks:
+        document = await get_tariff_document(bank["id"])
+        documents.append(BankingTariffResponse(**hydrate_banking_manual_charges(document)))
+    return documents
+
+
+@api_router.put("/admin/banking-tariffs/{bank_id}", response_model=BankingTariffResponse)
+async def save_admin_banking_tariff(bank_id: str, rules: BankingTariffRules, _: dict = Depends(require_admin)):
+    bank = await ensure_bank_async(bank_id)
+    existing = await get_tariff_document(bank_id)
+    document = build_tariff_document(
+        bank,
+        rules,
+        source_type="manual",
+        source_url=existing.get("source_url"),
+        file_name=existing.get("file_name"),
+        notes="تم اعتماد القيم يدوياً من الأدمن",
+        preview=existing.get("extracted_text_preview"),
+        status="manual",
+    )
+    document["created_at"] = existing.get("created_at") or document["created_at"]
+    await db.banking_tariffs.update_one(
+        {"bank_id": bank_id, "account_type": "companies"},
+        {"$set": document},
+        upsert=True,
+    )
+    return BankingTariffResponse(**hydrate_banking_manual_charges(document))
+
+
+@api_router.post("/admin/banking-tariffs/{bank_id}/extract", response_model=BankingTariffResponse)
+async def extract_admin_banking_tariff(
+    bank_id: str,
+    source_url: Optional[str] = Form(default=None),
+    tariff_file: Optional[UploadFile] = File(default=None),
+    _: dict = Depends(require_admin),
+):
+    bank = await ensure_bank_async(bank_id)
+    source_type = "link" if source_url else "file"
+    file_name = tariff_file.filename if tariff_file else None
+    try:
+        if tariff_file:
+            pdf_bytes = await tariff_file.read()
+            if not tariff_file.filename.lower().endswith(".pdf"):
+                raise HTTPException(status_code=400, detail="يجب رفع ملف PDF فقط")
+        elif source_url:
+            request = urllib.request.Request(source_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(request, timeout=45) as response:
+                pdf_bytes = response.read()
+            if not source_url.lower().split("?")[0].endswith(".pdf"):
+                file_name = source_url.rsplit("/", 1)[-1] or "tariff.pdf"
+        else:
+            raise HTTPException(status_code=400, detail="ارفع ملف PDF أو أدخل رابط التعريفة")
+
+        extracted_text = extract_pdf_text(pdf_bytes)
+        if not extracted_text.strip():
+            raise HTTPException(status_code=400, detail="تعذر قراءة نص ملف التعريفة")
+        rules, notes = parse_tariff_rules_from_text(extracted_text, bank_id)
+        document = build_tariff_document(
+            bank,
+            rules,
+            source_type=source_type,
+            source_url=source_url,
+            file_name=file_name,
+            notes=notes,
+            preview=normalize_tariff_text(extracted_text),
+            status="extracted",
+        )
+        await db.banking_tariffs.update_one(
+            {"bank_id": bank_id, "account_type": "companies"},
+            {"$set": document},
+            upsert=True,
+        )
+        return BankingTariffResponse(**hydrate_banking_manual_charges(document))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        rules = default_tariff_rules(bank_id)
+        document = build_tariff_document(
+            bank,
+            rules,
+            source_type=source_type,
+            source_url=source_url,
+            file_name=file_name,
+            notes=f"فشل استخراج التعريفة تلقائياً: {str(exc)}",
+            status="failed",
+        )
+        await db.banking_tariffs.update_one(
+            {"bank_id": bank_id, "account_type": "companies"},
+            {"$set": document},
+            upsert=True,
+        )
+        return BankingTariffResponse(**hydrate_banking_manual_charges(document))
 
 
 @api_router.delete("/admin/banks/{bank_id}")
@@ -1146,6 +1451,7 @@ async def delete_bank(bank_id: str, _: dict = Depends(require_admin)):
         upsert=True,
     )
     await db.banks.delete_one({"id": bank_id})
+    await db.banking_tariffs.delete_many({"bank_id": bank_id})
     deposits_result = await db.deposits.delete_many({"bank_id": bank_id})
     reconciliations_result = await db.reconciliations.delete_many({"bank_id": bank_id})
     revenues_result = await db.revenues.delete_many({"bank_id": bank_id})

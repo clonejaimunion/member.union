@@ -43,6 +43,11 @@ const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
 const months = Object.keys(monthLabels);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const cappedFee = (amount, percent, min, max) => {
+  const raw = Number(amount || 0) * (Number(percent || 0) / 100);
+  const withMin = Math.max(raw, Number(min || 0));
+  return Number(max || 0) > 0 ? Math.min(withMin, Number(max || 0)) : withMin;
+};
 
 const getBankRules = (bankId) => {
   if (bankId === "industrial-development") {
@@ -73,6 +78,23 @@ const getBankRules = (bankId) => {
   };
 };
 
+const rulesFromTariff = (tariff, fallbackBankId) => {
+  if (!tariff?.rules) return getBankRules(fallbackBankId);
+  const rule = tariff.rules;
+  return {
+    source: tariff.source_label || "تعريفة الخدمات المصرفية - حسابات الشركات",
+    monthlyStatementFee: Number(rule.monthly_statement_fee || 0),
+    paymentOrderFee: Number(rule.payment_order_fee || 0),
+    incomingCheckFee: Number(rule.incoming_check_internal_fee || 0),
+    incomingExternalCheckFee: (amount) => cappedFee(amount, rule.incoming_check_external_percent, rule.incoming_check_external_min, rule.incoming_check_external_max),
+    issuedCheckFee: Number(rule.issued_check_internal_fee || 0),
+    issuedExternalCheckFee: (amount) => cappedFee(amount, rule.issued_check_external_percent, rule.issued_check_external_min, rule.issued_check_external_max),
+    outgoingTransferFee: (amount) => cappedFee(amount, rule.outgoing_transfer_percent, rule.outgoing_transfer_min, rule.outgoing_transfer_max),
+    cashDepositFee: (amount) => Number(amount || 0) > 0 ? Math.max(Number(amount || 0) * (Number(rule.cash_deposit_percent || 0) / 100), Number(rule.cash_deposit_min || 0)) : 0,
+    depositLinkFee: () => Number(rule.deposit_link_fee || 0),
+  };
+};
+
 const periodBounds = (filters) => {
   if (filters.period_type === "yearly") return { from: `${filters.year}-01-01`, to: `${filters.year}-12-31` };
   return { from: `${filters.year}-${filters.month}-01`, to: `${filters.year}-${filters.month}-${new Date(Number(filters.year), Number(filters.month), 0).getDate()}` };
@@ -87,12 +109,13 @@ export default function BankingExpensesPage() {
   const [expenses, setExpenses] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const [manual, setManual] = useState(emptyManual);
+  const [tariffRules, setTariffRules] = useState(getBankRules("industrial-development"));
   const [loading, setLoading] = useState(true);
   const [savingManual, setSavingManual] = useState(false);
 
   const canManage = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
   const selectedBank = banks.find((bank) => bank.id === filters.bank_id) || fallbackBanks.find((bank) => bank.id === filters.bank_id) || banks[0];
-  const rules = useMemo(() => getBankRules(filters.bank_id), [filters.bank_id]);
+  const rules = tariffRules;
   const isYearly = filters.period_type === "yearly";
   const periodLabel = isYearly ? `سنة ${filters.year}` : `${monthLabels[filters.month] || filters.month} / ${filters.year}`;
 
@@ -103,14 +126,16 @@ export default function BankingExpensesPage() {
       const manualRequests = isYearly
         ? months.map((month) => api.get(`/banking-expenses/manual?bank_id=${filters.bank_id}&year=${filters.year}&month=${Number(month)}`))
         : [api.get(`/banking-expenses/manual?bank_id=${filters.bank_id}&year=${filters.year}&month=${Number(filters.month)}`)];
-      const [banksResponse, revenuesResponse, expensesResponse, depositsResponse, ...manualResponses] = await Promise.all([
+      const [banksResponse, tariffResponse, revenuesResponse, expensesResponse, depositsResponse, ...manualResponses] = await Promise.all([
         api.get("/banks"),
+        api.get(`/banking-tariffs/${filters.bank_id}`),
         api.get(`/revenues?bank_id=${filters.bank_id}&from_date=${from}&to_date=${to}`),
         api.get(`/expenses?bank_id=${filters.bank_id}&from_date=${from}&to_date=${to}`),
         api.get(`/banks/${filters.bank_id}/deposits`),
         ...manualRequests,
       ]);
       setBanks(banksResponse.data);
+      setTariffRules(rulesFromTariff(tariffResponse.data, filters.bank_id));
       setRevenues(revenuesResponse.data);
       setExpenses(expensesResponse.data);
       setDeposits(depositsResponse.data);
@@ -120,6 +145,7 @@ export default function BankingExpensesPage() {
       setRevenues([]);
       setExpenses([]);
       setDeposits([]);
+      setTariffRules(getBankRules(filters.bank_id));
       setManual(emptyManual());
     } finally {
       setLoading(false);
