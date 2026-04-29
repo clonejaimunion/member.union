@@ -3,6 +3,7 @@ import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
+import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -275,8 +276,6 @@ export default function BankReconciliationPage() {
     }
   };
 
-  const printPdf = () => window.print();
-
   const formatEgpText = (value) => `${new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(value || 0))} جنيه مصري`;
 
   const formatCheckDate = (value) => {
@@ -393,9 +392,15 @@ export default function BankReconciliationPage() {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="reconciliation-eyebrow">مذكرة تسوية</p>
               <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="reconciliation-title">مذكرة تسوية حساب - {bank.name}</h2>
             </div>
-            <Button onClick={printPdf} className="h-12 rounded-lg bg-slate-950 px-6 text-white hover:bg-slate-800 print:hidden" data-testid="print-reconciliation-pdf-button">
-              <Printer className="h-4 w-4" /> طباعة PDF
-            </Button>
+            <ExportReportButtons
+              title={`مذكرة تسوية حساب - ${bank.name} - ${activeReconciliation?.period_label || ""}`}
+              fileName={`مذكرة-تسوية-${bank.name}-${activeReconciliation?.period_label || ""}`}
+              selectors={["[data-testid='reconciliation-print-report']"]}
+              disabled={!activeReconciliation}
+              pdfTestId="print-reconciliation-pdf-button"
+              excelTestId="export-reconciliation-excel-button"
+              wordTestId="export-reconciliation-word-button"
+            />
           </div>
         </section>
 

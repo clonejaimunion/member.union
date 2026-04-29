@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Printer, ReceiptText, Sigma } from "lucide-react";
+import { ReceiptText, Sigma } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
+import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -35,10 +36,6 @@ export default function AccruedInterestPage() {
 
   const years = useMemo(() => report?.available_years || [], [report]);
 
-  const printPdf = () => {
-    window.print();
-  };
-
   const updateFilters = (updates) => {
     const next = new URLSearchParams(searchParams);
     Object.entries(updates).forEach(([key, value]) => {
@@ -71,9 +68,15 @@ export default function AccruedInterestPage() {
                   <option key={year} value={year} data-testid={`accrued-year-option-${year}`}>{year}</option>
                 ))}
               </select>
-              <Button onClick={printPdf} className="h-12 rounded-lg bg-slate-950 px-6 text-white hover:bg-slate-800" data-testid="print-accrued-pdf-button">
-                <Printer className="h-4 w-4" /> طباعة PDF
-              </Button>
+              <ExportReportButtons
+                title={`تقرير المستحقات السنوية - ${report?.bank?.name || bankId} - ${report?.year || ""}`}
+                fileName={`تقرير-المستحقات-${report?.bank?.name || bankId}-${report?.year || ""}`}
+                selectors={["[data-testid='accrued-heading-section']", "[data-testid='accrued-kpi-grid']", "[data-testid='accrued-deposit-sections']", "[data-testid='accrued-table-wrapper']"]}
+                disabled={!report || loading}
+                pdfTestId="print-accrued-pdf-button"
+                excelTestId="export-accrued-excel-button"
+                wordTestId="export-accrued-word-button"
+              />
             </div>
           </div>
         </section>

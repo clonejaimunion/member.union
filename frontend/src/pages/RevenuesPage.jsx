@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, FileSearch, Home, LogOut, Pencil, Printer, ReceiptText, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowRight, Banknote, FileSearch, Home, LogOut, Pencil, ReceiptText, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreditLine } from "@/components/CreditLine";
+import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
@@ -240,7 +241,14 @@ export default function RevenuesPage() {
               <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="بحث برقم الشيك أو أمر الدفع أو اسم المورد" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-search-input" />
               <Button type="submit" className="h-12 rounded-lg bg-emerald-700 px-6 text-white hover:bg-emerald-800" data-testid="revenue-search-button"><Search className="h-4 w-4" /> بحث</Button>
             </form>
-            <Button type="button" onClick={() => window.print()} className="h-12 rounded-lg bg-slate-950 px-6 text-white" data-testid="print-revenues-report-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
+            <ExportReportButtons
+              title="تقرير الإيرادات"
+              fileName="تقرير-الإيرادات"
+              selectors={["[data-testid='revenues-report-section']"]}
+              pdfTestId="print-revenues-report-button"
+              excelTestId="export-revenues-report-excel-button"
+              wordTestId="export-revenues-report-word-button"
+            />
           </div>
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="revenues-filters-grid">
             <select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-bank-select"><option value="all" data-testid="revenues-filter-bank-all-option">كل البنوك</option>{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`revenues-filter-bank-${bank.id}`}>{bank.name}</option>)}</select>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { FileSpreadsheet, Landmark, Percent, Sigma, WalletCards } from "lucide-react";
 import { BankShell } from "@/components/BankShell";
+import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
@@ -61,9 +62,20 @@ export default function StatementsPage() {
                 كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع حساب كل شهر من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر من التقويم.
               </p>
             </div>
-            <Badge className="w-fit border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 hover:bg-slate-50" data-testid="statements-bank-badge">
-              <Landmark className="ml-2 h-4 w-4" /> {detailed?.bank?.name || "—"}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2" data-testid="statements-heading-actions">
+              <Badge className="w-fit border-slate-200 bg-slate-50 px-4 py-2 text-slate-700 hover:bg-slate-50" data-testid="statements-bank-badge">
+                <Landmark className="ml-2 h-4 w-4" /> {detailed?.bank?.name || "—"}
+              </Badge>
+              <ExportReportButtons
+                title={`الكشوف التفريغية - ${detailed?.bank?.name || bankId}`}
+                fileName={`الكشوف-التفريغية-${detailed?.bank?.name || bankId}`}
+                selectors={["[data-testid='statements-heading-section']", "[data-testid='statements-kpi-grid']", "[data-testid='detailed-interest-statement-section']", "[data-testid='volume-statement-section']"]}
+                disabled={!detailed || loading}
+                pdfTestId="print-statements-pdf-button"
+                excelTestId="export-statements-excel-button"
+                wordTestId="export-statements-word-button"
+              />
+            </div>
           </div>
         </section>
 
