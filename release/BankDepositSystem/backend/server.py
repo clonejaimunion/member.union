@@ -1071,9 +1071,19 @@ def hydrate_banking_manual_charges(document: dict) -> dict:
             "external_transfer_fee": "رسوم تحويل خارجي",
         }
         clean["items"] = [
-            {"statement": label, "amount": round(float(clean.get(key) or 0), 2)}
+            {"statement": label, "count": 1, "amount": round(float(clean.get(key) or 0), 2), "total": round(float(clean.get(key) or 0), 2)}
             for key, label in legacy_labels.items()
             if float(clean.get(key) or 0) > 0
+        ]
+    else:
+        clean["items"] = [
+            {
+                "statement": item.get("statement"),
+                "count": round(float(item.get("count") or 1), 2),
+                "amount": round(float(item.get("amount") or 0), 2),
+                "total": round(float(item.get("total") if item.get("total") is not None else float(item.get("count") or 1) * float(item.get("amount") or 0)), 2),
+            }
+            for item in clean.get("items", [])
         ]
     if isinstance(clean.get("updated_at"), str):
         clean["updated_at"] = datetime.fromisoformat(clean["updated_at"])
@@ -2773,9 +2783,11 @@ async def save_banking_manual_charges(
     clean_items = []
     for item in payload.items:
       statement = str(item.get("statement") or "").strip()
+      count = round(float(item.get("count") or 1), 2)
       amount = round(float(item.get("amount") or 0), 2)
-      if statement and amount > 0:
-          clean_items.append({"statement": statement, "amount": amount})
+      total = round(count * amount, 2)
+      if statement and count > 0 and amount > 0:
+          clean_items.append({"statement": statement, "count": count, "amount": amount, "total": total})
     document = {
         "id": f"{payload.bank_id}-{payload.year}-{payload.month}",
         "organization_id": organization_id_or_default(),
