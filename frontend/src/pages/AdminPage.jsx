@@ -18,12 +18,25 @@ const permissionLabels = {
   manage_revenues: "إدارة الإيرادات",
   manage_expenses: "إدارة المصروفات",
   manage_users: "إدارة مستخدمين",
+  add_revenue: "إضافة إيراد",
+  approve_revenue: "اعتماد إيراد",
+  add_expense: "إضافة مصروف",
+  approve_reports: "اعتماد تقرير",
+  lock_periods: "إقفال فترة",
+  edit_revenue: "تعديل إيراد",
+  delete_revenue: "حذف إيراد",
+  edit_expense: "تعديل مصروف",
+  delete_expense: "حذف مصروف",
+  unlock_periods: "فتح فترة",
+  manage_einvoice: "إدارة الفاتورة الإلكترونية",
+  manage_bank_tariffs: "إدارة التعريفات البنكية",
+  manage_backups: "إدارة النسخ الاحتياطي",
 };
 
 const defaultUserForm = {
   username: "",
   password: "",
-  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false },
+  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false, add_revenue: true, approve_revenue: false, add_expense: true, approve_reports: false, lock_periods: false, edit_revenue: false, delete_revenue: false, edit_expense: false, delete_expense: false, unlock_periods: false, manage_einvoice: false, manage_bank_tariffs: false, manage_backups: false },
   is_active: true,
 };
 
@@ -47,6 +60,8 @@ const tariffFields = [
 ];
 
 const emptyTariffRules = () => tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: "" }), {});
+const defaultPeriodForm = { period_type: "monthly", year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1), action: "lock", reason: "" };
+const defaultApprovalForm = { report_type: "عام", report_name: "", report_reference: "", period_label: "", status: "approved", approver_title: "", notes: "" };
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -66,6 +81,16 @@ export default function AdminPage() {
   const [tariffUrl, setTariffUrl] = useState("");
   const [tariffFile, setTariffFile] = useState(null);
   const [savingTariff, setSavingTariff] = useState(false);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [periods, setPeriods] = useState([]);
+  const [approvals, setApprovals] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [periodForm, setPeriodForm] = useState(defaultPeriodForm);
+  const [approvalForm, setApprovalForm] = useState(defaultApprovalForm);
+  const [backupPassword, setBackupPassword] = useState("");
+  const [restorePassword, setRestorePassword] = useState("");
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [securityLoading, setSecurityLoading] = useState(false);
 
   const loadUsers = useCallback(() => {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
@@ -89,10 +114,28 @@ export default function AdminPage() {
     }
   }, [selectedTariffBankId]);
 
+  const loadSecurityReview = useCallback(async () => {
+    try {
+      const [auditResponse, periodsResponse, approvalsResponse, backupsResponse] = await Promise.all([
+        api.get("/admin/security/audit-logs?limit=80"),
+        api.get("/admin/security/periods"),
+        api.get("/admin/security/report-approvals"),
+        api.get("/admin/security/backups"),
+      ]);
+      setAuditLogs(auditResponse.data);
+      setPeriods(periodsResponse.data);
+      setApprovals(approvalsResponse.data);
+      setBackups(backupsResponse.data);
+    } catch (error) {
+      toast.error("تعذر تحميل المراجعة الأمنية");
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadTariffs();
-  }, [loadTariffs, loadUsers]);
+    loadSecurityReview();
+  }, [loadTariffs, loadSecurityReview, loadUsers]);
 
   useEffect(() => {
     const selected = tariffs.find((item) => item.bank_id === selectedTariffBankId);
@@ -255,6 +298,91 @@ export default function AdminPage() {
     }
   };
 
+  const savePeriodLock = async () => {
+    setSecurityLoading(true);
+    try {
+      await api.post("/admin/security/periods", {
+        period_type: periodForm.period_type,
+        year: Number(periodForm.year),
+        month: periodForm.period_type === "monthly" ? Number(periodForm.month) : null,
+        action: periodForm.action,
+        reason: periodForm.reason,
+      });
+      toast.success(periodForm.action === "lock" ? "تم إقفال الفترة" : "تم فتح الفترة وتسجيل السبب");
+      setPeriodForm(defaultPeriodForm);
+      await loadSecurityReview();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ الفترة");
+    } finally {
+      setSecurityLoading(false);
+    }
+  };
+
+  const saveReportApproval = async () => {
+    if (!approvalForm.report_name.trim() || !approvalForm.approver_title.trim()) return toast.error("أدخل اسم التقرير وصفة المعتمد");
+    setSecurityLoading(true);
+    try {
+      await api.post("/admin/security/report-approvals", approvalForm);
+      toast.success("تم حفظ اعتماد التقرير");
+      setApprovalForm(defaultApprovalForm);
+      await loadSecurityReview();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر اعتماد التقرير");
+    } finally {
+      setSecurityLoading(false);
+    }
+  };
+
+  const createBackup = async () => {
+    if (backupPassword.length < 6) return toast.error("كلمة مرور النسخة يجب ألا تقل عن 6 أحرف");
+    setSecurityLoading(true);
+    try {
+      await api.post("/admin/security/backups", { password: backupPassword });
+      toast.success("تم إنشاء نسخة احتياطية مشفرة");
+      setBackupPassword("");
+      await loadSecurityReview();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر إنشاء النسخة الاحتياطية");
+    } finally {
+      setSecurityLoading(false);
+    }
+  };
+
+  const restoreBackup = async () => {
+    if (!restoreFile || restorePassword.length < 6) return toast.error("اختر ملف النسخة وأدخل كلمة المرور");
+    setSecurityLoading(true);
+    try {
+      const data = new FormData();
+      data.append("password", restorePassword);
+      data.append("backup_file", restoreFile);
+      await api.post("/admin/security/backups/restore", data);
+      toast.success("تمت استعادة النسخة الاحتياطية");
+      setRestorePassword("");
+      setRestoreFile(null);
+      await loadSecurityReview();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر استعادة النسخة الاحتياطية");
+    } finally {
+      setSecurityLoading(false);
+    }
+  };
+
+  const downloadBackup = async (item) => {
+    try {
+      const response = await api.get(`/admin/security/backups/${item.id}/download`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = item.file_name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error("تعذر تحميل النسخة الاحتياطية");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="admin-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="admin-header">
@@ -401,6 +529,23 @@ export default function AdminPage() {
                 <p className="mt-3 max-h-44 overflow-y-auto whitespace-pre-wrap text-xs font-bold text-slate-500" data-testid="banking-tariff-preview-text">{selectedTariff.extracted_text_preview}</p>
               </details>
             )}
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="security-review-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="security-review-heading">
+              <ShieldCheck className="h-6 w-6 text-emerald-700" />
+              <div><p className="text-sm font-extrabold text-emerald-700" data-testid="security-review-eyebrow">المراجعة الأمنية</p><h2 className="text-2xl font-extrabold" data-testid="security-review-title">ضوابط الاقتراب من الاعتماد</h2></div>
+            </div>
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2" data-testid="security-review-grid">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="period-lock-card"><h3 className="mb-3 font-extrabold" data-testid="period-lock-title">إقفال وفتح الفترات المالية</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><select value={periodForm.period_type} onChange={(e) => setPeriodForm((c) => ({ ...c, period_type: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="period-lock-type-select"><option value="monthly">شهري</option><option value="yearly">سنوي</option></select><Input value={periodForm.year} onChange={(e) => setPeriodForm((c) => ({ ...c, year: e.target.value.replace(/[^0-9]/g, '').slice(0,4) }))} placeholder="السنة" data-testid="period-lock-year-input" />{periodForm.period_type === "monthly" && <Input value={periodForm.month} onChange={(e) => setPeriodForm((c) => ({ ...c, month: e.target.value.replace(/[^0-9]/g, '').slice(0,2) }))} placeholder="الشهر" data-testid="period-lock-month-input" />}<select value={periodForm.action} onChange={(e) => setPeriodForm((c) => ({ ...c, action: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="period-lock-action-select"><option value="lock">إقفال</option><option value="unlock">فتح</option></select><Input value={periodForm.reason} onChange={(e) => setPeriodForm((c) => ({ ...c, reason: e.target.value }))} placeholder="سبب الفتح/الإقفال" className="md:col-span-2" data-testid="period-lock-reason-input" /></div><Button onClick={savePeriodLock} disabled={securityLoading} className="mt-3 h-10 bg-slate-950 text-white" data-testid="save-period-lock-button"><Save className="h-4 w-4" /> حفظ الفترة</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="period-lock-list">{periods.slice(0, 8).map((item) => <p key={item.id} className="rounded bg-white p-2 text-xs font-bold" data-testid={`period-lock-row-${item.id}`}>{item.period_type === 'monthly' ? `${item.month}/${item.year}` : item.year} — {item.is_locked ? 'مقفلة' : 'مفتوحة'} — {item.reason || 'بدون ملاحظات'}</p>)}</div></div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="report-approval-card"><h3 className="mb-3 font-extrabold" data-testid="report-approval-title">اعتماد التقارير</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Input value={approvalForm.report_name} onChange={(e) => setApprovalForm((c) => ({ ...c, report_name: e.target.value }))} placeholder="اسم التقرير" data-testid="approval-report-name-input" /><Input value={approvalForm.report_reference} onChange={(e) => setApprovalForm((c) => ({ ...c, report_reference: e.target.value }))} placeholder="رقم التقرير/الإذن" data-testid="approval-report-reference-input" /><Input value={approvalForm.period_label} onChange={(e) => setApprovalForm((c) => ({ ...c, period_label: e.target.value }))} placeholder="الفترة" data-testid="approval-period-label-input" /><Input value={approvalForm.approver_title} onChange={(e) => setApprovalForm((c) => ({ ...c, approver_title: e.target.value }))} placeholder="صفة المعتمد" data-testid="approval-approver-title-input" /><select value={approvalForm.status} onChange={(e) => setApprovalForm((c) => ({ ...c, status: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="approval-status-select"><option value="unapproved">غير معتمد</option><option value="approved">معتمد</option><option value="cancelled">تم إلغاء الاعتماد</option></select><Input value={approvalForm.notes} onChange={(e) => setApprovalForm((c) => ({ ...c, notes: e.target.value }))} placeholder="ملاحظات" data-testid="approval-notes-input" /></div><Button onClick={saveReportApproval} disabled={securityLoading} className="mt-3 h-10 bg-slate-950 text-white" data-testid="save-report-approval-button"><Save className="h-4 w-4" /> اعتماد التقرير</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="report-approvals-list">{approvals.slice(0, 8).map((item) => <p key={item.id} className="rounded bg-white p-2 text-xs font-bold" data-testid={`approval-row-${item.id}`}>{item.approval_number} — {item.report_name} — {item.approver_name} — {item.status}</p>)}</div></div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="backup-card"><h3 className="mb-3 font-extrabold" data-testid="backup-title">النسخ الاحتياطي والاستعادة</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Input type="password" value={backupPassword} onChange={(e) => setBackupPassword(e.target.value)} placeholder="كلمة مرور النسخة" data-testid="backup-password-input" /><Button onClick={createBackup} disabled={securityLoading} className="h-10 bg-slate-950 text-white" data-testid="create-backup-button">إنشاء نسخة مشفرة</Button><Input type="file" accept=".enc" onChange={(e) => setRestoreFile(e.target.files?.[0] || null)} data-testid="restore-backup-file-input" /><Input type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} placeholder="كلمة مرور الاستعادة" data-testid="restore-backup-password-input" /></div><Button onClick={restoreBackup} disabled={securityLoading} variant="outline" className="mt-3 h-10 bg-white" data-testid="restore-backup-button">استعادة النسخة</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="backups-list">{backups.slice(0, 8).map((item) => <div key={item.id} className="flex items-center justify-between rounded bg-white p-2 text-xs font-bold" data-testid={`backup-row-${item.id}`}><span>{item.file_name} — {item.file_size} بايت</span><button type="button" onClick={() => downloadBackup(item)} className="text-emerald-700" data-testid={`download-backup-link-${item.id}`}>تحميل</button></div>)}</div></div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-checklist-card"><h3 className="mb-3 font-extrabold" data-testid="security-checklist-title">مؤشرات المراجعة والأمان</h3><ul className="space-y-2 text-sm font-bold text-slate-700" data-testid="security-checklist"><li>✓ سجل تدقيق لكل عمليات API المؤثرة.</li><li>✓ إقفال شهري وسنوي ومنع تعديل الفترات المقفلة.</li><li>✓ اعتماد تقارير برقم اعتماد واسم معتمد وملاحظات.</li><li>✓ نسخ احتياطي مشفر بكلمة مرور يحددها الأدمن.</li><li>✓ دليل إجراءات: الإدخال للمستخدم، المراجعة للأدمن، الاعتماد عبر هذه الصفحة، الإقفال بعد نهاية الفترة، وفتح الفترة بسبب مكتوب.</li><li>⚠ مراجعة محاسب قانوني ومراجعة أمنية خارجية لا تتم آلياً ويجب تنفيذها بواسطة مختص.</li></ul></div>
+            </div>
+            <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="max-h-72 overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="grid grid-cols-1 gap-2 rounded bg-slate-50 p-3 text-xs font-bold md:grid-cols-[160px_120px_1fr_70px]" data-testid={`audit-log-row-${item.id}`}><span>{new Date(item.created_at).toLocaleString('ar-EG')}</span><span>{item.username || 'غير معروف'}</span><span>{item.action}</span><span>{item.status_code}</span></div>)}</div></div>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">

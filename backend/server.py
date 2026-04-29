@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import FastAPI, APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,12 +17,18 @@ import base64
 from io import BytesIO
 import re
 import urllib.request
+import json
+import hashlib
+import secrets
 
 import bcrypt
 import jwt
 import pyotp
 import qrcode
 from pypdf import PdfReader
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
 ROOT_DIR = Path(__file__).parent
@@ -524,6 +530,95 @@ class ElectronicInvoiceStatusUpdate(BaseModel):
     status: Literal["draft", "ready", "needs_review", "submitted", "accepted", "rejected"]
 
 
+class PeriodLockCreate(BaseModel):
+    period_type: Literal["monthly", "yearly"]
+    year: int = Field(..., ge=2020, le=2200)
+    month: Optional[int] = Field(default=None, ge=1, le=12)
+    action: Literal["lock", "unlock"]
+    reason: Optional[str] = None
+
+
+class PeriodLockResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    period_type: Literal["monthly", "yearly"]
+    year: int
+    month: Optional[int] = None
+    is_locked: bool
+    reason: Optional[str] = None
+    locked_by: str
+    locked_by_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReportApprovalCreate(BaseModel):
+    report_type: str
+    report_name: str
+    report_reference: Optional[str] = None
+    period_label: Optional[str] = None
+    status: Literal["unapproved", "approved", "cancelled"] = "approved"
+    approver_title: str
+    notes: Optional[str] = None
+
+
+class ReportApprovalResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    approval_number: str
+    report_type: str
+    report_name: str
+    report_reference: Optional[str] = None
+    period_label: Optional[str] = None
+    status: Literal["unapproved", "approved", "cancelled"]
+    approver_name: str
+    approver_title: str
+    approved_by_user_id: str
+    approved_by_username: str
+    notes: Optional[str] = None
+    approval_phrase: str
+    qr_payload: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class BackupCreate(BaseModel):
+    password: str = Field(..., min_length=6)
+
+
+class BackupRestoreRequest(BaseModel):
+    password: str = Field(..., min_length=6)
+
+
+class BackupRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    file_name: str
+    file_size: int
+    encrypted: bool
+    created_by: str
+    created_by_name: str
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    username: Optional[str] = None
+    user_id: Optional[str] = None
+    method: str
+    path: str
+    action: str
+    status_code: int
+    request_body: Optional[dict] = None
+    ip_address: Optional[str] = None
+    created_at: datetime
+
+
 class ExpenseCreate(ExpenseBase):
     pass
 
@@ -891,6 +986,54 @@ def invoice_status_from_data(settings: dict, customer: dict, service: dict) -> t
     return ("needs_review" if notes else "ready"), notes
 
 
+def approval_number_for_user(user: dict) -> str:
+    username = user.get("username")
+    if username == "admin":
+        return "0103535"
+    if username == "entryuser":
+        return "028060"
+    existing = user.get("approval_number")
+    if existing:
+        return str(existing)
+    digest = hashlib.sha256((user.get("id") or username or str(uuid.uuid4())).encode()).hexdigest()
+    return str(int(digest[:8], 16) % 9000000 + 1000000).zfill(7)
+
+
+def real_name_for_user(user: dict) -> str:
+    if user.get("username") == "admin":
+        return "يوسف عبدالغني"
+    if user.get("username") == "entryuser":
+        return "دعاء علي"
+    return user.get("full_name") or user.get("username") or "مستخدم النظام"
+
+
+def period_key(period_type: str, year: int, month: Optional[int] = None) -> str:
+    return f"{period_type}-{year}-{month or 0}"
+
+
+async def is_period_locked(target_date: date) -> Optional[dict]:
+    year = target_date.year
+    month = target_date.month
+    yearly = await db.financial_periods.find_one({"period_type": "yearly", "year": year, "is_locked": True}, {"_id": 0})
+    if yearly:
+        return yearly
+    monthly = await db.financial_periods.find_one({"period_type": "monthly", "year": year, "month": month, "is_locked": True}, {"_id": 0})
+    return monthly
+
+
+async def ensure_period_is_open(target_date: date):
+    locked = await is_period_locked(target_date)
+    if locked:
+        label = f"{locked.get('year')}" if locked.get("period_type") == "yearly" else f"{locked.get('month')}/{locked.get('year')}"
+        raise HTTPException(status_code=423, detail=f"الفترة المالية {label} مقفلة ولا يمكن تعديل بياناتها إلا بعد فتحها من المراجعة الأمنية")
+
+
+def fernet_from_password(password: str, salt: bytes) -> Fernet:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=390000)
+    key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+    return Fernet(key)
+
+
 WESTERN_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 
@@ -928,6 +1071,7 @@ async def ensure_revenue_unique(payload: RevenueCreate, revenue_id: Optional[str
 async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_revenue_unique(payload, revenue_id)
+    await ensure_period_is_open(payload.issued_at)
     method = payload.collection_method
     return {
         "receipt_number": normalize_digit_text(payload.receipt_number),
@@ -987,6 +1131,7 @@ async def ensure_expense_unique(payload: ExpenseCreate, expense_id: Optional[str
 async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_expense_unique(payload, expense_id)
+    await ensure_period_is_open(payload.issued_at)
     deductions = [
         {"amount": round(float(item.amount), 2), "statement": item.statement.strip()}
         for item in payload.deductions
@@ -1674,6 +1819,7 @@ async def create_deposit(
     await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
+    await ensure_period_is_open(creation_datetime.date())
 
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
@@ -1721,6 +1867,7 @@ async def update_deposit(
     await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
+    await ensure_period_is_open(creation_datetime.date())
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
 
@@ -1747,6 +1894,9 @@ async def delete_deposit(
     _: dict = Depends(require_admin),
 ):
     await ensure_bank_async(bank_id)
+    existing = await db.deposits.find_one({"id": deposit_id, "bank_id": bank_id}, {"_id": 0})
+    if existing and existing.get("creation_datetime"):
+        await ensure_period_is_open(datetime.fromisoformat(existing["creation_datetime"]).date())
     result = await db.deposits.delete_one({"id": deposit_id, "bank_id": bank_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
@@ -2067,6 +2217,7 @@ async def update_revenue(
     existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     updates = await revenue_document_from_payload(payload, revenue_id)
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
     await db.revenues.update_one({"id": revenue_id}, {"$set": updates})
@@ -2096,6 +2247,9 @@ async def delete_revenue(
     revenue_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
 ):
+    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    if existing and existing.get("issued_at"):
+        await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     result = await db.revenues.delete_one({"id": revenue_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
@@ -2176,6 +2330,7 @@ async def update_expense(
     existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     updates = await expense_document_from_payload(payload, expense_id)
     updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
     await db.expenses.update_one({"id": expense_id}, {"$set": updates})
@@ -2205,6 +2360,9 @@ async def delete_expense(
     expense_id: str,
     _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
 ):
+    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    if existing and existing.get("issued_at"):
+        await ensure_period_is_open(date.fromisoformat(existing["issued_at"]))
     result = await db.expenses.delete_one({"id": expense_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
@@ -2395,6 +2553,139 @@ async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicI
     updated = await db.electronic_invoices.find_one({"id": invoice_id}, {"_id": 0})
     return ElectronicInvoice(**hydrate_einvoice_document(updated))
 
+
+@api_router.get("/admin/security/audit-logs", response_model=List[AuditLogResponse])
+async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000), _: dict = Depends(require_admin)):
+    documents = await db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    return [AuditLogResponse(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.get("/admin/security/periods", response_model=List[PeriodLockResponse])
+async def list_financial_periods(_: dict = Depends(get_current_user)):
+    documents = await db.financial_periods.find({}, {"_id": 0}).sort("year", -1).sort("month", -1).to_list(1000)
+    return [PeriodLockResponse(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/admin/security/periods", response_model=PeriodLockResponse)
+async def save_financial_period(payload: PeriodLockCreate, current_user: dict = Depends(get_current_user)):
+    permissions = current_user.get("permissions", {})
+    if payload.action == "lock" and current_user.get("role") != "admin" and not permissions.get("lock_periods") and not permissions.get("manage_users"):
+        raise HTTPException(status_code=403, detail="لا تملك صلاحية إقفال الفترات")
+    if payload.action == "unlock" and current_user.get("role") != "admin" and not permissions.get("unlock_periods") and not permissions.get("manage_users"):
+        raise HTTPException(status_code=403, detail="لا تملك صلاحية فتح الفترات")
+    if payload.period_type == "monthly" and not payload.month:
+        raise HTTPException(status_code=400, detail="يجب اختيار الشهر عند إقفال فترة شهرية")
+    if payload.action == "unlock" and not payload.reason:
+        raise HTTPException(status_code=400, detail="يجب كتابة سبب فتح الفترة")
+    now = datetime.now(timezone.utc)
+    document = {
+        "id": period_key(payload.period_type, payload.year, payload.month),
+        "period_type": payload.period_type,
+        "year": payload.year,
+        "month": payload.month if payload.period_type == "monthly" else None,
+        "is_locked": payload.action == "lock",
+        "reason": payload.reason,
+        "locked_by": current_user["id"],
+        "locked_by_name": real_name_for_user(current_user),
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+    existing = await db.financial_periods.find_one({"id": document["id"]}, {"_id": 0})
+    if existing:
+        document["created_at"] = existing.get("created_at", document["created_at"])
+    await db.financial_periods.update_one({"id": document["id"]}, {"$set": document}, upsert=True)
+    return PeriodLockResponse(**hydrate_einvoice_document(document))
+
+
+@api_router.get("/admin/security/report-approvals", response_model=List[ReportApprovalResponse])
+async def list_report_approvals(_: dict = Depends(require_admin)):
+    documents = await db.report_approvals.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [ReportApprovalResponse(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/admin/security/report-approvals", response_model=ReportApprovalResponse)
+async def create_report_approval(payload: ReportApprovalCreate, current_user: dict = Depends(require_any_permission(["approve_reports", "manage_users"]))):
+    now = datetime.now(timezone.utc)
+    approval_number = approval_number_for_user(current_user)
+    approver_name = real_name_for_user(current_user)
+    document = {
+        "id": str(uuid.uuid4()),
+        "approval_number": approval_number,
+        "report_type": payload.report_type,
+        "report_name": payload.report_name,
+        "report_reference": payload.report_reference,
+        "period_label": payload.period_label,
+        "status": payload.status,
+        "approver_name": approver_name,
+        "approver_title": payload.approver_title,
+        "approved_by_user_id": current_user["id"],
+        "approved_by_username": current_user["username"],
+        "notes": payload.notes,
+        "approval_phrase": f"تم اعتماد التقرير بواسطة: {approver_name} بتاريخ: {now.date().isoformat()}",
+        "qr_payload": json.dumps({"approval_number": approval_number, "report_reference": payload.report_reference, "report_name": payload.report_name}, ensure_ascii=False),
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+    await db.report_approvals.insert_one(document.copy())
+    return ReportApprovalResponse(**hydrate_einvoice_document(document))
+
+
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+
+
+@api_router.get("/admin/security/backups", response_model=List[BackupRecord])
+async def list_backups(_: dict = Depends(require_admin)):
+    documents = await db.backup_records.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [BackupRecord(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/admin/security/backups", response_model=BackupRecord)
+async def create_backup(payload: BackupCreate, current_user: dict = Depends(require_admin)):
+    export_data = {}
+    for collection_name in BACKUP_COLLECTIONS:
+        export_data[collection_name] = await db[collection_name].find({}, {"_id": 0}).to_list(100000)
+    raw = json.dumps(export_data, ensure_ascii=False, default=str).encode()
+    salt = secrets.token_bytes(16)
+    encrypted = fernet_from_password(payload.password, salt).encrypt(raw)
+    backup_id = str(uuid.uuid4())
+    file_name = f"secure-backup-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.enc"
+    path = BACKUP_DIR / file_name
+    path.write_bytes(base64.b64encode(salt) + b"\n" + encrypted)
+    now = datetime.now(timezone.utc)
+    record = {"id": backup_id, "file_name": file_name, "file_size": path.stat().st_size, "encrypted": True, "created_by": current_user["id"], "created_by_name": real_name_for_user(current_user), "created_at": serialize_datetime(now)}
+    await db.backup_records.insert_one(record.copy())
+    return BackupRecord(**hydrate_einvoice_document(record))
+
+
+@api_router.get("/admin/security/backups/{backup_id}/download")
+async def download_backup(backup_id: str, _: dict = Depends(require_admin)):
+    record = await db.backup_records.find_one({"id": backup_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
+    path = BACKUP_DIR / record["file_name"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="ملف النسخة غير موجود")
+    return FileResponse(str(path), filename=record["file_name"], media_type="application/octet-stream")
+
+
+@api_router.post("/admin/security/backups/restore")
+async def restore_backup(password: str = Form(...), backup_file: UploadFile = File(...), _: dict = Depends(require_admin)):
+    content = await backup_file.read()
+    try:
+        salt_line, encrypted = content.split(b"\n", 1)
+        salt = base64.b64decode(salt_line)
+        raw = fernet_from_password(password, salt).decrypt(encrypted)
+        data = json.loads(raw.decode())
+    except (ValueError, InvalidToken, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="كلمة المرور أو ملف النسخة الاحتياطية غير صحيح")
+    for collection_name, documents in data.items():
+        if collection_name not in BACKUP_COLLECTIONS:
+            continue
+        await db[collection_name].delete_many({})
+        if documents:
+            await db[collection_name].insert_many(documents)
+    return {"message": "تمت استعادة النسخة الاحتياطية وتسجيل العملية في سجل التدقيق", "collections": list(data.keys())}
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -2417,6 +2708,67 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+BACKUP_DIR = ROOT_DIR.parent / "secure_backups"
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_audit_body(value):
+    if not isinstance(value, dict):
+        return None
+    hidden_keys = {"password", "current_password", "new_password", "otp_code", "token", "secret"}
+    clean = {}
+    for key, item in value.items():
+        clean[key] = "***" if key.lower() in hidden_keys else item
+    return clean
+
+
+async def audit_event(request: Request, status_code: int, body: Optional[dict] = None):
+    if request.url.path.startswith("/api/admin/security/audit-logs"):
+        return
+    user_id = None
+    username = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user_id = payload.get("sub")
+            user = await db.users.find_one({"id": user_id}, {"_id": 0, "username": 1})
+            username = user.get("username") if user else None
+        except Exception:
+            pass
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "username": username,
+        "user_id": user_id,
+        "method": request.method,
+        "path": request.url.path,
+        "action": f"{request.method} {request.url.path}",
+        "status_code": status_code,
+        "request_body": sanitize_audit_body(body),
+        "ip_address": request.client.host if request.client else None,
+        "created_at": serialize_datetime(datetime.now(timezone.utc)),
+    })
+
+
+@app.middleware("http")
+async def audit_log_middleware(request: Request, call_next):
+    raw_body = await request.body()
+    parsed_body = None
+    if raw_body and request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path.startswith("/api"):
+        try:
+            parsed_body = json.loads(raw_body.decode())
+        except Exception:
+            parsed_body = None
+
+    async def receive():
+        return {"type": "http.request", "body": raw_body, "more_body": False}
+
+    request = Request(request.scope, receive)
+    response = await call_next(request)
+    if request.url.path.startswith("/api") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        await audit_event(request, response.status_code, parsed_body)
+    return response
 
 # Configure logging
 logging.basicConfig(
