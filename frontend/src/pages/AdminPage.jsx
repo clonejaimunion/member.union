@@ -36,6 +36,7 @@ const permissionLabels = {
 
 const defaultUserForm = {
   username: "",
+  full_name: "",
   password: "",
   permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false, add_revenue: true, approve_revenue: false, add_expense: true, approve_reports: false, lock_periods: false, edit_revenue: false, delete_revenue: false, edit_expense: false, delete_expense: false, unlock_periods: false, manage_einvoice: false, manage_backups: false },
   is_active: true,
@@ -67,7 +68,9 @@ export default function AdminPage() {
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState(defaultUserForm);
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "" });
+  const [adminFullName, setAdminFullName] = useState(user?.full_name || "");
   const [resetPasswords, setResetPasswords] = useState({});
+  const [fullNameEdits, setFullNameEdits] = useState({});
   const [twoFactor, setTwoFactor] = useState(null);
   const [otpCode, setOtpCode] = useState("");
   const [bankForm, setBankForm] = useState({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
@@ -161,6 +164,10 @@ export default function AdminPage() {
     loadModuleSettings();
   }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings]);
 
+  useEffect(() => {
+    setAdminFullName(user?.full_name || "");
+  }, [user?.full_name]);
+
   const toggleNewPermission = (permission) => {
     setNewUser((current) => ({
       ...current,
@@ -220,6 +227,18 @@ export default function AdminPage() {
       await refreshMe();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر تغيير كلمة المرور");
+    }
+  };
+
+  const saveAdminFullName = async (event) => {
+    event.preventDefault();
+    try {
+      await api.put("/admin/profile", { full_name: adminFullName });
+      toast.success("تم حفظ الاسم بالكامل للأدمن");
+      await refreshMe();
+      loadUsers();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ الاسم بالكامل");
     }
   };
 
@@ -459,6 +478,10 @@ export default function AdminPage() {
                 <Label htmlFor="new_username" data-testid="new-user-username-label">اسم المستخدم</Label>
                 <Input id="new_username" value={newUser.username} onChange={(event) => setNewUser((current) => ({ ...current, username: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-user-username-input" />
               </div>
+              <div className="space-y-2" data-testid="new-user-full-name-wrapper">
+                <Label htmlFor="new_full_name" data-testid="new-user-full-name-label">الاسم بالكامل (باللغة العربية)</Label>
+                <Input id="new_full_name" value={newUser.full_name} onChange={(event) => setNewUser((current) => ({ ...current, full_name: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-user-full-name-input" />
+              </div>
               <div className="space-y-2" data-testid="new-user-password-wrapper">
                 <Label htmlFor="new_password" data-testid="new-user-password-label">كلمة المرور</Label>
                 <Input id="new_password" type="password" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-user-password-input" />
@@ -541,7 +564,7 @@ export default function AdminPage() {
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-checklist-card"><h3 className="mb-3 font-extrabold" data-testid="security-checklist-title">مؤشرات المراجعة والأمان</h3><ul className="space-y-2 text-sm font-bold text-slate-700" data-testid="security-checklist"><li>✓ سجل تدقيق لكل عمليات API المؤثرة.</li><li>✓ إقفال شهري وسنوي ومنع تعديل الفترات المقفلة.</li><li>✓ اعتماد تقارير برقم اعتماد واسم معتمد وملاحظات.</li><li>✓ نسخ احتياطي مشفر بكلمة مرور يحددها الأدمن.</li><li>✓ دليل إجراءات: الإدخال للمستخدم، المراجعة للأدمن، الاعتماد عبر هذه الصفحة، الإقفال بعد نهاية الفترة، وفتح الفترة بسبب مكتوب.</li><li>⚠ مراجعة محاسب قانوني ومراجعة أمنية خارجية لا تتم آلياً ويجب تنفيذها بواسطة مختص.</li></ul></div>
             </div>}
-            {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="grid grid-cols-1 gap-2 rounded bg-slate-50 p-3 text-xs font-bold md:grid-cols-[120px_110px_90px_120px_1fr_70px]" data-testid={`audit-log-row-${item.id}`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-hour`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-username`}>{item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-action`}>{item.action}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div>)}</div></div>}
+            {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="rounded bg-slate-50 p-3 text-xs font-bold" data-testid={`audit-log-row-${item.id}`}><div className="grid grid-cols-1 gap-2 md:grid-cols-[110px_105px_180px_80px]" data-testid={`audit-log-row-${item.id}-summary`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-actor-full-name`}>{item.actor_full_name || item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div><p className="mt-2 leading-6 text-slate-700" data-testid={`audit-log-row-${item.id}-arabic-description`}>{item.arabic_description || item.action}</p></div>)}</div></div>}
           </section>}
 
           {activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
@@ -552,6 +575,7 @@ export default function AdminPage() {
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div data-testid={`user-row-${item.id}-identity`}>
                       <p className="text-lg font-extrabold" data-testid={`user-row-${item.id}-username`}>{item.username}</p>
+                      <p className="text-sm font-extrabold text-emerald-700" data-testid={`user-row-${item.id}-full-name`}>{item.full_name}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`user-row-${item.id}-role`}>{item.role === "admin" ? "أدمن" : "مستخدم إدخال"}</p>
                     </div>
                     <div className="flex flex-wrap gap-2" data-testid={`user-row-${item.id}-badges`}>
@@ -570,6 +594,10 @@ export default function AdminPage() {
                             {item.permissions?.[key] ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
                           </button>
                         ))}
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]" data-testid={`user-row-${item.id}-full-name-actions`}>
+                        <Input placeholder="الاسم بالكامل باللغة العربية" value={fullNameEdits[item.id] ?? item.full_name ?? ""} onChange={(event) => setFullNameEdits((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 rounded-lg bg-white text-right" data-testid={`user-row-${item.id}-full-name-input`} />
+                        <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { full_name: fullNameEdits[item.id] ?? item.full_name })} data-testid={`user-row-${item.id}-save-full-name-button`}>حفظ الاسم بالكامل</Button>
                       </div>
                       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]" data-testid={`user-row-${item.id}-security-actions`}>
                       <Input type="password" placeholder="كلمة مرور جديدة" value={resetPasswords[item.id] || ""} onChange={(event) => setResetPasswords((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 rounded-lg bg-white text-right" data-testid={`user-row-${item.id}-reset-password-input`} />
@@ -651,6 +679,11 @@ export default function AdminPage() {
               <LockKeyhole className="h-6 w-6 text-slate-950" />
               <h2 className="text-2xl font-extrabold" data-testid="admin-password-title">تغيير كلمة مرور الأدمن</h2>
             </div>
+            <form onSubmit={saveAdminFullName} className="mb-5 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="admin-full-name-form">
+              <Label htmlFor="admin_full_name" data-testid="admin-full-name-label">الاسم بالكامل (باللغة العربية)</Label>
+              <Input id="admin_full_name" value={adminFullName} onChange={(event) => setAdminFullName(event.target.value)} required className="h-12 rounded-lg bg-white text-right" data-testid="admin-full-name-input" />
+              <Button type="submit" variant="outline" className="h-11 w-full rounded-lg bg-white" data-testid="save-admin-full-name-button"><Save className="h-4 w-4" /> حفظ الاسم بالكامل</Button>
+            </form>
             <form onSubmit={changeAdminPassword} className="space-y-4" data-testid="admin-password-form">
               <div className="space-y-2" data-testid="admin-current-password-wrapper">
                 <Label htmlFor="current_password" data-testid="admin-current-password-label">كلمة المرور الحالية</Label>

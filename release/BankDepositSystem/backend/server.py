@@ -240,6 +240,7 @@ class UserPermissions(BaseModel):
 class UserPublic(BaseModel):
     id: str
     username: str
+    full_name: str
     role: str
     organization_id: str
     organization_name: str
@@ -270,12 +271,14 @@ class AuthResponse(BaseModel):
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3)
+    full_name: str = Field(..., min_length=3, max_length=120)
     password: str = Field(..., min_length=8)
     permissions: UserPermissions = Field(default_factory=UserPermissions)
     is_active: bool = True
 
 
 class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, min_length=3, max_length=120)
     password: Optional[str] = Field(default=None, min_length=8)
     permissions: Optional[UserPermissions] = None
     is_active: Optional[bool] = None
@@ -284,6 +287,10 @@ class UserUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
+
+
+class AdminProfileUpdate(BaseModel):
+    full_name: str = Field(..., min_length=3, max_length=120)
 
 
 class AppSettingsResponse(BaseModel):
@@ -678,10 +685,12 @@ class AuditLogResponse(BaseModel):
 
     id: str
     username: Optional[str] = None
+    actor_full_name: Optional[str] = None
     user_id: Optional[str] = None
     method: str
     path: str
     action: str
+    arabic_description: Optional[str] = None
     status_code: int
     request_body: Optional[dict] = None
     ip_address: Optional[str] = None
@@ -1235,11 +1244,22 @@ def approval_number_for_user(user: dict) -> str:
 
 
 def real_name_for_user(user: dict) -> str:
-    if user.get("username") == "admin":
-        return "يوسف عبدالغني"
-    if user.get("username") == "entryuser":
-        return "دعاء علي"
     return user.get("full_name") or user.get("username") or "مستخدم النظام"
+
+
+def validate_arabic_full_name(full_name: str) -> str:
+    value = re.sub(r"\s+", " ", (full_name or "").strip())
+    if len(value) < 3:
+        raise HTTPException(status_code=400, detail="الاسم بالكامل باللغة العربية مطلوب")
+    if not re.search(r"[\u0600-\u06FF]", value):
+        raise HTTPException(status_code=400, detail="يجب إدخال الاسم بالكامل باللغة العربية")
+    return value
+
+
+def default_admin_full_name(username: str, organization_id: str) -> str:
+    if username == "admin_union" or organization_id == "general-union":
+        return "مدير النقابة العامة"
+    return "مدير مشروع التكافل الاجتماعي"
 
 
 def period_key(period_type: str, year: int, month: Optional[int] = None) -> str:
@@ -1421,6 +1441,7 @@ def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
 
 def hydrate_user(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key not in {"_id", "password_hash", "totp_secret", "totp_pending_secret"}}
+    clean["full_name"] = clean.get("full_name") or default_admin_full_name(clean.get("username", ""), clean.get("organization_id", DEFAULT_ORGANIZATION_ID)) if clean.get("role") == "admin" else clean.get("full_name") or "مستخدم النظام"
     clean["organization_id"] = clean.get("organization_id") or DEFAULT_ORGANIZATION_ID
     clean["organization_name"] = clean.get("organization_name") or ORGANIZATIONS.get(clean["organization_id"], ORGANIZATIONS[DEFAULT_ORGANIZATION_ID])["name"]
     clean["organization_modules"] = normalize_modules(clean["organization_id"], clean.get("organization_modules"))
@@ -1815,6 +1836,8 @@ async def ensure_default_admin():
     except Exception:
         pass
     await db.users.update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID, "organization_name": ORGANIZATIONS[DEFAULT_ORGANIZATION_ID]["name"]}})
+    await db.users.update_many({"role": "admin", "full_name": {"$exists": False}}, {"$set": {"full_name": "مدير النظام"}})
+    await db.users.update_many({"role": {"$ne": "admin"}, "full_name": {"$exists": False}}, {"$set": {"full_name": "مستخدم النظام"}})
     await db.users.create_index([("organization_id", 1), ("username", 1)], unique=True)
     await ensure_organization_seed_data()
     now = datetime.now(timezone.utc)
@@ -1837,6 +1860,7 @@ async def ensure_default_admin():
         existing = await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
         document = {
             "username": username,
+            "full_name": existing.get("full_name") if existing and existing.get("full_name") else default_admin_full_name(username, organization_id),
             "organization_id": organization_id,
             "organization_name": organization["name"],
             "organization_modules": normalize_modules(organization_id, organization.get("modules")),
@@ -1975,6 +1999,7 @@ async def create_user(payload: UserCreate, admin_user: dict = Depends(require_ad
     document = {
         "id": str(uuid.uuid4()),
         "username": payload.username.strip(),
+        "full_name": validate_arabic_full_name(payload.full_name),
         "organization_id": organization_id,
         "organization_name": organization["name"],
         "organization_modules": normalize_modules(organization_id, organization.get("modules")),
@@ -2002,6 +2027,8 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
         raise HTTPException(status_code=403, detail="لا يمكن تعديل أدمن آخر")
 
     updates = {"updated_at": serialize_datetime(datetime.now(timezone.utc))}
+    if payload.full_name is not None:
+        updates["full_name"] = validate_arabic_full_name(payload.full_name)
     if payload.password:
         updates["password_hash"] = hash_password(payload.password)
         updates["must_change_password"] = False
@@ -2012,6 +2039,14 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
 
     await db.users.update_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"$set": updates})
     updated = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
+    return public_user(updated)
+
+
+@api_router.put("/admin/profile", response_model=UserPublic)
+async def update_admin_profile(payload: AdminProfileUpdate, admin_user: dict = Depends(require_admin)):
+    updates = {"full_name": validate_arabic_full_name(payload.full_name), "updated_at": serialize_datetime(datetime.now(timezone.utc))}
+    await db.users.update_one(with_organization({"id": admin_user["id"]}, admin_user.get("organization_id")), {"$set": updates})
+    updated = await db.users.find_one(with_organization({"id": admin_user["id"]}, admin_user.get("organization_id")), {"_id": 0})
     return public_user(updated)
 
 
@@ -3237,11 +3272,50 @@ def sanitize_audit_body(value):
     return clean
 
 
+def arabic_audit_description(method: str, path: str, status_code: int, body: Optional[dict], actor_name: Optional[str]) -> str:
+    method_labels = {"GET": "استعرض", "POST": "أضاف أو نفذ", "PUT": "عدّل", "PATCH": "حدّث", "DELETE": "حذف"}
+    area_labels = [
+        ("/api/admin/users", "إدارة المستخدمين"),
+        ("/api/admin/profile", "بيانات الأدمن"),
+        ("/api/admin/change-password", "كلمة مرور الأدمن"),
+        ("/api/admin/2fa", "Google Authenticator"),
+        ("/api/admin/security/periods", "إقفال وفتح الفترات"),
+        ("/api/admin/security/report-approvals", "اعتماد التقارير"),
+        ("/api/admin/security/backups", "النسخ الاحتياطي"),
+        ("/api/admin/organization/modules", "إعدادات الخواص"),
+        ("/api/admin/app-settings", "الإعدادات العامة"),
+        ("/api/admin/banks", "إدارة البنوك"),
+        ("/api/banking-expenses", "المصروفات البنكية"),
+        ("/api/electronic-invoice", "الفاتورة الإلكترونية"),
+        ("/api/electronic-invoices", "الفاتورة الإلكترونية"),
+        ("/api/revenues", "الإيرادات"),
+        ("/api/expenses", "المصروفات"),
+        ("/api/banks", "البنوك والودائع والتقارير"),
+        ("/api/auth/login", "تسجيل الدخول"),
+        ("/api/auth/me", "بيانات الجلسة"),
+    ]
+    area = next((label for prefix, label in area_labels if path.startswith(prefix)), "النظام")
+    action = method_labels.get(method, "نفذ إجراء")
+    result = "بنجاح" if status_code < 400 else "وفشل الإجراء"
+    actor = actor_name or "مستخدم غير معروف"
+    details = []
+    if isinstance(body, dict):
+        for key in ["username", "full_name", "system_name", "organization_name", "bank_id", "year", "month", "report_name", "status", "action"]:
+            value = body.get(key)
+            if value not in (None, ""):
+                details.append(f"{key}: {value}")
+        if "modules" in body:
+            details.append("تم تعديل إعدادات الخواص")
+    detail_text = f"، تفاصيل: {'، '.join(details)}" if details else ""
+    return f"قام {actor} بـ{action} داخل {area} على المسار {path}، وكانت النتيجة {result} بكود {status_code}{detail_text}."
+
+
 async def audit_event(request: Request, status_code: int, body: Optional[dict] = None):
     if request.url.path.startswith("/api/admin/security/audit-logs"):
         return
     user_id = None
     username = None
+    actor_full_name = None
     organization_id = DEFAULT_ORGANIZATION_ID
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
@@ -3249,19 +3323,22 @@ async def audit_event(request: Request, status_code: int, body: Optional[dict] =
             payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
             organization_id = payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
-            user = await db.users.find_one({"id": user_id}, {"_id": 0, "username": 1, "organization_id": 1})
+            user = await db.users.find_one({"id": user_id}, {"_id": 0, "username": 1, "full_name": 1, "organization_id": 1})
             username = user.get("username") if user else None
+            actor_full_name = real_name_for_user(user) if user else None
             organization_id = user.get("organization_id", organization_id) if user else organization_id
         except Exception:
             pass
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "username": username,
+        "actor_full_name": actor_full_name,
         "user_id": user_id,
         "organization_id": organization_id,
         "method": request.method,
         "path": request.url.path,
         "action": f"{request.method} {request.url.path}",
+        "arabic_description": arabic_audit_description(request.method, request.url.path, status_code, sanitize_audit_body(body), actor_full_name),
         "status_code": status_code,
         "request_body": sanitize_audit_body(body),
         "ip_address": request.client.host if request.client else None,

@@ -8,6 +8,7 @@
 ## Admin Permissions
 - Admin can access `/secure-admin-control-panel`.
 - Admin can create users with scoped permissions.
+- Admin can update mandatory Arabic `full_name` from the admin password/profile section.
 - Admin can change the admin password only after providing the current password.
 - Admin can start Google Authenticator setup and receive QR/manual secret.
 
@@ -40,6 +41,12 @@
 - Admin users are scoped to one organization.
 - Existing operational data is migrated to `social-solidarity`.
 - Collections that store operational data must be filtered by authenticated user's `organization_id`.
+
+## Full Name and Audit Log
+- Creating a user requires `full_name` in Arabic.
+- Updating admin profile requires `full_name` in Arabic.
+- Audit logs must include `actor_full_name` and `arabic_description`.
+- Audit log UI must display the Arabic actor name and Arabic detailed description.
 
 ## Organization API Checks
 ```bash
