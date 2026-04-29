@@ -3495,8 +3495,12 @@ async def get_trial_balance(
                 key = line["account_id"]
             else:
                 account = account_by_code.get(line.get("account_code")) or account_by_name.get(line.get("account_name"))
+                if account_type and (not account or account.get("account_type") != account_type):
+                    continue
                 key = account.get("id") if account else (line.get("account_code") or line.get("account_name"))
             if key not in rows_by_key:
+                if account_type and (account.get("account_type") if account else line.get("account_type")) != account_type:
+                    continue
                 rows_by_key[key] = {
                     "account_id": account.get("id") if account else line.get("account_id"),
                     "account_code": account.get("code") if account else line.get("account_code"),
