@@ -149,7 +149,20 @@ export default function StatementsPage() {
             </section>
 
             <section className="space-y-4" data-testid="volume-statement-section">
-              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="volume-statement-title">كشف إجمالي حجم الودائع</h3>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="volume-statement-heading">
+                <h3 className="text-2xl font-extrabold text-slate-950" data-testid="volume-statement-title">كشف إجمالي حجم الودائع</h3>
+                <ExportReportButtons
+                  title={`كشف إجمالي حجم الودائع - ${volume?.bank?.name || detailed?.bank?.name || bankId}`}
+                  fileName={`كشف-إجمالي-حجم-الودائع-${volume?.bank?.name || detailed?.bank?.name || bankId}`}
+                  selectors={["[data-testid='volume-statement-section']"]}
+                  printSelectors={["[data-testid='volume-statement-section']"]}
+                  disabled={!volume || loading}
+                  pdfLabel="طباعة PDF"
+                  pdfTestId="print-volume-statement-pdf-button"
+                  excelTestId="export-volume-statement-excel-button"
+                  wordTestId="export-volume-statement-word-button"
+                />
+              </div>
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="volume-table-wrapper">
                 <Table data-testid="volume-table">
                   <TableHeader className="bg-emerald-700">

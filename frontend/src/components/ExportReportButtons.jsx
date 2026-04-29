@@ -73,13 +73,31 @@ export const exportReportToOffice = ({ title, fileName, selectors, type }) => {
   downloadContent(buildOfficeHtml({ title, selectors, excel }), `${safeFileName(fileName || title)}.${extension}`, mimeType);
 };
 
-export const ExportReportButtons = ({ title, fileName, selectors, disabled = false, className = "", pdfLabel = "PDF", pdfTestId, excelTestId, wordTestId }) => {
+export const ExportReportButtons = ({ title, fileName, selectors, printSelectors = null, disabled = false, className = "", pdfLabel = "PDF", pdfTestId, excelTestId, wordTestId }) => {
   const exportExcel = () => exportReportToOffice({ title, fileName, selectors, type: "excel" });
   const exportWord = () => exportReportToOffice({ title, fileName, selectors, type: "word" });
+  const printPdf = () => {
+    if (!printSelectors) {
+      window.print();
+      return;
+    }
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+    printWindow.document.write(buildOfficeHtml({ title, selectors: printSelectors, excel: false }));
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
 
   return (
     <div className={`flex flex-wrap gap-2 print:hidden ${className}`} data-export-exclude="true" data-testid={`${pdfTestId || "report-export-pdf-button"}-group`}>
-      <Button type="button" onClick={() => window.print()} disabled={disabled} className="h-11 rounded-lg bg-slate-950 px-5 text-white disabled:opacity-50" data-testid={pdfTestId || "report-export-pdf-button"}>
+      <Button type="button" onClick={printPdf} disabled={disabled} className="h-11 rounded-lg bg-slate-950 px-5 text-white disabled:opacity-50" data-testid={pdfTestId || "report-export-pdf-button"}>
         <FileDown className="h-4 w-4" /> {pdfLabel}
       </Button>
       <Button type="button" onClick={exportExcel} disabled={disabled} variant="outline" className="h-11 rounded-lg bg-white px-5 disabled:opacity-50" data-testid={excelTestId || "report-export-excel-button"}>
