@@ -66,6 +66,17 @@ ORGANIZATIONS = {
     },
 }
 
+MODULE_DEFINITIONS = {
+    "deposits": "فوائد الودائع",
+    "reconciliations": "التسويات البنكية",
+    "revenues": "الإيرادات",
+    "expenses": "المصروفات",
+    "expenses_analysis": "تحليل المصروفات",
+    "banking_expenses": "المصروفات البنكية",
+    "ledger": "دفتر الأستاذ",
+    "electronic_invoice": "الفاتورة الإلكترونية",
+}
+
 # Create the main app without a prefix
 app = FastAPI()
 
@@ -232,6 +243,7 @@ class UserPublic(BaseModel):
     role: str
     organization_id: str
     organization_name: str
+    organization_modules: Dict[str, bool] = Field(default_factory=dict)
     permissions: UserPermissions
     is_active: bool
     totp_enabled: bool = False
@@ -294,6 +306,19 @@ class OrganizationResponse(BaseModel):
     id: str
     name: str
     login_label: str
+    modules: Dict[str, bool] = Field(default_factory=dict)
+
+
+class OrganizationModulesResponse(BaseModel):
+    organization_id: str
+    organization_name: str
+    modules: Dict[str, bool]
+    module_labels: Dict[str, str]
+    updated_at: str
+
+
+class OrganizationModulesUpdate(BaseModel):
+    modules: Dict[str, bool]
 
 
 class TwoFactorSetupResponse(BaseModel):
@@ -897,6 +922,21 @@ def organization_id_or_default() -> str:
     return CURRENT_ORGANIZATION_ID.get() or DEFAULT_ORGANIZATION_ID
 
 
+def default_modules_for_organization(organization_id: str) -> Dict[str, bool]:
+    modules = {key: True for key in MODULE_DEFINITIONS}
+    if organization_id == "social-solidarity":
+        modules["electronic_invoice"] = False
+    return modules
+
+
+def normalize_modules(organization_id: str, modules: Optional[dict] = None) -> Dict[str, bool]:
+    normalized = default_modules_for_organization(organization_id)
+    for key, value in (modules or {}).items():
+        if key in normalized:
+            normalized[key] = bool(value)
+    return normalized
+
+
 def with_organization(query: Optional[dict] = None, organization_id: Optional[str] = None) -> dict:
     next_query = dict(query or {})
     next_query["organization_id"] = organization_id or organization_id_or_default()
@@ -914,7 +954,9 @@ async def get_organization_document(organization_id: Optional[str] = None) -> di
     if not base:
         raise HTTPException(status_code=404, detail="الجهة غير موجودة")
     custom = await db.organizations.find_one({"id": org_id}, {"_id": 0})
-    return {**base, **(custom or {})}
+    document = {**base, **(custom or {})}
+    document["modules"] = normalize_modules(org_id, document.get("modules"))
+    return document
 
 
 async def list_organization_documents() -> List[dict]:
@@ -948,6 +990,16 @@ async def get_app_settings_document() -> dict:
     await db.app_settings.insert_one(document.copy())
     document["shortcut_icon_url"] = app_icon_url(document.get("shortcut_icon_updated_at"))
     return document
+
+
+def build_organization_modules_response(organization: dict) -> OrganizationModulesResponse:
+    return OrganizationModulesResponse(
+        organization_id=organization["id"],
+        organization_name=organization["name"],
+        modules=normalize_modules(organization["id"], organization.get("modules")),
+        module_labels=MODULE_DEFINITIONS,
+        updated_at=organization.get("updated_at") or serialize_datetime(datetime.now(timezone.utc)),
+    )
 
 
 def build_app_settings_response(document: dict) -> AppSettingsResponse:
@@ -1371,6 +1423,7 @@ def hydrate_user(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key not in {"_id", "password_hash", "totp_secret", "totp_pending_secret"}}
     clean["organization_id"] = clean.get("organization_id") or DEFAULT_ORGANIZATION_ID
     clean["organization_name"] = clean.get("organization_name") or ORGANIZATIONS.get(clean["organization_id"], ORGANIZATIONS[DEFAULT_ORGANIZATION_ID])["name"]
+    clean["organization_modules"] = normalize_modules(clean["organization_id"], clean.get("organization_modules"))
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -1514,6 +1567,28 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
     return build_app_settings_response(document)
 
 
+@api_router.get("/admin/organization/modules", response_model=OrganizationModulesResponse)
+async def get_admin_organization_modules(admin_user: dict = Depends(require_admin)):
+    organization = await get_organization_document(admin_user.get("organization_id"))
+    return build_organization_modules_response(organization)
+
+
+@api_router.put("/admin/organization/modules", response_model=OrganizationModulesResponse)
+async def update_admin_organization_modules(payload: OrganizationModulesUpdate, admin_user: dict = Depends(require_admin)):
+    organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    organization = await get_organization_document(organization_id)
+    next_modules = normalize_modules(organization_id, payload.modules)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    await db.organizations.update_one(
+        {"id": organization_id},
+        {"$set": {"modules": next_modules, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "name": organization["name"], "login_label": organization["login_label"], "created_at": now_iso}},
+        upsert=True,
+    )
+    await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_modules": next_modules, "updated_at": now_iso}})
+    updated = await get_organization_document(organization_id)
+    return build_organization_modules_response(updated)
+
+
 @api_router.post("/admin/app-settings/icon", response_model=AppSettingsResponse)
 async def update_admin_app_icon(icon_file: UploadFile = File(...), _: dict = Depends(require_admin)):
     content = await icon_file.read()
@@ -1551,20 +1626,23 @@ def require_permission(permission_name: str):
 
 
 async def require_einvoice_enabled(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("organization_id") == "social-solidarity":
+    organization = await get_organization_document(current_user.get("organization_id"))
+    if not normalize_modules(organization["id"], organization.get("modules")).get("electronic_invoice", True):
         raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
     return current_user
 
 
 async def require_einvoice_admin(current_user: dict = Depends(require_admin)) -> dict:
-    if current_user.get("organization_id") == "social-solidarity":
+    organization = await get_organization_document(current_user.get("organization_id"))
+    if not normalize_modules(organization["id"], organization.get("modules")).get("electronic_invoice", True):
         raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
     return current_user
 
 
 def require_einvoice_permission(permission_names: List[str]):
     async def checker(current_user: dict = Depends(require_any_permission(permission_names))) -> dict:
-        if current_user.get("organization_id") == "social-solidarity":
+        organization = await get_organization_document(current_user.get("organization_id"))
+        if not normalize_modules(organization["id"], organization.get("modules")).get("electronic_invoice", True):
             raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
         return current_user
 
@@ -1761,6 +1839,7 @@ async def ensure_default_admin():
             "username": username,
             "organization_id": organization_id,
             "organization_name": organization["name"],
+            "organization_modules": normalize_modules(organization_id, organization.get("modules")),
             "role": "admin",
             "permissions": admin_permissions,
             "is_active": True,
@@ -1785,9 +1864,13 @@ async def ensure_organization_seed_data():
     for organization in ORGANIZATIONS.values():
         await db.organizations.update_one(
             {"id": organization["id"]},
-            {"$setOnInsert": {**organization, "created_at": now_iso, "updated_at": now_iso}},
+            {"$setOnInsert": {**organization, "modules": default_modules_for_organization(organization["id"]), "created_at": now_iso, "updated_at": now_iso}},
             upsert=True,
         )
+        existing = await db.organizations.find_one({"id": organization["id"]}, {"_id": 0})
+        modules = normalize_modules(organization["id"], existing.get("modules") if existing else None)
+        await db.organizations.update_one({"id": organization["id"]}, {"$set": {"modules": modules}})
+        await db.users.update_many({"organization_id": organization["id"]}, {"$set": {"organization_modules": modules}})
     tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
@@ -1894,6 +1977,7 @@ async def create_user(payload: UserCreate, admin_user: dict = Depends(require_ad
         "username": payload.username.strip(),
         "organization_id": organization_id,
         "organization_name": organization["name"],
+        "organization_modules": normalize_modules(organization_id, organization.get("modules")),
         "password_hash": hash_password(payload.password),
         "role": "user",
         "permissions": payload.permissions.model_dump(),

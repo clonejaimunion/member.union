@@ -5,19 +5,21 @@ import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
+import { isModuleEnabled } from "@/lib/modules";
 
 export default function ModuleSelection() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { settings } = useAppSettings();
   const organizationName = user?.organization_name || settings.system_name;
-  const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
-  const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
-  const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
-  const canUseExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses;
-  const canUseBankingExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
-  const canUseLedger = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
-  const canUseElectronicInvoice = user?.organization_id !== "social-solidarity" && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
+  const canUseDeposits = isModuleEnabled(user, "deposits") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports);
+  const canUseReconciliation = isModuleEnabled(user, "reconciliations") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations);
+  const canUseRevenues = isModuleEnabled(user, "revenues") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
+  const canUseExpenses = isModuleEnabled(user, "expenses") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
+  const canUseExpensesAnalysis = isModuleEnabled(user, "expenses_analysis") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
+  const canUseBankingExpenses = isModuleEnabled(user, "banking_expenses") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseLedger = isModuleEnabled(user, "ledger") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
 
   const modules = [
     canUseDeposits && {
@@ -41,7 +43,7 @@ export default function ModuleSelection() {
       icon: ReceiptText,
       testId: "module-revenues-card",
     },
-    canUseExpenses && {
+    canUseExpensesAnalysis && {
       title: "المصروفات",
       description: "أذون الصرف، الاستحقاقات، الاستقطاعات، الصافي، والتقرير.",
       path: "/expenses",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
+import { moduleDefinitions } from "@/lib/modules";
 
 const permissionLabels = {
   enter_deposits: "إدخال ودائع",
@@ -49,6 +50,7 @@ const defaultApprovalForm = { report_type: "عام", report_name: "", report_ref
 
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
+  { id: "feature-settings", title: "إعدادات الخواص", subtitle: "تفعيل وتعطيل وحدات الجهة", icon: SlidersHorizontal },
   { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
   { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
   { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
@@ -84,11 +86,15 @@ export default function AdminPage() {
   const [systemName, setSystemName] = useState("نظام محاسبي متكامل");
   const [organizationName, setOrganizationName] = useState("");
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
+  const [moduleSettings, setModuleSettings] = useState({});
+  const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [moduleSettingsLoading, setModuleSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState("add-user");
   const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
-  const visiblePermissionEntries = Object.entries(permissionLabels).filter(([key]) => user?.organization_id !== "social-solidarity" || key !== "manage_einvoice");
+  const effectiveModuleSettings = Object.keys(moduleSettings).length ? moduleSettings : (user?.organization_modules || {});
+  const visiblePermissionEntries = Object.entries(permissionLabels).filter(([key]) => key !== "manage_einvoice" || effectiveModuleSettings.electronic_invoice !== false);
   const visiblePermissionKeys = new Set(visiblePermissionEntries.map(([key]) => key));
 
   const loadUsers = useCallback(() => {
@@ -137,12 +143,23 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadModuleSettings = useCallback(async () => {
+    try {
+      const response = await api.get("/admin/organization/modules");
+      setModuleSettings(response.data.modules || {});
+      setModuleLabels(response.data.module_labels || moduleDefinitions);
+    } catch (error) {
+      toast.error("تعذر تحميل إعدادات الخواص");
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadBanks();
     loadSecurityReview();
     loadAppSettings();
-  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings]);
+    loadModuleSettings();
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings]);
 
   const toggleNewPermission = (permission) => {
     setNewUser((current) => ({
@@ -375,6 +392,25 @@ export default function AdminPage() {
     }
   };
 
+  const toggleModuleSetting = (moduleKey) => {
+    setModuleSettings((current) => ({ ...current, [moduleKey]: current[moduleKey] === false }));
+  };
+
+  const saveModuleSettings = async () => {
+    setModuleSettingsLoading(true);
+    try {
+      const response = await api.put("/admin/organization/modules", { modules: moduleSettings });
+      setModuleSettings(response.data.modules || {});
+      setModuleLabels(response.data.module_labels || moduleDefinitions);
+      await refreshMe();
+      toast.success("تم حفظ إعدادات الخواص");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ إعدادات الخواص");
+    } finally {
+      setModuleSettingsLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="admin-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="admin-header">
@@ -585,6 +621,29 @@ export default function AdminPage() {
               </div>
               <Button type="button" onClick={saveShortcutIcon} disabled={settingsLoading} variant="outline" className="h-11 w-full rounded-lg bg-white" data-testid="save-shortcut-icon-button"><FileUp className="h-4 w-4" /> تحديث شعار الاختصار</Button>
             </div>
+          </section>}
+
+          {activeAdminSection === "feature-settings" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="feature-settings-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="feature-settings-heading">
+              <SlidersHorizontal className="h-6 w-6 text-emerald-700" />
+              <div>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="feature-settings-eyebrow">إعدادات الخواص</p>
+                <h2 className="text-2xl font-extrabold" data-testid="feature-settings-title">تفعيل وتعطيل وحدات الجهة</h2>
+              </div>
+            </div>
+            <p className="mb-4 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600" data-testid="feature-settings-note">التغييرات تطبق على الجهة الحالية فقط: {user?.organization_name}</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="feature-settings-grid">
+              {Object.entries(moduleLabels).map(([moduleKey, label]) => {
+                const enabled = moduleSettings[moduleKey] !== false;
+                return (
+                  <button key={moduleKey} type="button" onClick={() => toggleModuleSetting(moduleKey)} className={`flex items-center justify-between rounded-lg border p-4 text-sm font-extrabold transition-colors ${enabled ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-500"}`} data-testid={`feature-module-${moduleKey}-toggle`}>
+                    <span data-testid={`feature-module-${moduleKey}-label`}>{label}</span>
+                    {enabled ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
+                  </button>
+                );
+              })}
+            </div>
+            <Button type="button" onClick={saveModuleSettings} disabled={moduleSettingsLoading} className="mt-5 h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-feature-settings-button"><Save className="h-4 w-4" /> حفظ إعدادات الخواص</Button>
           </section>}
 
           {activeAdminSection === "admin-password" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-password-section">
