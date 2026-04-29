@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
+import { Eye, Pencil, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
@@ -123,7 +123,7 @@ export default function BankReconciliationPage() {
         amount: String(item.net_amount ?? item.gross_amount ?? ""),
         check_date: formatSourceCheckDate(item.issued_at),
       }));
-    return rows.length ? rows : [emptyCheck()];
+    return rows;
   }, [formatSourceCheckDate]);
 
   const rowsFromRevenueChecks = useCallback((items) => {
@@ -135,7 +135,7 @@ export default function BankReconciliationPage() {
         amount: String(item.amount ?? ""),
         check_date: formatSourceCheckDate(item.dated || item.issued_at),
       }));
-    return rows.length ? rows : [emptyCheck()];
+    return rows;
   }, [formatSourceCheckDate]);
 
   const syncChecksFromRecords = useCallback(async (type = "both", silent = false) => {
@@ -217,26 +217,6 @@ export default function BankReconciliationPage() {
     document.addEventListener("click", handleDocumentClick, true);
     return () => document.removeEventListener("click", handleDocumentClick, true);
   }, [hasUnsavedChanges, location.pathname, navigate, requestNavigation]);
-
-  const updateCheck = (type, index, field, value) => {
-    const nextValue = field === "amount"
-        ? sanitizeDecimalInput(value)
-        : field === "check_date"
-          ? sanitizeDayMonthInput(value)
-          : value;
-    const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
-    setter((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: nextValue } : item));
-  };
-
-  const addCheck = (type) => {
-    const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
-    setter((current) => [...current, emptyCheck()]);
-  };
-
-  const removeCheck = (type, index) => {
-    const setter = type === "outstanding" ? setOutstandingChecks : setCollectionChecks;
-    setter((current) => current.filter((_, itemIndex) => itemIndex !== index));
-  };
 
   const normalizeDayMonthToDateTime = (value) => {
     if (!value) return `${new Date().getFullYear()}-01-01T00:00:00`;
@@ -389,29 +369,29 @@ export default function BankReconciliationPage() {
           <Button type="button" onClick={() => syncChecksFromRecords(type)} disabled={syncingChecks} variant="outline" className="h-10 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100" data-testid={`sync-${type}-checks-button`}>
             <Save className="h-4 w-4" /> {type === "outstanding" ? "تحديث من المصروفات" : "تحديث من الإيرادات"}
           </Button>
-          <Button type="button" onClick={() => addCheck(type)} variant="outline" className="h-10 rounded-lg bg-white" data-testid={`add-${type}-check-button`}>
-            <Plus className="h-4 w-4" /> إضافة شيك
-          </Button>
         </div>
       </div>
       <div className="space-y-3" data-testid={`${type}-checks-list`}>
+        {checks.length === 0 && (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-sm font-bold text-slate-500" data-testid={`${type}-checks-empty-state`}>
+            {type === "outstanding" ? "لا توجد شيكات لم تقدم للصرف في المصروفات" : "لا توجد شيكات تحت التحصيل في الإيرادات"}
+          </div>
+        )}
         {checks.map((item, index) => (
           <div key={`${type}-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid={`${type}-check-row-${index}`}>
             <div className="space-y-2" data-testid={`${type}-check-${index}-number-wrapper`}>
               <Label data-testid={`${type}-check-${index}-number-label`}>رقم الشيك</Label>
-              <Input inputMode="numeric" dir="ltr" value={item.check_number} onChange={(event) => updateCheck(type, index, "check_number", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-number-input`} />
+              <Input readOnly aria-readonly="true" inputMode="numeric" dir="ltr" value={item.check_number} className="h-11 rounded-lg bg-slate-100 text-right font-extrabold text-slate-700" data-testid={`${type}-check-${index}-number-input`} />
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-amount-wrapper`}>
               <Label data-testid={`${type}-check-${index}-amount-label`}>مبلغ الشيك</Label>
-              <Input inputMode="decimal" dir="ltr" value={item.amount} onChange={(event) => updateCheck(type, index, "amount", event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`${type}-check-${index}-amount-input`} />
+              <Input readOnly aria-readonly="true" inputMode="decimal" dir="ltr" value={item.amount} className="h-11 rounded-lg bg-slate-100 text-right font-extrabold text-slate-700" data-testid={`${type}-check-${index}-amount-input`} />
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-date-wrapper`}>
               <Label data-testid={`${type}-check-${index}-date-label`}>تاريخ الشيك</Label>
-              <Input inputMode="numeric" dir="ltr" value={item.check_date} onChange={(event) => updateCheck(type, index, "check_date", event.target.value)} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-white text-center font-extrabold tracking-wider" data-testid={`${type}-check-${index}-date-input`} />
+              <Input readOnly aria-readonly="true" inputMode="numeric" dir="ltr" value={item.check_date} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-slate-100 text-center font-extrabold tracking-wider text-slate-700" data-testid={`${type}-check-${index}-date-input`} />
             </div>
-            <button type="button" onClick={() => removeCheck(type, index)} className="mt-7 inline-flex h-11 items-center justify-center rounded-lg border border-red-200 bg-red-50 px-3 text-red-700 hover:bg-red-100 print:hidden" data-testid={`remove-${type}-check-${index}-button`}>
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <div className="mt-7 hidden h-11 md:block" data-testid={`${type}-check-${index}-protected-spacer`} />
           </div>
         ))}
       </div>
