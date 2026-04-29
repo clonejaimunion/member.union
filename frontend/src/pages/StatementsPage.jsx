@@ -26,6 +26,8 @@ const monthLabels = Object.fromEntries(monthOptions);
 const currentDate = new Date();
 const firstReportYear = 2025;
 const yearOptions = Array.from({ length: Math.max(currentDate.getFullYear() + 10, 2035) - firstReportYear + 1 }, (_, index) => String(firstReportYear + index));
+const defaultDetailedFilter = { period_type: "yearly", year: String(Math.max(currentDate.getFullYear(), firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") };
+const defaultPreviousFilter = { period_type: "yearly", year: String(Math.max(currentDate.getFullYear() - 1, firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") };
 
 export default function StatementsPage() {
   const { bankId } = useParams();
@@ -33,13 +35,22 @@ export default function StatementsPage() {
   const [volume, setVolume] = useState(null);
   const [deposits, setDeposits] = useState([]);
   const [selectedDepositId, setSelectedDepositId] = useState("all");
-  const [detailedFilter, setDetailedFilter] = useState({ period_type: "yearly", year: String(Math.max(currentDate.getFullYear(), firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") });
+  const [detailedFilter, setDetailedFilter] = useState(defaultDetailedFilter);
+  const [draftDetailedFilter, setDraftDetailedFilter] = useState(defaultDetailedFilter);
+  const [previousFilter, setPreviousFilter] = useState(defaultPreviousFilter);
+  const [draftPreviousFilter, setDraftPreviousFilter] = useState(defaultPreviousFilter);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    const params = new URLSearchParams({ period_type: detailedFilter.period_type, year: detailedFilter.year });
+    const params = new URLSearchParams({
+      period_type: detailedFilter.period_type,
+      year: detailedFilter.year,
+      previous_period_type: previousFilter.period_type,
+      previous_year: previousFilter.year,
+    });
     if (detailedFilter.period_type === "monthly") params.set("month", String(Number(detailedFilter.month)));
+    if (previousFilter.period_type === "monthly") params.set("previous_month", String(Number(previousFilter.month)));
     Promise.all([
       api.get(`/banks/${bankId}/statements/detailed?${params.toString()}`),
       api.get(`/banks/${bankId}/statements/volume`),
@@ -53,7 +64,7 @@ export default function StatementsPage() {
       setVolume(null);
       setDeposits([]);
     }).finally(() => setLoading(false));
-  }, [bankId, detailedFilter]);
+  }, [bankId, detailedFilter, previousFilter]);
 
   const filteredDetailedRows = useMemo(() => {
     const rows = detailed?.rows || [];
@@ -73,6 +84,8 @@ export default function StatementsPage() {
   }), [filteredDetailedRows]);
 
   const detailedPeriodLabel = detailedFilter.period_type === "monthly" ? `${monthLabels[detailedFilter.month]} / ${detailedFilter.year}` : `سنة ${detailedFilter.year}`;
+  const previousPeriodLabel = previousFilter.period_type === "monthly" ? `${monthLabels[previousFilter.month]} / ${previousFilter.year}` : `سنة ${previousFilter.year}`;
+  const combinedPeriodLabel = `عائد الفترة: ${detailedPeriodLabel} — مستحق سنوات سابقة: ${previousPeriodLabel}`;
 
   return (
     <BankShell>
@@ -115,12 +128,14 @@ export default function StatementsPage() {
               </div>
               <div className="rounded-xl bg-emerald-50 p-5 text-emerald-900" data-testid="statement-kpi-current">
                 <Sigma className="mb-3 h-6 w-6" />
-                <p className="text-sm font-bold text-emerald-700" data-testid="statement-kpi-current-label">عائد السنة الحالية</p>
+                <p className="text-sm font-bold text-emerald-700" data-testid="statement-kpi-current-label">عائد الفترة المختارة</p>
+                <p className="mt-1 text-xs font-extrabold text-emerald-700" data-testid="statement-kpi-current-period">{detailedPeriodLabel}</p>
                 <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-current-value">{formatCurrency(filteredTotals.current)}</p>
               </div>
               <div className="rounded-xl bg-amber-50 p-5 text-amber-950" data-testid="statement-kpi-previous">
                 <FileSpreadsheet className="mb-3 h-6 w-6" />
                 <p className="text-sm font-bold text-amber-700" data-testid="statement-kpi-previous-label">مستحق سنوات سابقة</p>
+                <p className="mt-1 text-xs font-extrabold text-amber-700" data-testid="statement-kpi-previous-period">{previousPeriodLabel}</p>
                 <p className="mt-2 text-2xl font-extrabold" data-testid="statement-kpi-previous-value">{formatCurrency(filteredTotals.previous)}</p>
               </div>
               <div className="rounded-xl bg-white p-5 ring-1 ring-slate-200" data-testid="statement-kpi-count">
@@ -147,24 +162,48 @@ export default function StatementsPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" data-testid="detailed-interest-statement-heading">
                 <div data-testid="detailed-interest-title-block">
                   <h3 className="text-2xl font-extrabold text-slate-950" data-testid="detailed-interest-statement-title">كشف العوائد التفريغي</h3>
-                  <p className="mt-1 text-sm font-bold text-slate-500" data-testid="detailed-interest-period-label">{detailedPeriodLabel}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-500" data-testid="detailed-interest-period-label">{combinedPeriodLabel}</p>
                 </div>
-                <div className="flex flex-wrap items-end gap-2 print:hidden" data-testid="detailed-interest-actions">
-                  <div data-testid="detailed-interest-period-type-wrapper">
-                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-period-type-label">عرض الكشف</label>
-                    <select value={detailedFilter.period_type} onChange={(event) => setDetailedFilter((current) => ({ ...current, period_type: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-period-type-select"><option value="yearly" data-testid="detailed-interest-period-yearly-option">سنوي</option><option value="monthly" data-testid="detailed-interest-period-monthly-option">شهري</option></select>
+                <div className="flex flex-wrap items-end gap-3 print:hidden" data-testid="detailed-interest-actions">
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3" data-testid="current-interest-filter-panel">
+                    <p className="mb-2 text-xs font-extrabold text-emerald-700" data-testid="current-interest-filter-title">تصفية عائد الفترة</p>
+                    <div className="flex flex-wrap items-end gap-2" data-testid="current-interest-filter-controls">
+                      <div data-testid="detailed-interest-period-type-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-period-type-label">عرض العائد</label>
+                        <select value={draftDetailedFilter.period_type} onChange={(event) => setDraftDetailedFilter((current) => ({ ...current, period_type: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-period-type-select"><option value="yearly" data-testid="detailed-interest-period-yearly-option">سنوي</option><option value="monthly" data-testid="detailed-interest-period-monthly-option">شهري</option></select>
+                      </div>
+                      <div data-testid="detailed-interest-year-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-year-label">السنة</label>
+                        <select value={draftDetailedFilter.year} onChange={(event) => setDraftDetailedFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-year-select">{yearOptions.map((year) => <option key={year} value={year} data-testid={`detailed-interest-year-option-${year}`}>{year}</option>)}</select>
+                      </div>
+                      <div data-testid="detailed-interest-month-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-month-label">الشهر</label>
+                        <select value={draftDetailedFilter.month} onChange={(event) => setDraftDetailedFilter((current) => ({ ...current, month: event.target.value }))} disabled={draftDetailedFilter.period_type === "yearly"} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold disabled:opacity-50" data-testid="detailed-interest-month-select">{monthOptions.map(([value, label]) => <option key={value} value={value} data-testid={`detailed-interest-month-option-${value}`}>{label}</option>)}</select>
+                      </div>
+                      <button type="button" onClick={() => setDetailedFilter(draftDetailedFilter)} className="h-11 rounded-lg bg-emerald-700 px-4 text-sm font-extrabold text-white transition-transform hover:-translate-y-0.5" data-testid="apply-current-interest-filter-button">تطبيق العائد</button>
+                    </div>
                   </div>
-                  <div data-testid="detailed-interest-year-wrapper">
-                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-year-label">السنة</label>
-                    <select value={detailedFilter.year} onChange={(event) => setDetailedFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-year-select">{yearOptions.map((year) => <option key={year} value={year} data-testid={`detailed-interest-year-option-${year}`}>{year}</option>)}</select>
-                  </div>
-                  <div data-testid="detailed-interest-month-wrapper">
-                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-month-label">الشهر</label>
-                    <select value={detailedFilter.month} onChange={(event) => setDetailedFilter((current) => ({ ...current, month: event.target.value }))} disabled={detailedFilter.period_type === "yearly"} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold disabled:opacity-50" data-testid="detailed-interest-month-select">{monthOptions.map(([value, label]) => <option key={value} value={value} data-testid={`detailed-interest-month-option-${value}`}>{label}</option>)}</select>
+                  <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-3" data-testid="previous-interest-filter-panel">
+                    <p className="mb-2 text-xs font-extrabold text-amber-700" data-testid="previous-interest-filter-title">تصفية مستحق سنوات سابقة</p>
+                    <div className="flex flex-wrap items-end gap-2" data-testid="previous-interest-filter-controls">
+                      <div data-testid="previous-interest-period-type-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="previous-interest-period-type-label">عرض المستحق</label>
+                        <select value={draftPreviousFilter.period_type} onChange={(event) => setDraftPreviousFilter((current) => ({ ...current, period_type: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="previous-interest-period-type-select"><option value="yearly" data-testid="previous-interest-period-yearly-option">سنوي</option><option value="monthly" data-testid="previous-interest-period-monthly-option">شهري</option></select>
+                      </div>
+                      <div data-testid="previous-interest-year-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="previous-interest-year-label">السنة</label>
+                        <select value={draftPreviousFilter.year} onChange={(event) => setDraftPreviousFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="previous-interest-year-select">{yearOptions.map((year) => <option key={year} value={year} data-testid={`previous-interest-year-option-${year}`}>{year}</option>)}</select>
+                      </div>
+                      <div data-testid="previous-interest-month-wrapper">
+                        <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="previous-interest-month-label">الشهر</label>
+                        <select value={draftPreviousFilter.month} onChange={(event) => setDraftPreviousFilter((current) => ({ ...current, month: event.target.value }))} disabled={draftPreviousFilter.period_type === "yearly"} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold disabled:opacity-50" data-testid="previous-interest-month-select">{monthOptions.map(([value, label]) => <option key={value} value={value} data-testid={`previous-interest-month-option-${value}`}>{label}</option>)}</select>
+                      </div>
+                      <button type="button" onClick={() => setPreviousFilter(draftPreviousFilter)} className="h-11 rounded-lg bg-amber-600 px-4 text-sm font-extrabold text-white transition-transform hover:-translate-y-0.5" data-testid="apply-previous-interest-filter-button">تطبيق المستحق</button>
+                    </div>
                   </div>
                   <ExportReportButtons
-                    title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${detailedPeriodLabel}`}
-                    fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${detailedPeriodLabel}`}
+                    title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${combinedPeriodLabel}`}
+                    fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${combinedPeriodLabel}`}
                     selectors={["[data-testid='detailed-interest-statement-section']"]}
                     printSelectors={["[data-testid='detailed-interest-statement-section']"]}
                     disabled={!detailed || loading}
@@ -179,7 +218,7 @@ export default function StatementsPage() {
                 <Table data-testid="detailed-interest-table">
                   <TableHeader className="bg-slate-950">
                     <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', detailedFilter.period_type === "monthly" ? 'عائد الشهر' : 'عائد السنة', 'مستحق سنوات سابقة', 'الإجمالي المستحق'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', `عائد ${detailedPeriodLabel}`, `مستحق ${previousPeriodLabel}`, 'الإجمالي المستحق للفترات المختارة'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`detailed-interest-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>

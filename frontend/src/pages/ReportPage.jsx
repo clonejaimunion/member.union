@@ -56,7 +56,7 @@ export default function ReportPage({ type }) {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="report-type-label">{report?.year || "—"}</p>
               <h2 className="text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="report-title">{title}</h2>
               <p className="max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="report-description">
-                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر الفعلية من التقويم.
+                التقرير يعرض بيانات الوديعة أعلى الجدول ثم العائد الشهري محسوبًا من العائد السنوي ÷ 365 × أيام الشهر الفعلية من التقويم.
               </p>
               <ExportReportButtons
                 title={exportTitle}

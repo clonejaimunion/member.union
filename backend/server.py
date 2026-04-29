@@ -1938,11 +1938,16 @@ async def get_detailed_statement(
     period_type: Literal["yearly", "monthly"] = Query(default="yearly"),
     year: Optional[int] = Query(default=None, ge=2020, le=2200),
     month: Optional[int] = Query(default=None, ge=1, le=12),
+    previous_period_type: Literal["yearly", "monthly"] = Query(default="yearly"),
+    previous_year: Optional[int] = Query(default=None, ge=2020, le=2200),
+    previous_month: Optional[int] = Query(default=None, ge=1, le=12),
     _: dict = Depends(require_permission("view_reports")),
 ):
     bank = await ensure_bank_async(bank_id)
     current_year = year or datetime.now(timezone.utc).year
     target_month = month or datetime.now(timezone.utc).month
+    previous_target_year = previous_year or current_year - 1
+    previous_target_month = previous_month or target_month
     deposits = await get_bank_deposits(bank_id)
     rows = []
     total_volume = 0.0
@@ -1953,11 +1958,15 @@ async def get_detailed_statement(
         interest_rows, annual_interest, yearly_total = calculate_interest_rows(deposit, current_year)
         if period_type == "monthly":
             current_total = next((row.interest_amount for row in interest_rows if row.month_number == target_month), 0.0)
-            previous_breakdown = []
-            previous_total = 0.0
         else:
             current_total = yearly_total
-            previous_breakdown, previous_total = calculate_previous_years(deposit, current_year)
+
+        previous_interest_rows, _, previous_yearly_total = calculate_interest_rows(deposit, previous_target_year)
+        if previous_period_type == "monthly":
+            previous_total = next((row.interest_amount for row in previous_interest_rows if row.month_number == previous_target_month), 0.0)
+        else:
+            previous_total = previous_yearly_total
+        previous_breakdown = [PreviousYearBreakdown(year=previous_target_year, interest_amount=previous_total)] if previous_total > 0 else []
         total_volume += deposit.amount
         total_current += current_total
         total_previous += previous_total
