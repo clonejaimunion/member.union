@@ -104,8 +104,8 @@ def test_current_year_uses_real_month_days_january_2026(api_client, base_url, ad
     assert january["interest_amount"] == 3100
 
 
-# Accrued module: leap-year daily interest must divide by 366 (not 365)
-def test_accrued_2024_daily_interest_uses_366(api_client, base_url, admin_headers):
+# Accrued module: leap-year daily interest must still divide by fixed 365 days
+def test_accrued_2024_daily_interest_uses_fixed_365(api_client, base_url, admin_headers):
     unique = uuid.uuid4().hex[:8]
     payload = {
         "account_number": f"TEST-LEAP-ACC-{unique}",
@@ -133,7 +133,7 @@ def test_accrued_2024_daily_interest_uses_366(api_client, base_url, admin_header
     assert data["year"] == 2024
     assert len(data["rows"]) == 1
     row = data["rows"][0]
-    assert row["daily_interest_amount"] == 546.44
+    assert row["daily_interest_amount"] == 547.94
 
 
 # Accrued module: required scenario (18/01 link date) should produce 13 days due until 31/12/2024
@@ -165,7 +165,7 @@ def test_accrued_2024_linked_on_18_jan_has_13_days_until_year_end(api_client, ba
     assert row["last_payment_date"] == "2024-12-18"
     assert row["accrued_until_date"] == "2024-12-31"
     assert row["accrued_days"] == 13
-    assert row["accrued_interest_amount"] == 7103.72
+    assert row["accrued_interest_amount"] == 7123.22
 
 
 # Admin module: creating banks must be admin-only

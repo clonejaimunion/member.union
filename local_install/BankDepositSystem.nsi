@@ -1,6 +1,8 @@
 Unicode True
 Name "Bank Deposit Interest System"
 OutFile "..\dist\BankDepositSystemSetup.exe"
+Icon "accounting_app.ico"
+UninstallIcon "accounting_app.ico"
 InstallDir "$LOCALAPPDATA\Bank Deposit Interest System"
 RequestExecutionLevel user
 
@@ -12,8 +14,8 @@ Section "Install"
   File /r "..\release\BankDepositSystem\*"
 
   CreateDirectory "$SMPROGRAMS\Bank Deposit Interest System"
-  CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat"
-  CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat"
+  CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
+  CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd

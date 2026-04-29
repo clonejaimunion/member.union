@@ -90,7 +90,7 @@ export default function LoginPage() {
             <ShieldCheck className="h-4 w-4" /> حماية بالصلاحيات والمصادقة الثنائية
           </div>
           <div className="space-y-4" data-testid="login-hero-title-block">
-            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الارادي</h2>
+            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الاراضي</h2>
             <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">نظام محاسبي متكامل</p>
           </div>
         </section>

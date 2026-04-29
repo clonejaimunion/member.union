@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { formatCurrency, formatNumber } from "@/lib/format";
+import { useAuth } from "@/contexts/AuthContext";
 
 const monthOptions = [
   ["01", "يناير"],
@@ -28,9 +29,19 @@ const firstReportYear = 2025;
 const yearOptions = Array.from({ length: Math.max(currentDate.getFullYear() + 10, 2035) - firstReportYear + 1 }, (_, index) => String(firstReportYear + index));
 const defaultDetailedFilter = { period_type: "yearly", year: String(Math.max(currentDate.getFullYear(), firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") };
 const defaultPreviousFilter = { period_type: "yearly", year: String(Math.max(currentDate.getFullYear() - 1, firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") };
+const yearValues = new Set(yearOptions);
+const monthValues = new Set(monthOptions.map(([value]) => value));
+
+const normalizeFilterPreference = (value, fallback) => {
+  const periodType = value?.period_type === "monthly" ? "monthly" : "yearly";
+  const year = yearValues.has(String(value?.year)) ? String(value.year) : fallback.year;
+  const month = monthValues.has(String(value?.month).padStart(2, "0")) ? String(value.month).padStart(2, "0") : fallback.month;
+  return { period_type: periodType, year, month };
+};
 
 export default function StatementsPage() {
   const { bankId } = useParams();
+  const { user } = useAuth();
   const [detailed, setDetailed] = useState(null);
   const [volume, setVolume] = useState(null);
   const [deposits, setDeposits] = useState([]);
@@ -39,7 +50,35 @@ export default function StatementsPage() {
   const [draftDetailedFilter, setDraftDetailedFilter] = useState(defaultDetailedFilter);
   const [previousFilter, setPreviousFilter] = useState(defaultPreviousFilter);
   const [draftPreviousFilter, setDraftPreviousFilter] = useState(defaultPreviousFilter);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const filterStorageKey = useMemo(() => user?.id ? `bank-statement-filters:${user.id}:${bankId}` : null, [user?.id, bankId]);
+
+  useEffect(() => {
+    setPreferencesLoaded(false);
+    if (!filterStorageKey) return;
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(filterStorageKey) || "{}");
+      const nextDetailed = normalizeFilterPreference(saved.detailedFilter, defaultDetailedFilter);
+      const nextPrevious = normalizeFilterPreference(saved.previousFilter, defaultPreviousFilter);
+      setDetailedFilter(nextDetailed);
+      setDraftDetailedFilter(nextDetailed);
+      setPreviousFilter(nextPrevious);
+      setDraftPreviousFilter(nextPrevious);
+    } catch {
+      setDetailedFilter(defaultDetailedFilter);
+      setDraftDetailedFilter(defaultDetailedFilter);
+      setPreviousFilter(defaultPreviousFilter);
+      setDraftPreviousFilter(defaultPreviousFilter);
+    } finally {
+      setPreferencesLoaded(true);
+    }
+  }, [filterStorageKey]);
+
+  useEffect(() => {
+    if (!filterStorageKey || !preferencesLoaded) return;
+    window.localStorage.setItem(filterStorageKey, JSON.stringify({ detailedFilter, previousFilter }));
+  }, [filterStorageKey, preferencesLoaded, detailedFilter, previousFilter]);
 
   useEffect(() => {
     setLoading(true);
