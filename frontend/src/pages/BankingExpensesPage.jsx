@@ -52,9 +52,10 @@ const getBankRules = (bankId) => {
       paymentOrderFee: 10,
       incomingCheckFee: 20,
       incomingExternalCheckFee: (amount) => clamp(Number(amount || 0) * 0.003, 50, 500),
-      outgoingTransferFee: (amount) => clamp(Number(amount || 0) * 0.003, 50, 500),
-      cashFee: (amount) => Number(amount || 0) < 20000 ? 20 : 0,
-      issuedCheckFee: () => 0,
+      issuedCheckFee: 20,
+      issuedExternalCheckFee: (amount) => clamp(Number(amount || 0) * 0.003, 50, 500),
+      outgoingTransferFee: (amount) => clamp(Number(amount || 0) * 0.002, 50, 500),
+      cashDepositFee: (amount) => Number(amount || 0) > 0 ? Math.max(Number(amount || 0) * 0.002, 20) : 0,
       depositLinkFee: () => 0,
     };
   }
@@ -64,9 +65,10 @@ const getBankRules = (bankId) => {
     paymentOrderFee: 0,
     incomingCheckFee: 0,
     incomingExternalCheckFee: () => 0,
+    issuedCheckFee: 0,
+    issuedExternalCheckFee: () => 0,
     outgoingTransferFee: () => 0,
-    cashFee: () => 0,
-    issuedCheckFee: () => 0,
+    cashDepositFee: () => 0,
     depositLinkFee: () => 0,
   };
 };
@@ -176,9 +178,10 @@ export default function BankingExpensesPage() {
     const externalChecksCollected = checksCollected.filter((item) => item.check_clearing_type === "external");
     const checksUnderCollection = revenues.filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "under_collection");
     const paidChecks = expenses.filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "paid");
-    const notPresentedChecks = expenses.filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "not_presented");
+    const internalPaidChecks = paidChecks.filter((item) => (item.check_clearing_type || "internal") === "internal");
+    const externalPaidChecks = paidChecks.filter((item) => item.check_clearing_type === "external");
     const transfers = expenses.filter((item) => item.payment_method === "bank_transfer");
-    const cashExpenses = expenses.filter((item) => item.payment_method === "cash");
+    const cashDeposits = revenues.filter((item) => item.collection_method === "cash");
     const depositLinks = deposits.filter((item) => String(item.creation_datetime || item.created_at || "").startsWith(isYearly ? filters.year : `${filters.year}-${filters.month}`));
     const statementCount = isYearly ? 12 : 1;
 
@@ -190,10 +193,10 @@ export default function BankingExpensesPage() {
       { key: "checks-under", statement: "شيكات تحت التحصيل", count: checksUnderCollection.length, bankExpense: 0 },
       { key: "monthly-statement", statement: isYearly ? "رسوم كشف الحساب الشهري - سنوي" : "رسوم كشف الحساب الشهري", count: statementCount, bankExpense: statementCount * rules.monthlyStatementFee },
       ...manualFields.map((field) => ({ key: field.key, statement: field.label, count: manual[field.key] ? 1 : 0, bankExpense: Number(sanitizeDecimalInput(manual[field.key]) || 0) })),
-      { key: "paid-checks", statement: "شيكات تم الصرف", count: paidChecks.length, bankExpense: paidChecks.reduce((sum, item) => sum + rules.issuedCheckFee(item.net_amount), 0) },
-      { key: "not-presented-checks", statement: "شيكات لم تقدم للصرف", count: notPresentedChecks.length, bankExpense: 0 },
+      { key: "paid-checks-internal", statement: "شيكات تم الصرف داخلي", count: internalPaidChecks.length, bankExpense: internalPaidChecks.length * rules.issuedCheckFee },
+      { key: "paid-checks-external", statement: "شيكات تم الصرف خارجي", count: externalPaidChecks.length, bankExpense: externalPaidChecks.reduce((sum, item) => sum + rules.issuedExternalCheckFee(item.net_amount), 0) },
       { key: "bank-transfer-beneficiary", statement: "تحويل بنكي لمستفيد", count: transfers.length, bankExpense: transfers.reduce((sum, item) => sum + rules.outgoingTransferFee(item.net_amount), 0) },
-      { key: "cash", statement: "نقدي", count: cashExpenses.length, bankExpense: cashExpenses.reduce((sum, item) => sum + rules.cashFee(item.net_amount), 0) },
+      { key: "cash-deposit", statement: "عمولة إيداع نقدي", count: cashDeposits.length, bankExpense: cashDeposits.reduce((sum, item) => sum + rules.cashDepositFee(item.amount), 0) },
       { key: "deposit-link", statement: "ربط وديعة", count: depositLinks.length, bankExpense: depositLinks.reduce((sum, item) => sum + rules.depositLinkFee(item.amount), 0) },
     ];
   }, [deposits, expenses, filters.month, filters.year, isYearly, manual, revenues, rules]);

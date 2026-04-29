@@ -17,6 +17,7 @@ import { formatCurrency, formatEgpLabel, sanitizeDecimalInput, sanitizeDigitsInp
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyDeduction = () => ({ amount: "", statement: "" });
 const methodLabels = { cash: "نقداً", check: "شيك", bank_transfer: "تحويل بنكي" };
+const checkClearingLabels = { internal: "داخلي", external: "خارجي" };
 const organizationLabels = { general_union: "النقابة العامة", social_solidarity_project: "مشروع التكافل الاجتماعي" };
 const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة" };
 const monthLabels = { "01": "يناير", "02": "فبراير", "03": "مارس", "04": "أبريل", "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس", "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر" };
@@ -34,6 +35,7 @@ const defaultForm = () => ({
   payment_method: "cash",
   payee_name: "",
   check_number: "",
+  check_clearing_type: "internal",
   transfer_number: "",
   transfer_to: "",
   membership_number: "",
@@ -148,6 +150,7 @@ export default function ExpensesPage() {
     governorate: form.expense_category === "death_benefits" ? form.governorate.trim() : null,
     payee_name: ["cash", "check"].includes(form.payment_method) ? form.payee_name.trim() : null,
     check_number: form.payment_method === "check" ? sanitizeDigitsInput(form.check_number) : null,
+    check_clearing_type: form.payment_method === "check" ? form.check_clearing_type : null,
     transfer_number: form.payment_method === "bank_transfer" ? sanitizeDigitsInput(form.transfer_number) : null,
     transfer_to: form.payment_method === "bank_transfer" ? form.transfer_to.trim() : null,
     deductions: form.deductions.filter((item) => item.statement.trim() || Number(sanitizeDecimalInput(item.amount) || 0) > 0).map((item) => ({ amount: Number(sanitizeDecimalInput(item.amount) || 0), statement: item.statement.trim() })),
@@ -179,6 +182,7 @@ export default function ExpensesPage() {
       payment_method: item.payment_method || "cash",
       payee_name: item.payee_name || "",
       check_number: item.check_number || "",
+      check_clearing_type: item.check_clearing_type || "internal",
       transfer_number: item.transfer_number || "",
       transfer_to: item.transfer_to || "",
       membership_number: item.membership_number || "",
@@ -220,7 +224,7 @@ export default function ExpensesPage() {
 
   const detailLabel = (item) => item.payment_method === "bank_transfer" ? "تم التحويل إلى" : "يصرف للسيد";
   const detailValue = (item) => item.payment_method === "bank_transfer" ? item.transfer_to : item.payee_name;
-  const refValue = (item) => item.payment_method === "check" ? item.check_number : item.payment_method === "bank_transfer" ? item.transfer_number : "—";
+  const refValue = (item) => item.payment_method === "check" ? `${item.check_number || "—"} — ${checkClearingLabels[item.check_clearing_type || "internal"]}` : item.payment_method === "bank_transfer" ? item.transfer_number : "—";
 
   const DetailGrid = ({ item, prefix }) => (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid={`${prefix}-details-grid`}>
@@ -310,6 +314,7 @@ export default function ExpensesPage() {
             <div className="space-y-2" data-testid="expense-bank-wrapper"><Label data-testid="expense-bank-label">اسم البنك</Label><select value={form.bank_id} onChange={(event) => updateForm("bank_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`expense-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
             {form.payment_method !== "bank_transfer" && <div className="space-y-2" data-testid="expense-payee-wrapper"><Label data-testid="expense-payee-label">يصرف للسيد</Label><Input required value={form.payee_name} onChange={(event) => updateForm("payee_name", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-payee-input" /></div>}
             {form.payment_method === "check" && <div className="space-y-2" data-testid="expense-check-wrapper"><Label data-testid="expense-check-label">رقم الشيك</Label><Input required inputMode="numeric" value={form.check_number} onChange={(event) => updateForm("check_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-check-input" /></div>}
+            {form.payment_method === "check" && <div className="space-y-2" data-testid="expense-check-clearing-wrapper"><Label data-testid="expense-check-clearing-label">نوع الشيك</Label><select value={form.check_clearing_type} onChange={(event) => updateForm("check_clearing_type", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="expense-check-clearing-select"><option value="internal" data-testid="expense-check-clearing-internal-option">داخلي</option><option value="external" data-testid="expense-check-clearing-external-option">خارجي</option></select></div>}
             {form.payment_method === "bank_transfer" && <><div className="space-y-2" data-testid="expense-transfer-wrapper"><Label data-testid="expense-transfer-label">رقم عملية التحويل</Label><Input required inputMode="numeric" value={form.transfer_number} onChange={(event) => updateForm("transfer_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-input" /></div><div className="space-y-2" data-testid="expense-transfer-to-wrapper"><Label data-testid="expense-transfer-to-label">تم التحويل إلى</Label><Input required value={form.transfer_to} onChange={(event) => updateForm("transfer_to", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-transfer-to-input" /></div></>}
             {form.expense_category === "death_benefits" && <><div className="space-y-2" data-testid="expense-membership-wrapper"><Label data-testid="expense-membership-label">رقم العضوية</Label><Input required inputMode="numeric" value={form.membership_number} onChange={(event) => updateForm("membership_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-membership-input" /></div><div className="space-y-2" data-testid="expense-committee-wrapper"><Label data-testid="expense-committee-label">لجنة</Label><Input required value={form.committee} onChange={(event) => updateForm("committee", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-committee-input" /></div><div className="space-y-2" data-testid="expense-governorate-wrapper"><Label data-testid="expense-governorate-label">محافظة</Label><Input required value={form.governorate} onChange={(event) => updateForm("governorate", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-governorate-input" /></div></>}
             <div className="space-y-2" data-testid="expense-gross-amount-wrapper"><Label data-testid="expense-gross-amount-label">المبلغ الكلي</Label><Input required inputMode="decimal" value={form.gross_amount} onChange={(event) => updateForm("gross_amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="expense-gross-amount-input" /></div>

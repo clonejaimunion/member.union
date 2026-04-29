@@ -347,6 +347,7 @@ class ExpenseBase(BaseModel):
     payment_method: Literal["cash", "check", "bank_transfer"]
     payee_name: Optional[str] = None
     check_number: Optional[str] = None
+    check_clearing_type: Optional[Literal["internal", "external"]] = None
     transfer_number: Optional[str] = None
     transfer_to: Optional[str] = None
     membership_number: Optional[str] = None
@@ -501,6 +502,8 @@ def hydrate_expense(document: dict) -> dict:
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     if clean.get("payment_method") == "check" and not clean.get("bank_payment_status"):
         clean["bank_payment_status"] = "not_presented"
+    if clean.get("payment_method") == "check" and not clean.get("check_clearing_type"):
+        clean["check_clearing_type"] = "internal"
     return clean
 
 
@@ -622,6 +625,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         "payment_method": payload.payment_method,
         "payee_name": payload.payee_name.strip() if payload.payment_method in ["cash", "check"] and payload.payee_name else None,
         "check_number": normalize_digit_text(payload.check_number) if payload.payment_method == "check" else None,
+        "check_clearing_type": payload.check_clearing_type if payload.payment_method == "check" else None,
         "transfer_number": normalize_digit_text(payload.transfer_number) if payload.payment_method == "bank_transfer" else None,
         "transfer_to": payload.transfer_to.strip() if payload.payment_method == "bank_transfer" and payload.transfer_to else None,
         "membership_number": normalize_digit_text(payload.membership_number) if payload.expense_category == "death_benefits" and payload.membership_number else None,
