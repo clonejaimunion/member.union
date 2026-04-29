@@ -941,7 +941,7 @@ def public_user(user_document: dict) -> UserPublic:
 
 
 def days_in_year(year: int) -> int:
-    return 366 if calendar.isleap(year) else 365
+    return 365
 
 
 def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestRow], float, float]:
