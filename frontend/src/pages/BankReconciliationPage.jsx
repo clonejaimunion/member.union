@@ -39,6 +39,7 @@ export default function BankReconciliationPage() {
   const [editingReconciliationId, setEditingReconciliationId] = useState(null);
   const [selectedHistoryYear, setSelectedHistoryYear] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncingChecks, setSyncingChecks] = useState(false);
   const [committedFormSnapshot, setCommittedFormSnapshot] = useState("");
   const [leavePromptOpen, setLeavePromptOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
@@ -106,10 +107,68 @@ export default function BankReconciliationPage() {
     });
   }, [bankId]);
 
+  const formatSourceCheckDate = useCallback((value) => {
+    if (!value) return currentDayMonth();
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return currentDayMonth();
+    return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+
+  const rowsFromExpenseChecks = useCallback((items) => {
+    const rows = items
+      .filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "not_presented")
+      .filter((item) => item.check_number || Number(item.net_amount || item.gross_amount || 0) > 0)
+      .map((item) => ({
+        check_number: item.check_number || "",
+        amount: String(item.net_amount ?? item.gross_amount ?? ""),
+        check_date: formatSourceCheckDate(item.issued_at),
+      }));
+    return rows.length ? rows : [emptyCheck()];
+  }, [formatSourceCheckDate]);
+
+  const rowsFromRevenueChecks = useCallback((items) => {
+    const rows = items
+      .filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "under_collection")
+      .filter((item) => item.check_number || Number(item.amount || 0) > 0)
+      .map((item) => ({
+        check_number: item.check_number || "",
+        amount: String(item.amount ?? ""),
+        check_date: formatSourceCheckDate(item.dated || item.issued_at),
+      }));
+    return rows.length ? rows : [emptyCheck()];
+  }, [formatSourceCheckDate]);
+
+  const syncChecksFromRecords = useCallback(async (type = "both", silent = false) => {
+    setSyncingChecks(true);
+    try {
+      const requests = [];
+      if (type === "both" || type === "outstanding") requests.push(api.get(`/expenses?bank_id=${bankId}&payment_method=check`));
+      if (type === "both" || type === "collection") requests.push(api.get(`/revenues?bank_id=${bankId}&collection_method=check`));
+      const responses = await Promise.all(requests);
+      let responseIndex = 0;
+      if (type === "both" || type === "outstanding") {
+        setOutstandingChecks(rowsFromExpenseChecks(responses[responseIndex].data));
+        responseIndex += 1;
+      }
+      if (type === "both" || type === "collection") {
+        setCollectionChecks(rowsFromRevenueChecks(responses[responseIndex].data));
+      }
+      if (!silent) toast.success("تم تحديث بيانات الشيكات تلقائياً");
+    } catch (error) {
+      if (!silent) toast.error("تعذر تحديث الشيكات من الإيرادات والمصروفات");
+    } finally {
+      setSyncingChecks(false);
+    }
+  }, [bankId, rowsFromExpenseChecks, rowsFromRevenueChecks]);
+
   useEffect(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
     loadReconciliations();
   }, [bankId, loadReconciliations]);
+
+  useEffect(() => {
+    if (canEditReconciliation && !editingReconciliationId) syncChecksFromRecords("both", true);
+  }, [canEditReconciliation, editingReconciliationId, syncChecksFromRecords]);
 
   useEffect(() => {
     if (!committedFormSnapshot) setCommittedFormSnapshot(currentFormSnapshot);
@@ -247,6 +306,7 @@ export default function BankReconciliationPage() {
       outstandingChecks: nextOutstandingChecks,
       collectionChecks: nextCollectionChecks,
     }));
+    setTimeout(() => syncChecksFromRecords("both", true), 0);
   };
 
   const saveReconciliation = async (event) => {
@@ -323,11 +383,16 @@ export default function BankReconciliationPage() {
 
   const renderCheckEditor = ({ title, type, checks }) => (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid={`${type}-checks-section`}>
-      <div className="mb-4 flex items-center justify-between gap-3" data-testid={`${type}-checks-heading`}>
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid={`${type}-checks-heading`}>
         <h3 className="text-xl font-extrabold text-slate-950" data-testid={`${type}-checks-title`}>{title}</h3>
-        <Button type="button" onClick={() => addCheck(type)} variant="outline" className="h-10 rounded-lg bg-white print:hidden" data-testid={`add-${type}-check-button`}>
-          <Plus className="h-4 w-4" /> إضافة شيك
-        </Button>
+        <div className="flex flex-wrap gap-2 print:hidden" data-testid={`${type}-checks-actions`}>
+          <Button type="button" onClick={() => syncChecksFromRecords(type)} disabled={syncingChecks} variant="outline" className="h-10 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100" data-testid={`sync-${type}-checks-button`}>
+            <Save className="h-4 w-4" /> {type === "outstanding" ? "تحديث من المصروفات" : "تحديث من الإيرادات"}
+          </Button>
+          <Button type="button" onClick={() => addCheck(type)} variant="outline" className="h-10 rounded-lg bg-white" data-testid={`add-${type}-check-button`}>
+            <Plus className="h-4 w-4" /> إضافة شيك
+          </Button>
+        </div>
       </div>
       <div className="space-y-3" data-testid={`${type}-checks-list`}>
         {checks.map((item, index) => (
