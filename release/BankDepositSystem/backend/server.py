@@ -475,11 +475,7 @@ class BankingManualCharges(BaseModel):
     bank_id: str
     year: int = Field(..., ge=1900, le=2200)
     month: int = Field(..., ge=1, le=12)
-    stamp: float = Field(default=0, ge=0)
-    bank_correspondence: float = Field(default=0, ge=0)
-    correspondence_safekeeping: float = Field(default=0, ge=0)
-    internal_transfer_fee: float = Field(default=0, ge=0)
-    external_transfer_fee: float = Field(default=0, ge=0)
+    items: List[Dict[str, object]] = Field(default_factory=list)
 
 
 class BankingManualChargesResponse(BankingManualCharges):
@@ -1066,6 +1062,19 @@ def hydrate_expense(document: dict) -> dict:
 
 def hydrate_banking_manual_charges(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
+    if not clean.get("items"):
+        legacy_labels = {
+            "stamp": "دمغة",
+            "bank_correspondence": "مراسلات بنكية",
+            "correspondence_safekeeping": "حفظ مراسلات",
+            "internal_transfer_fee": "رسوم تحويل داخلي",
+            "external_transfer_fee": "رسوم تحويل خارجي",
+        }
+        clean["items"] = [
+            {"statement": label, "amount": round(float(clean.get(key) or 0), 2)}
+            for key, label in legacy_labels.items()
+            if float(clean.get(key) or 0) > 0
+        ]
     if isinstance(clean.get("updated_at"), str):
         clean["updated_at"] = datetime.fromisoformat(clean["updated_at"])
     return clean
@@ -2748,11 +2757,7 @@ async def get_banking_manual_charges(
             "bank_name": bank["name"],
             "year": year,
             "month": month,
-            "stamp": 0,
-            "bank_correspondence": 0,
-            "correspondence_safekeeping": 0,
-            "internal_transfer_fee": 0,
-            "external_transfer_fee": 0,
+            "items": [],
             "updated_at": serialize_datetime(datetime.now(timezone.utc)),
         }
     return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
@@ -2765,6 +2770,12 @@ async def save_banking_manual_charges(
 ):
     bank = await ensure_bank_async(payload.bank_id)
     now = datetime.now(timezone.utc)
+    clean_items = []
+    for item in payload.items:
+      statement = str(item.get("statement") or "").strip()
+      amount = round(float(item.get("amount") or 0), 2)
+      if statement and amount > 0:
+          clean_items.append({"statement": statement, "amount": amount})
     document = {
         "id": f"{payload.bank_id}-{payload.year}-{payload.month}",
         "organization_id": organization_id_or_default(),
@@ -2772,11 +2783,7 @@ async def save_banking_manual_charges(
         "bank_name": bank["name"],
         "year": payload.year,
         "month": payload.month,
-        "stamp": round(float(payload.stamp or 0), 2),
-        "bank_correspondence": round(float(payload.bank_correspondence or 0), 2),
-        "correspondence_safekeeping": round(float(payload.correspondence_safekeeping or 0), 2),
-        "internal_transfer_fee": round(float(payload.internal_transfer_fee or 0), 2),
-        "external_transfer_fee": round(float(payload.external_transfer_fee or 0), 2),
+        "items": clean_items,
         "updated_at": serialize_datetime(now),
     }
     await db.banking_manual_charges.update_one(

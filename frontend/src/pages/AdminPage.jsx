@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileImage, FileUp, KeyRound, Link as LinkIcon, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,37 +30,16 @@ const permissionLabels = {
   delete_expense: "حذف مصروف",
   unlock_periods: "فتح فترة",
   manage_einvoice: "إدارة الفاتورة الإلكترونية",
-  manage_bank_tariffs: "إدارة التعريفات البنكية",
   manage_backups: "إدارة النسخ الاحتياطي",
 };
 
 const defaultUserForm = {
   username: "",
   password: "",
-  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false, add_revenue: true, approve_revenue: false, add_expense: true, approve_reports: false, lock_periods: false, edit_revenue: false, delete_revenue: false, edit_expense: false, delete_expense: false, unlock_periods: false, manage_einvoice: false, manage_bank_tariffs: false, manage_backups: false },
+  permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false, add_revenue: true, approve_revenue: false, add_expense: true, approve_reports: false, lock_periods: false, edit_revenue: false, delete_revenue: false, edit_expense: false, delete_expense: false, unlock_periods: false, manage_einvoice: false, manage_backups: false },
   is_active: true,
 };
 
-const tariffFields = [
-  ["monthly_statement_fee", "رسوم كشف الحساب الشهري"],
-  ["payment_order_fee", "رسوم أمر الدفع الإلكتروني"],
-  ["incoming_check_internal_fee", "تحصيل شيك داخلي"],
-  ["incoming_check_external_percent", "تحصيل شيك خارجي %"],
-  ["incoming_check_external_min", "تحصيل شيك خارجي حد أدنى"],
-  ["incoming_check_external_max", "تحصيل شيك خارجي حد أقصى"],
-  ["issued_check_internal_fee", "صرف شيك داخلي"],
-  ["issued_check_external_percent", "صرف شيك خارجي %"],
-  ["issued_check_external_min", "صرف شيك خارجي حد أدنى"],
-  ["issued_check_external_max", "صرف شيك خارجي حد أقصى"],
-  ["outgoing_transfer_percent", "تحويل لمستفيد %"],
-  ["outgoing_transfer_min", "تحويل لمستفيد حد أدنى"],
-  ["outgoing_transfer_max", "تحويل لمستفيد حد أقصى"],
-  ["cash_deposit_percent", "إيداع نقدي %"],
-  ["cash_deposit_min", "إيداع نقدي حد أدنى"],
-  ["deposit_link_fee", "ربط وديعة"],
-];
-
-const emptyTariffRules = () => tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: "" }), {});
 const currentAdminDate = new Date();
 const adminYearOptions = Array.from({ length: 16 }, (_, index) => String(currentAdminDate.getFullYear() - 5 + index));
 const adminMonthOptions = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
@@ -75,7 +54,6 @@ const adminSections = [
   { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
   { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
   { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
-  { id: "banking-tariffs", title: "تعريفة الخدمات المصرفية", subtitle: "تحديث تعريفة كل بنك - شركات", icon: FileUp },
   { id: "security-review", title: "المراجعة الأمنية", subtitle: "ضوابط الاقتراب من الاعتماد", icon: ShieldCheck },
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
@@ -93,12 +71,6 @@ export default function AdminPage() {
   const [bankForm, setBankForm] = useState({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
   const [banks, setBanks] = useState([]);
   const [openingBalances, setOpeningBalances] = useState({});
-  const [tariffs, setTariffs] = useState([]);
-  const [selectedTariffBankId, setSelectedTariffBankId] = useState("industrial-development");
-  const [tariffRules, setTariffRules] = useState(emptyTariffRules);
-  const [tariffUrl, setTariffUrl] = useState("");
-  const [tariffFile, setTariffFile] = useState(null);
-  const [savingTariff, setSavingTariff] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
   const [periods, setPeriods] = useState([]);
   const [approvals, setApprovals] = useState([]);
@@ -121,23 +93,15 @@ export default function AdminPage() {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
   }, []);
 
-  const loadTariffs = useCallback(async () => {
+  const loadBanks = useCallback(async () => {
     try {
-      const [banksResponse, tariffsResponse] = await Promise.all([api.get("/banks"), api.get("/admin/banking-tariffs")]);
+      const banksResponse = await api.get("/banks");
       setBanks(banksResponse.data);
       setOpeningBalances(banksResponse.data.reduce((acc, bank) => ({ ...acc, [bank.id]: String(bank.opening_balance || "") }), {}));
-      setTariffs(tariffsResponse.data);
-      const nextBankId = selectedTariffBankId || banksResponse.data[0]?.id || "industrial-development";
-      setSelectedTariffBankId(nextBankId);
-      const selected = tariffsResponse.data.find((item) => item.bank_id === nextBankId) || tariffsResponse.data[0];
-      if (selected) {
-        setTariffRules(tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: String(selected.rules?.[key] ?? "") }), {}));
-        setTariffUrl(selected.source_url || "");
-      }
     } catch (error) {
-      toast.error("تعذر تحميل تعريفات البنوك");
+      toast.error("تعذر تحميل البنوك");
     }
-  }, [selectedTariffBankId]);
+  }, []);
 
   const loadSecurityReview = useCallback(async () => {
     try {
@@ -173,18 +137,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadUsers();
-    loadTariffs();
+    loadBanks();
     loadSecurityReview();
     loadAppSettings();
-  }, [loadTariffs, loadSecurityReview, loadUsers, loadAppSettings]);
-
-  useEffect(() => {
-    const selected = tariffs.find((item) => item.bank_id === selectedTariffBankId);
-    if (!selected) return;
-    setTariffRules(tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: String(selected.rules?.[key] ?? "") }), {}));
-    setTariffUrl(selected.source_url || "");
-    setTariffFile(null);
-  }, [selectedTariffBankId, tariffs]);
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings]);
 
   const toggleNewPermission = (permission) => {
     setNewUser((current) => ({
@@ -276,13 +232,11 @@ export default function AdminPage() {
       await api.post("/admin/banks", bankForm);
       toast.success("تمت إضافة البنك الجديد");
       setBankForm({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
-      loadTariffs();
+      loadBanks();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر إضافة البنك");
     }
   };
-
-  const selectedTariff = tariffs.find((item) => item.bank_id === selectedTariffBankId);
 
   const updateOpeningBalanceInput = (bankId, value) => {
     const clean = value.replace(/[^0-9.-]/g, "").replace(/(?!^)-/g, "");
@@ -293,49 +247,9 @@ export default function AdminPage() {
     try {
       await api.put(`/admin/banks/${bankId}/opening-balance`, { opening_balance: Number(openingBalances[bankId] || 0) });
       toast.success("تم حفظ الرصيد الافتتاحي");
-      await loadTariffs();
+      await loadBanks();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حفظ الرصيد الافتتاحي");
-    }
-  };
-
-  const updateTariffField = (field, value) => {
-    setTariffRules((current) => ({ ...current, [field]: value.replace(/[^0-9.]/g, "") }));
-  };
-
-  const saveTariffRules = async () => {
-    setSavingTariff(true);
-    try {
-      const payload = tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: Number(tariffRules[key] || 0) }), {});
-      await api.put(`/admin/banking-tariffs/${selectedTariffBankId}`, payload);
-      toast.success("تم اعتماد تعريفة البنك");
-      await loadTariffs();
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || "تعذر حفظ التعريفة");
-    } finally {
-      setSavingTariff(false);
-    }
-  };
-
-  const extractTariff = async () => {
-    if (!tariffUrl.trim() && !tariffFile) {
-      toast.error("ارفع ملف PDF أو أدخل رابط التعريفة");
-      return;
-    }
-    setSavingTariff(true);
-    try {
-      const data = new FormData();
-      if (tariffUrl.trim()) data.append("source_url", tariffUrl.trim());
-      if (tariffFile) data.append("tariff_file", tariffFile);
-      const response = await api.post(`/admin/banking-tariffs/${selectedTariffBankId}/extract`, data);
-      toast.success("تم تحديث التعريفة تلقائياً، راجع القيم ثم اضغط اعتماد التعريفة عند الحاجة");
-      await loadTariffs();
-      setTariffRules(tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: String(response.data.rules?.[key] ?? "") }), {}));
-      setTariffFile(null);
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || "تعذر استخراج التعريفة");
-    } finally {
-      setSavingTariff(false);
     }
   };
 
@@ -573,54 +487,6 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-          </section>}
-
-          {activeAdminSection === "banking-tariffs" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="banking-tariff-admin-section">
-            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="banking-tariff-admin-heading">
-              <div data-testid="banking-tariff-admin-title-block">
-                <p className="text-sm font-extrabold text-emerald-700" data-testid="banking-tariff-admin-eyebrow">تعريفة الخدمات المصرفية</p>
-                <h2 className="text-2xl font-extrabold" data-testid="banking-tariff-admin-title">تحديث تعريفة كل بنك - شركات</h2>
-              </div>
-              <Badge className="w-fit bg-slate-50 text-slate-700 hover:bg-slate-50" data-testid="banking-tariff-status-badge">{selectedTariff?.extraction_status || "default"}</Badge>
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="banking-tariff-source-grid">
-              <div className="space-y-2" data-testid="banking-tariff-bank-wrapper">
-                <Label data-testid="banking-tariff-bank-label">البنك</Label>
-                <select value={selectedTariffBankId} onChange={(event) => setSelectedTariffBankId(event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="banking-tariff-bank-select">
-                  {banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`banking-tariff-bank-option-${bank.id}`}>{bank.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2" data-testid="banking-tariff-url-wrapper">
-                <Label data-testid="banking-tariff-url-label">رابط ملف PDF</Label>
-                <Input value={tariffUrl} onChange={(event) => setTariffUrl(event.target.value)} placeholder="https://.../tariff.pdf" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="banking-tariff-url-input" />
-              </div>
-              <div className="space-y-2 md:col-span-2" data-testid="banking-tariff-file-wrapper">
-                <Label data-testid="banking-tariff-file-label">رفع ملف PDF</Label>
-                <Input type="file" accept="application/pdf,.pdf" onChange={(event) => setTariffFile(event.target.files?.[0] || null)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="banking-tariff-file-input" />
-              </div>
-              <div className="flex flex-wrap gap-2 md:col-span-2" data-testid="banking-tariff-actions">
-                <Button type="button" onClick={extractTariff} disabled={savingTariff} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="extract-banking-tariff-button"><FileUp className="h-4 w-4" /> تحديث تلقائي من PDF/رابط</Button>
-                <Button type="button" onClick={saveTariffRules} disabled={savingTariff} variant="outline" className="h-11 rounded-lg bg-white" data-testid="save-banking-tariff-button"><Save className="h-4 w-4" /> اعتماد التعريفة</Button>
-                {selectedTariff?.source_url && <a href={selectedTariff.source_url} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-700" data-testid="open-banking-tariff-source-link"><LinkIcon className="h-4 w-4" /> فتح المصدر</a>}
-              </div>
-            </div>
-            <div className="mt-4 rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-600" data-testid="banking-tariff-notes">
-              {selectedTariff?.extraction_notes || "ارفع ملف التعريفة أو ضع الرابط لتحديث القيم تلقائياً، ثم راجعها واعتمدها."}
-            </div>
-            <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="banking-tariff-fields-grid">
-              {tariffFields.map(([key, label]) => (
-                <div key={key} className="space-y-2" data-testid={`banking-tariff-${key}-wrapper`}>
-                  <Label data-testid={`banking-tariff-${key}-label`}>{label}</Label>
-                  <Input inputMode="decimal" value={tariffRules[key] || ""} onChange={(event) => updateTariffField(key, event.target.value)} className="h-11 rounded-lg bg-slate-50 text-right" data-testid={`banking-tariff-${key}-input`} />
-                </div>
-              ))}
-            </div>
-            {selectedTariff?.extracted_text_preview && (
-              <details className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="banking-tariff-preview-details">
-                <summary className="cursor-pointer font-extrabold" data-testid="banking-tariff-preview-summary">معاينة النص المستخرج</summary>
-                <p className="mt-3 max-h-44 overflow-y-auto whitespace-pre-wrap text-xs font-bold text-slate-500" data-testid="banking-tariff-preview-text">{selectedTariff.extracted_text_preview}</p>
-              </details>
-            )}
           </section>}
 
           {(activeAdminSection === "security-review" || activeAdminSection === "audit-log") && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="security-review-section">
