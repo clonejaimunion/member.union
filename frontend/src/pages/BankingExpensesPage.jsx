@@ -14,20 +14,21 @@ import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
 import { formatCurrency, formatNumber, sanitizeDecimalInput } from "@/lib/format";
 
-const monthLabels = {
-  "01": "يناير",
-  "02": "فبراير",
-  "03": "مارس",
-  "04": "أبريل",
-  "05": "مايو",
-  "06": "يونيو",
-  "07": "يوليو",
-  "08": "أغسطس",
-  "09": "سبتمبر",
-  "10": "أكتوبر",
-  "11": "نوفمبر",
-  "12": "ديسمبر",
-};
+const monthOptions = [
+  ["01", "يناير"],
+  ["02", "فبراير"],
+  ["03", "مارس"],
+  ["04", "أبريل"],
+  ["05", "مايو"],
+  ["06", "يونيو"],
+  ["07", "يوليو"],
+  ["08", "أغسطس"],
+  ["09", "سبتمبر"],
+  ["10", "أكتوبر"],
+  ["11", "نوفمبر"],
+  ["12", "ديسمبر"],
+];
+const monthLabels = Object.fromEntries(monthOptions);
 
 const manualFields = [
   { key: "stamp", label: "دمغة" },
@@ -38,9 +39,11 @@ const manualFields = [
 ];
 
 const emptyManual = () => ({ stamp: "", bank_correspondence: "", correspondence_safekeeping: "", internal_transfer_fee: "", external_transfer_fee: "" });
-const currentYear = String(new Date().getFullYear());
+const firstReportYear = 2025;
+const currentYear = String(Math.max(new Date().getFullYear(), firstReportYear));
 const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
-const months = Object.keys(monthLabels);
+const months = monthOptions.map(([value]) => value);
+const yearOptions = Array.from({ length: Math.max(new Date().getFullYear() + 10, 2035) - firstReportYear + 1 }, (_, index) => String(firstReportYear + index));
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const cappedFee = (amount, percent, min, max) => {
@@ -258,8 +261,8 @@ export default function BankingExpensesPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="banking-expenses-filters-grid">
             <div data-testid="banking-expenses-bank-wrapper"><Label data-testid="banking-expenses-bank-label">البنك</Label><select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="banking-expenses-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`banking-expenses-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
             <div data-testid="banking-expenses-period-type-wrapper"><Label data-testid="banking-expenses-period-type-label">عرض التقرير</Label><select value={filters.period_type} onChange={(event) => setFilters((current) => ({ ...current, period_type: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="banking-expenses-period-type-select"><option value="monthly" data-testid="banking-expenses-period-monthly-option">شهري</option><option value="yearly" data-testid="banking-expenses-period-yearly-option">سنوي</option></select></div>
-            <div data-testid="banking-expenses-year-wrapper"><Label data-testid="banking-expenses-year-label">السنة</Label><Input value={filters.year} onChange={(event) => setFilters((current) => ({ ...current, year: event.target.value.replace(/[^0-9]/g, "").slice(0, 4) || current.year }))} className="mt-2 h-12 rounded-lg bg-slate-50 text-right" data-testid="banking-expenses-year-input" /></div>
-            <div data-testid="banking-expenses-month-wrapper"><Label data-testid="banking-expenses-month-label">الشهر</Label><select value={filters.month} onChange={(event) => setFilters((current) => ({ ...current, month: event.target.value }))} disabled={isYearly} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none disabled:opacity-50" data-testid="banking-expenses-month-select">{Object.entries(monthLabels).map(([value, label]) => <option key={value} value={value} data-testid={`banking-expenses-month-option-${value}`}>{label}</option>)}</select></div>
+            <div data-testid="banking-expenses-year-wrapper"><Label data-testid="banking-expenses-year-label">السنة</Label><select value={filters.year} onChange={(event) => setFilters((current) => ({ ...current, year: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="banking-expenses-year-select">{yearOptions.map((year) => <option key={year} value={year} data-testid={`banking-expenses-year-option-${year}`}>{year}</option>)}</select></div>
+            <div data-testid="banking-expenses-month-wrapper"><Label data-testid="banking-expenses-month-label">الشهر</Label><select value={filters.month} onChange={(event) => setFilters((current) => ({ ...current, month: event.target.value }))} disabled={isYearly} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none disabled:opacity-50" data-testid="banking-expenses-month-select">{monthOptions.map(([value, label]) => <option key={value} value={value} data-testid={`banking-expenses-month-option-${value}`}>{label}</option>)}</select></div>
           </div>
         </section>
 
