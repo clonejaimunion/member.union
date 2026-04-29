@@ -2920,8 +2920,25 @@ async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicI
 
 
 @api_router.get("/admin/security/audit-logs", response_model=List[AuditLogResponse])
-async def list_audit_logs(limit: int = Query(default=200, ge=1, le=1000), _: dict = Depends(require_admin)):
-    documents = await db.audit_logs.find(with_organization({}), {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+async def list_audit_logs(
+    limit: int = Query(default=200, ge=1, le=1000),
+    year: Optional[int] = Query(default=None, ge=2020, le=2200),
+    month: Optional[int] = Query(default=None, ge=1, le=12),
+    hour: Optional[int] = Query(default=None, ge=0, le=23),
+    _: dict = Depends(require_admin),
+):
+    query = with_organization({})
+    if year:
+        start_month = month or 1
+        start = datetime(year, start_month, 1, hour or 0, tzinfo=timezone.utc)
+        if hour is not None:
+            end = start + timedelta(hours=1)
+        elif month:
+            end = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc)
+        else:
+            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        query["created_at"] = {"$gte": serialize_datetime(start), "$lt": serialize_datetime(end)}
+    documents = await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     return [AuditLogResponse(**hydrate_einvoice_document(document)) for document in documents]
 
 

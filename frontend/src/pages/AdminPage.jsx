@@ -61,8 +61,23 @@ const tariffFields = [
 ];
 
 const emptyTariffRules = () => tariffFields.reduce((acc, [key]) => ({ ...acc, [key]: "" }), {});
-const defaultPeriodForm = { period_type: "monthly", year: String(new Date().getFullYear()), month: String(new Date().getMonth() + 1), action: "lock", reason: "" };
+const currentAdminDate = new Date();
+const adminYearOptions = Array.from({ length: 16 }, (_, index) => String(currentAdminDate.getFullYear() - 5 + index));
+const adminMonthOptions = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+const adminHourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
+const defaultPeriodForm = { period_type: "monthly", year: String(currentAdminDate.getFullYear()), month: String(currentAdminDate.getMonth() + 1), action: "lock", reason: "" };
 const defaultApprovalForm = { report_type: "عام", report_name: "", report_reference: "", period_label: "", status: "approved", approver_title: "", notes: "" };
+
+const adminSections = [
+  { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
+  { id: "users", title: "المستخدمون", subtitle: "إضافة مستخدم لإدخال البيانات والمستخدمون المسجلون", icon: UsersRound },
+  { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
+  { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
+  { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
+  { id: "banking-tariffs", title: "تعريفة الخدمات المصرفية", subtitle: "تحديث تعريفة كل بنك - شركات", icon: FileUp },
+  { id: "security-review", title: "المراجعة الأمنية", subtitle: "ضوابط الاقتراب من الاعتماد", icon: ShieldCheck },
+  { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
+];
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -98,6 +113,8 @@ export default function AdminPage() {
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
+  const [activeAdminSection, setActiveAdminSection] = useState("users");
+  const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
 
   const loadUsers = useCallback(() => {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
@@ -123,8 +140,12 @@ export default function AdminPage() {
 
   const loadSecurityReview = useCallback(async () => {
     try {
+      const auditParams = new URLSearchParams({ limit: "200" });
+      if (auditFilter.year !== "all") auditParams.set("year", auditFilter.year);
+      if (auditFilter.month !== "all") auditParams.set("month", String(Number(auditFilter.month)));
+      if (auditFilter.hour !== "all") auditParams.set("hour", String(Number(auditFilter.hour)));
       const [auditResponse, periodsResponse, approvalsResponse, backupsResponse] = await Promise.all([
-        api.get("/admin/security/audit-logs?limit=80"),
+        api.get(`/admin/security/audit-logs?${auditParams.toString()}`),
         api.get("/admin/security/periods"),
         api.get("/admin/security/report-approvals"),
         api.get("/admin/security/backups"),
@@ -136,7 +157,7 @@ export default function AdminPage() {
     } catch (error) {
       toast.error("تعذر تحميل المراجعة الأمنية");
     }
-  }, []);
+  }, [auditFilter]);
 
   const loadAppSettings = useCallback(async () => {
     try {
@@ -457,9 +478,25 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 xl:grid-cols-[1fr_0.85fr] lg:px-8" data-testid="admin-content-grid">
+      <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8" data-testid="admin-section-menu">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="admin-section-menu-grid">
+          {adminSections.map((section) => {
+            const Icon = section.icon;
+            const active = activeAdminSection === section.id;
+            return (
+              <button key={section.id} type="button" onClick={() => setActiveAdminSection(section.id)} className={`min-h-32 rounded-xl border p-5 text-right transition-[transform,background-color,border-color,box-shadow] hover:-translate-y-0.5 ${active ? "border-emerald-300 bg-emerald-50 shadow-lg shadow-emerald-100" : "border-slate-200 bg-white hover:bg-slate-50"}`} data-testid={`admin-section-button-${section.id}`}>
+                <Icon className={`mb-4 h-6 w-6 ${active ? "text-emerald-700" : "text-slate-500"}`} />
+                <span className="block text-lg font-extrabold text-slate-950" data-testid={`admin-section-title-${section.id}`}>{section.title}</span>
+                <span className="mt-2 block text-xs font-bold leading-5 text-slate-500" data-testid={`admin-section-subtitle-${section.id}`}>{section.subtitle}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="admin-content-grid">
         <div className="space-y-6" data-testid="admin-users-column">
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
+          {activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
             <div className="mb-5 flex items-center gap-3" data-testid="create-user-heading">
               <UsersRound className="h-6 w-6 text-emerald-700" />
               <h2 className="text-2xl font-extrabold" data-testid="create-user-title">إضافة مستخدم لإدخال البيانات</h2>
@@ -483,9 +520,9 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-user-submit-button"><Plus className="h-4 w-4" /> إضافة المستخدم</Button>
             </form>
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-bank-section">
+          {activeAdminSection === "add-bank" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-bank-section">
             <div className="mb-5 flex items-center gap-3" data-testid="create-bank-heading">
               <Building2 className="h-6 w-6 text-emerald-700" />
               <h2 className="text-2xl font-extrabold" data-testid="create-bank-title">إضافة بنك جديد</h2>
@@ -513,9 +550,9 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-bank-submit-button"><Plus className="h-4 w-4" /> إضافة البنك</Button>
             </form>
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="opening-balances-section">
+          {activeAdminSection === "opening-balances" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="opening-balances-section">
             <div className="mb-5" data-testid="opening-balances-heading">
               <p className="text-sm font-extrabold text-emerald-700" data-testid="opening-balances-eyebrow">الأرصدة الافتتاحية</p>
               <h2 className="text-2xl font-extrabold" data-testid="opening-balances-title">رصيد افتتاحي لكل بنك</h2>
@@ -535,9 +572,9 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="banking-tariff-admin-section">
+          {activeAdminSection === "banking-tariffs" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="banking-tariff-admin-section">
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="banking-tariff-admin-heading">
               <div data-testid="banking-tariff-admin-title-block">
                 <p className="text-sm font-extrabold text-emerald-700" data-testid="banking-tariff-admin-eyebrow">تعريفة الخدمات المصرفية</p>
@@ -583,14 +620,14 @@ export default function AdminPage() {
                 <p className="mt-3 max-h-44 overflow-y-auto whitespace-pre-wrap text-xs font-bold text-slate-500" data-testid="banking-tariff-preview-text">{selectedTariff.extracted_text_preview}</p>
               </details>
             )}
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="security-review-section">
+          {(activeAdminSection === "security-review" || activeAdminSection === "audit-log") && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="security-review-section">
             <div className="mb-5 flex items-center gap-3" data-testid="security-review-heading">
               <ShieldCheck className="h-6 w-6 text-emerald-700" />
-              <div><p className="text-sm font-extrabold text-emerald-700" data-testid="security-review-eyebrow">المراجعة الأمنية</p><h2 className="text-2xl font-extrabold" data-testid="security-review-title">ضوابط الاقتراب من الاعتماد</h2></div>
+              <div><p className="text-sm font-extrabold text-emerald-700" data-testid="security-review-eyebrow">{activeAdminSection === "audit-log" ? "سجل التدقيق" : "المراجعة الأمنية"}</p><h2 className="text-2xl font-extrabold" data-testid="security-review-title">{activeAdminSection === "audit-log" ? "سجل التدقيق Audit Log" : "ضوابط الاقتراب من الاعتماد"}</h2></div>
             </div>
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2" data-testid="security-review-grid">
+            {activeAdminSection === "security-review" && <div className="grid grid-cols-1 gap-5 xl:grid-cols-2" data-testid="security-review-grid">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="period-lock-card"><h3 className="mb-3 font-extrabold" data-testid="period-lock-title">إقفال وفتح الفترات المالية</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><select value={periodForm.period_type} onChange={(e) => setPeriodForm((c) => ({ ...c, period_type: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="period-lock-type-select"><option value="monthly">شهري</option><option value="yearly">سنوي</option></select><Input value={periodForm.year} onChange={(e) => setPeriodForm((c) => ({ ...c, year: e.target.value.replace(/[^0-9]/g, '').slice(0,4) }))} placeholder="السنة" data-testid="period-lock-year-input" />{periodForm.period_type === "monthly" && <Input value={periodForm.month} onChange={(e) => setPeriodForm((c) => ({ ...c, month: e.target.value.replace(/[^0-9]/g, '').slice(0,2) }))} placeholder="الشهر" data-testid="period-lock-month-input" />}<select value={periodForm.action} onChange={(e) => setPeriodForm((c) => ({ ...c, action: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="period-lock-action-select"><option value="lock">إقفال</option><option value="unlock">فتح</option></select><Input value={periodForm.reason} onChange={(e) => setPeriodForm((c) => ({ ...c, reason: e.target.value }))} placeholder="سبب الفتح/الإقفال" className="md:col-span-2" data-testid="period-lock-reason-input" /></div><Button onClick={savePeriodLock} disabled={securityLoading} className="mt-3 h-10 bg-slate-950 text-white" data-testid="save-period-lock-button"><Save className="h-4 w-4" /> حفظ الفترة</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="period-lock-list">{periods.slice(0, 8).map((item) => <p key={item.id} className="rounded bg-white p-2 text-xs font-bold" data-testid={`period-lock-row-${item.id}`}>{item.period_type === 'monthly' ? `${item.month}/${item.year}` : item.year} — {item.is_locked ? 'مقفلة' : 'مفتوحة'} — {item.reason || 'بدون ملاحظات'}</p>)}</div></div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="report-approval-card"><h3 className="mb-3 font-extrabold" data-testid="report-approval-title">اعتماد التقارير</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Input value={approvalForm.report_name} onChange={(e) => setApprovalForm((c) => ({ ...c, report_name: e.target.value }))} placeholder="اسم التقرير" data-testid="approval-report-name-input" /><Input value={approvalForm.report_reference} onChange={(e) => setApprovalForm((c) => ({ ...c, report_reference: e.target.value }))} placeholder="رقم التقرير/الإذن" data-testid="approval-report-reference-input" /><Input value={approvalForm.period_label} onChange={(e) => setApprovalForm((c) => ({ ...c, period_label: e.target.value }))} placeholder="الفترة" data-testid="approval-period-label-input" /><Input value={approvalForm.approver_title} onChange={(e) => setApprovalForm((c) => ({ ...c, approver_title: e.target.value }))} placeholder="صفة المعتمد" data-testid="approval-approver-title-input" /><select value={approvalForm.status} onChange={(e) => setApprovalForm((c) => ({ ...c, status: e.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3" data-testid="approval-status-select"><option value="unapproved">غير معتمد</option><option value="approved">معتمد</option><option value="cancelled">تم إلغاء الاعتماد</option></select><Input value={approvalForm.notes} onChange={(e) => setApprovalForm((c) => ({ ...c, notes: e.target.value }))} placeholder="ملاحظات" data-testid="approval-notes-input" /></div><Button onClick={saveReportApproval} disabled={securityLoading} className="mt-3 h-10 bg-slate-950 text-white" data-testid="save-report-approval-button"><Save className="h-4 w-4" /> اعتماد التقرير</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="report-approvals-list">{approvals.slice(0, 8).map((item) => <p key={item.id} className="rounded bg-white p-2 text-xs font-bold" data-testid={`approval-row-${item.id}`}>{item.approval_number} — {item.report_name} — {item.approver_name} — {item.status}</p>)}</div></div>
@@ -598,11 +635,11 @@ export default function AdminPage() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="backup-card"><h3 className="mb-3 font-extrabold" data-testid="backup-title">النسخ الاحتياطي والاستعادة</h3><div className="grid grid-cols-1 gap-3 md:grid-cols-2"><Input type="password" value={backupPassword} onChange={(e) => setBackupPassword(e.target.value)} placeholder="كلمة مرور النسخة" data-testid="backup-password-input" /><Button onClick={createBackup} disabled={securityLoading} className="h-10 bg-slate-950 text-white" data-testid="create-backup-button">إنشاء نسخة مشفرة</Button><Input type="file" accept=".enc" onChange={(e) => setRestoreFile(e.target.files?.[0] || null)} data-testid="restore-backup-file-input" /><Input type="password" value={restorePassword} onChange={(e) => setRestorePassword(e.target.value)} placeholder="كلمة مرور الاستعادة" data-testid="restore-backup-password-input" /></div><Button onClick={restoreBackup} disabled={securityLoading} variant="outline" className="mt-3 h-10 bg-white" data-testid="restore-backup-button">استعادة النسخة</Button><div className="mt-3 max-h-40 overflow-y-auto space-y-2" data-testid="backups-list">{backups.slice(0, 8).map((item) => <div key={item.id} className="flex items-center justify-between rounded bg-white p-2 text-xs font-bold" data-testid={`backup-row-${item.id}`}><span>{item.file_name} — {item.file_size} بايت</span><button type="button" onClick={() => downloadBackup(item)} className="text-emerald-700" data-testid={`download-backup-link-${item.id}`}>تحميل</button></div>)}</div></div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-checklist-card"><h3 className="mb-3 font-extrabold" data-testid="security-checklist-title">مؤشرات المراجعة والأمان</h3><ul className="space-y-2 text-sm font-bold text-slate-700" data-testid="security-checklist"><li>✓ سجل تدقيق لكل عمليات API المؤثرة.</li><li>✓ إقفال شهري وسنوي ومنع تعديل الفترات المقفلة.</li><li>✓ اعتماد تقارير برقم اعتماد واسم معتمد وملاحظات.</li><li>✓ نسخ احتياطي مشفر بكلمة مرور يحددها الأدمن.</li><li>✓ دليل إجراءات: الإدخال للمستخدم، المراجعة للأدمن، الاعتماد عبر هذه الصفحة، الإقفال بعد نهاية الفترة، وفتح الفترة بسبب مكتوب.</li><li>⚠ مراجعة محاسب قانوني ومراجعة أمنية خارجية لا تتم آلياً ويجب تنفيذها بواسطة مختص.</li></ul></div>
-            </div>
-            <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="max-h-72 overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="grid grid-cols-1 gap-2 rounded bg-slate-50 p-3 text-xs font-bold md:grid-cols-[160px_120px_1fr_70px]" data-testid={`audit-log-row-${item.id}`}><span>{new Date(item.created_at).toLocaleString('ar-EG')}</span><span>{item.username || 'غير معروف'}</span><span>{item.action}</span><span>{item.status_code}</span></div>)}</div></div>
-          </section>
+            </div>}
+            {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="grid grid-cols-1 gap-2 rounded bg-slate-50 p-3 text-xs font-bold md:grid-cols-[120px_110px_90px_120px_1fr_70px]" data-testid={`audit-log-row-${item.id}`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-hour`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-username`}>{item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-action`}>{item.action}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div>)}</div></div>}
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
+          {activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
             <h2 className="mb-5 text-2xl font-extrabold" data-testid="users-list-title">المستخدمون المسجلون</h2>
             <div className="space-y-3" data-testid="users-list">
               {users.map((item) => (
@@ -640,11 +677,11 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-          </section>
+          </section>}
         </div>
 
         <aside className="space-y-6" data-testid="admin-security-column">
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="general-app-settings-section">
+          {activeAdminSection === "general-settings" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="general-app-settings-section">
             <div className="mb-5 flex items-center gap-3" data-testid="general-app-settings-heading">
               <FileImage className="h-6 w-6 text-emerald-700" />
               <div>
@@ -679,9 +716,9 @@ export default function AdminPage() {
               </div>
               <Button type="button" onClick={saveShortcutIcon} disabled={settingsLoading} variant="outline" className="h-11 w-full rounded-lg bg-white" data-testid="save-shortcut-icon-button"><FileUp className="h-4 w-4" /> تحديث شعار الاختصار</Button>
             </div>
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-password-section">
+          {activeAdminSection === "admin-password" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-password-section">
             <div className="mb-5 flex items-center gap-3" data-testid="admin-password-heading">
               <LockKeyhole className="h-6 w-6 text-slate-950" />
               <h2 className="text-2xl font-extrabold" data-testid="admin-password-title">تغيير كلمة مرور الأدمن</h2>
@@ -697,9 +734,9 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 w-full rounded-lg bg-slate-950 text-white" data-testid="admin-change-password-button"><Save className="h-4 w-4" /> حفظ كلمة المرور</Button>
             </form>
-          </section>
+          </section>}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-2fa-section">
+          {activeAdminSection === "admin-password" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-2fa-section">
             <div className="mb-5 flex items-center gap-3" data-testid="admin-2fa-heading">
               <QrCode className="h-6 w-6 text-emerald-700" />
               <h2 className="text-2xl font-extrabold" data-testid="admin-2fa-title">Google Authenticator</h2>
@@ -716,7 +753,7 @@ export default function AdminPage() {
                 <Button type="button" onClick={verify2FA} className="h-12 w-full rounded-lg bg-emerald-700 text-white hover:bg-emerald-800" data-testid="admin-2fa-verify-button"><ShieldCheck className="h-4 w-4" /> تفعيل المصادقة الثنائية</Button>
               </div>
             )}
-          </section>
+          </section>}
         </aside>
       </section>
       <footer className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8" data-testid="admin-footer">
