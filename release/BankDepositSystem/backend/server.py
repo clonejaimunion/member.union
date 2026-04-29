@@ -1933,9 +1933,16 @@ async def get_interest_report(
 
 
 @api_router.get("/banks/{bank_id}/statements/detailed", response_model=BankStatement)
-async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
+async def get_detailed_statement(
+    bank_id: str,
+    period_type: Literal["yearly", "monthly"] = Query(default="yearly"),
+    year: Optional[int] = Query(default=None, ge=2020, le=2200),
+    month: Optional[int] = Query(default=None, ge=1, le=12),
+    _: dict = Depends(require_permission("view_reports")),
+):
     bank = await ensure_bank_async(bank_id)
-    current_year = datetime.now(timezone.utc).year
+    current_year = year or datetime.now(timezone.utc).year
+    target_month = month or datetime.now(timezone.utc).month
     deposits = await get_bank_deposits(bank_id)
     rows = []
     total_volume = 0.0
@@ -1943,8 +1950,14 @@ async def get_detailed_statement(bank_id: str, _: dict = Depends(require_permiss
     total_previous = 0.0
 
     for index, deposit in enumerate(deposits, start=1):
-        _, annual_interest, current_total = calculate_interest_rows(deposit, current_year)
-        previous_breakdown, previous_total = calculate_previous_years(deposit, current_year)
+        interest_rows, annual_interest, yearly_total = calculate_interest_rows(deposit, current_year)
+        if period_type == "monthly":
+            current_total = next((row.interest_amount for row in interest_rows if row.month_number == target_month), 0.0)
+            previous_breakdown = []
+            previous_total = 0.0
+        else:
+            current_total = yearly_total
+            previous_breakdown, previous_total = calculate_previous_years(deposit, current_year)
         total_volume += deposit.amount
         total_current += current_total
         total_previous += previous_total
