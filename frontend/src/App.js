@@ -1,6 +1,6 @@
 import "@/App.css";
 import { useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -19,6 +19,37 @@ import ExpensesPage from "@/pages/ExpensesPage";
 import ExpensesAnalysisPage from "@/pages/ExpensesAnalysisPage";
 import BankingExpensesPage from "@/pages/BankingExpensesPage";
 
+const appTitle = "النقابة العامة للعاملين بالزراعة والري";
+
+const sectionTitles = [
+  { test: (path) => path === "/", title: appTitle },
+  { test: (path) => path === "/login", title: appTitle },
+  { test: (path) => path === "/deposits", title: "فوائد الودائع" },
+  { test: (path) => path === "/reconciliations", title: "التسويات البنكية" },
+  { test: (path) => path === "/revenues", title: "الإيرادات" },
+  { test: (path) => path === "/expenses", title: "المصروفات" },
+  { test: (path) => path === "/expenses-analysis", title: "تحليل المصروفات" },
+  { test: (path) => path === "/banking-expenses", title: "المصروفات البنكية" },
+  { test: (path) => path === "/secure-admin-control-panel", title: "لوحة الأدمن" },
+  { test: (path) => path.endsWith("/register"), title: "تسجيل الودائع" },
+  { test: (path) => path.endsWith("/current-year"), title: "تقرير السنة الحالية" },
+  { test: (path) => path.endsWith("/previous-year"), title: "تقرير السنوات السابقة" },
+  { test: (path) => path.endsWith("/accrued-interest"), title: "المستحقات السنوية" },
+  { test: (path) => path.endsWith("/reconciliation"), title: "مذكرة التسوية البنكية" },
+  { test: (path) => path.endsWith("/statements"), title: "الكشوف التفريغية" },
+];
+
+function PageTitleManager() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const matched = sectionTitles.find((item) => item.test(location.pathname));
+    document.title = matched?.title || appTitle;
+  }, [location.pathname]);
+
+  return null;
+}
+
 function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
@@ -30,6 +61,7 @@ function App() {
     <div className="App" dir="rtl" data-testid="app-root">
       <AuthProvider>
         <BrowserRouter>
+          <PageTitleManager />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />

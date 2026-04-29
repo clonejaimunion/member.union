@@ -25,5 +25,5 @@ export const fallbackBanks = [
   { id: "agricultural-bank", name: "البنك الزراعي", short_name: "ABE", code: "ABE-EG", swift_code: "BDACEGCA" },
 ];
 
-export const creatorCredit = "تم إنشاء البرنامج بواسطة يوسف عبدالغني احمد";
+export const creatorCredit = "powered py ® Youssef abdelghane";
 

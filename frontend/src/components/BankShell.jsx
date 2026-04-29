@@ -71,7 +71,7 @@ export const BankShell = ({ children }) => {
               <Link to={moduleBankSelectionPath}><ArrowRightLeft className="h-4 w-4" /> تغيير البنك</Link>
             </Button>
             <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="module-home-button">
-              <Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link>
+              <Link to="/"><Home className="h-4 w-4" /> الصفحة الرئيسية</Link>
             </Button>
             <Button onClick={() => requestNavigation(() => navigate(-1))} variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="bank-shell-back-button">
               <ArrowRight className="h-4 w-4" /> رجوع

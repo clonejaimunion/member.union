@@ -66,8 +66,8 @@ export default function ModuleSelection() {
           <div className="flex items-center gap-3" data-testid="module-selection-brand">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
             <div>
-              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">القائمة الرئيسية</p>
-              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">اختر نوع العمل</h1>
+              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">الصفحة الرئيسية</p>
+              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">النقابة العامة للعاملين بالزراعة والري</h1>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="module-selection-actions">
@@ -85,11 +85,7 @@ export default function ModuleSelection() {
 
       <section className="mx-auto flex min-h-[calc(100vh-88px)] max-w-7xl flex-col justify-center gap-10 px-4 py-10 sm:px-6 lg:px-8" data-testid="module-selection-content">
         <div className="mx-auto max-w-4xl space-y-5 text-center" data-testid="module-selection-intro">
-          <Badge className="border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50" data-testid="module-selection-badge">نظام بنكي منفصل ومنظم</Badge>
-          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">اختر القسم المطلوب</h2>
-          <p className="mx-auto max-w-2xl text-base font-semibold leading-8 text-slate-600 md:text-lg" data-testid="module-selection-description">
-            كل قسم مستقل وواضح للوصول السريع بدون تزاحم في العرض.
-          </p>
+          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">الصفحة الرئيسية</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-testid="module-cards-grid">
@@ -100,7 +96,7 @@ export default function ModuleSelection() {
                 <div className="mb-5 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm transition-transform group-hover:scale-105" data-testid={`${module.testId}-icon`}><Icon className="h-9 w-9" /></div>
                 <h3 className="flex min-h-16 items-center justify-center text-balance text-2xl font-extrabold leading-snug text-slate-950" data-testid={`${module.testId}-title`}>{module.title}</h3>
                 <p className="sr-only" data-testid={`${module.testId}-description`}>{module.description}</p>
-                <div className="mt-5 text-sm font-extrabold text-emerald-700 transition-transform group-hover:-translate-x-1" data-testid={`${module.testId}-action`}>اختيار القسم ←</div>
+                <span className="sr-only" data-testid={`${module.testId}-action`}>{module.title}</span>
               </Link>
             );
           })}

@@ -236,7 +236,7 @@ export default function RevenuesPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="revenues-header-actions">
             <Badge className="border-slate-200 bg-white px-3 py-1 text-slate-700 shadow-sm hover:bg-white" data-testid="revenues-user-badge">{user?.username}</Badge>
-            <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="revenues-home-button"><Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link></Button>
+            <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="revenues-home-button"><Link to="/"><Home className="h-4 w-4" /> الصفحة الرئيسية</Link></Button>
             <Button onClick={() => navigate(-1)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="revenues-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="revenues-logout-button"><LogOut className="h-4 w-4" /> خروج</Button>
           </div>

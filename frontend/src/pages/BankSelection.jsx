@@ -51,7 +51,7 @@ export default function BankSelection({ mode = "deposits" }) {
             {user?.role === "admin" && (
               <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-admin-button"><Link to="/secure-admin-control-panel">لوحة الأدمن</Link></Button>
             )}
-            <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-modules-button"><Link to="/"><Home className="h-4 w-4" /> القائمة الرئيسية</Link></Button>
+            <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-modules-button"><Link to="/"><Home className="h-4 w-4" /> الصفحة الرئيسية</Link></Button>
             <Button onClick={() => navigate(-1)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button>
             <Button onClick={logout} variant="outline" className="h-11 rounded-lg bg-white" data-testid="bank-selection-logout-button">خروج</Button>
           </div>
