@@ -8,18 +8,40 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api } from "@/lib/api";
 import { formatCurrency, formatNumber } from "@/lib/format";
 
+const monthOptions = [
+  ["01", "يناير"],
+  ["02", "فبراير"],
+  ["03", "مارس"],
+  ["04", "أبريل"],
+  ["05", "مايو"],
+  ["06", "يونيو"],
+  ["07", "يوليو"],
+  ["08", "أغسطس"],
+  ["09", "سبتمبر"],
+  ["10", "أكتوبر"],
+  ["11", "نوفمبر"],
+  ["12", "ديسمبر"],
+];
+const monthLabels = Object.fromEntries(monthOptions);
+const currentDate = new Date();
+const firstReportYear = 2025;
+const yearOptions = Array.from({ length: Math.max(currentDate.getFullYear() + 10, 2035) - firstReportYear + 1 }, (_, index) => String(firstReportYear + index));
+
 export default function StatementsPage() {
   const { bankId } = useParams();
   const [detailed, setDetailed] = useState(null);
   const [volume, setVolume] = useState(null);
   const [deposits, setDeposits] = useState([]);
   const [selectedDepositId, setSelectedDepositId] = useState("all");
+  const [detailedFilter, setDetailedFilter] = useState({ period_type: "yearly", year: String(Math.max(currentDate.getFullYear(), firstReportYear)), month: String(currentDate.getMonth() + 1).padStart(2, "0") });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
+    const params = new URLSearchParams({ period_type: detailedFilter.period_type, year: detailedFilter.year });
+    if (detailedFilter.period_type === "monthly") params.set("month", String(Number(detailedFilter.month)));
     Promise.all([
-      api.get(`/banks/${bankId}/statements/detailed`),
+      api.get(`/banks/${bankId}/statements/detailed?${params.toString()}`),
       api.get(`/banks/${bankId}/statements/volume`),
       api.get(`/banks/${bankId}/deposits`),
     ]).then(([detailedResponse, volumeResponse, depositsResponse]) => {
@@ -31,7 +53,7 @@ export default function StatementsPage() {
       setVolume(null);
       setDeposits([]);
     }).finally(() => setLoading(false));
-  }, [bankId]);
+  }, [bankId, detailedFilter]);
 
   const filteredDetailedRows = useMemo(() => {
     const rows = detailed?.rows || [];
@@ -50,6 +72,8 @@ export default function StatementsPage() {
     count: filteredDetailedRows.length,
   }), [filteredDetailedRows]);
 
+  const detailedPeriodLabel = detailedFilter.period_type === "monthly" ? `${monthLabels[detailedFilter.month]} / ${detailedFilter.year}` : `سنة ${detailedFilter.year}`;
+
   return (
     <BankShell>
       <div className="space-y-6" data-testid="statements-page">
@@ -59,7 +83,7 @@ export default function StatementsPage() {
               <p className="text-sm font-extrabold text-emerald-700" data-testid="statements-eyebrow">كشوف تفريغية مفصلة</p>
               <h2 className="mt-2 text-3xl font-extrabold text-slate-950 sm:text-4xl" data-testid="statements-title">إجماليات الودائع والعوائد لكل وديعة</h2>
               <p className="mt-3 max-w-3xl text-base font-semibold leading-8 text-slate-600" data-testid="statements-description">
-                كشف مستقل للبنك الحالي يعرض إجمالي العائد عن السنة الحالية والمستحق عن السنوات السابقة، مع حساب كل شهر من العائد السنوي ÷ عدد أيام السنة الفعلية × أيام الشهر من التقويم.
+                كشف مستقل للبنك الحالي يعرض إجمالي العائد حسب الشهر أو السنة، مع حساب كل شهر من العائد السنوي ÷ 365 × أيام الشهر من التقويم.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2" data-testid="statements-heading-actions">
@@ -120,12 +144,42 @@ export default function StatementsPage() {
             </section>
 
             <section className="space-y-4" data-testid="detailed-interest-statement-section">
-              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="detailed-interest-statement-title">كشف العوائد التفريغي</h3>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" data-testid="detailed-interest-statement-heading">
+                <div data-testid="detailed-interest-title-block">
+                  <h3 className="text-2xl font-extrabold text-slate-950" data-testid="detailed-interest-statement-title">كشف العوائد التفريغي</h3>
+                  <p className="mt-1 text-sm font-bold text-slate-500" data-testid="detailed-interest-period-label">{detailedPeriodLabel}</p>
+                </div>
+                <div className="flex flex-wrap items-end gap-2 print:hidden" data-testid="detailed-interest-actions">
+                  <div data-testid="detailed-interest-period-type-wrapper">
+                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-period-type-label">عرض الكشف</label>
+                    <select value={detailedFilter.period_type} onChange={(event) => setDetailedFilter((current) => ({ ...current, period_type: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-period-type-select"><option value="yearly" data-testid="detailed-interest-period-yearly-option">سنوي</option><option value="monthly" data-testid="detailed-interest-period-monthly-option">شهري</option></select>
+                  </div>
+                  <div data-testid="detailed-interest-year-wrapper">
+                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-year-label">السنة</label>
+                    <select value={detailedFilter.year} onChange={(event) => setDetailedFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold" data-testid="detailed-interest-year-select">{yearOptions.map((year) => <option key={year} value={year} data-testid={`detailed-interest-year-option-${year}`}>{year}</option>)}</select>
+                  </div>
+                  <div data-testid="detailed-interest-month-wrapper">
+                    <label className="mb-1 block text-xs font-extrabold text-slate-500" data-testid="detailed-interest-month-label">الشهر</label>
+                    <select value={detailedFilter.month} onChange={(event) => setDetailedFilter((current) => ({ ...current, month: event.target.value }))} disabled={detailedFilter.period_type === "yearly"} className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-extrabold disabled:opacity-50" data-testid="detailed-interest-month-select">{monthOptions.map(([value, label]) => <option key={value} value={value} data-testid={`detailed-interest-month-option-${value}`}>{label}</option>)}</select>
+                  </div>
+                  <ExportReportButtons
+                    title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${detailedPeriodLabel}`}
+                    fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${detailedPeriodLabel}`}
+                    selectors={["[data-testid='detailed-interest-statement-section']"]}
+                    printSelectors={["[data-testid='detailed-interest-statement-section']"]}
+                    disabled={!detailed || loading}
+                    pdfLabel="طباعة PDF"
+                    pdfTestId="print-detailed-interest-pdf-button"
+                    excelTestId="export-detailed-interest-excel-button"
+                    wordTestId="export-detailed-interest-word-button"
+                  />
+                </div>
+              </div>
               <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="detailed-interest-table-wrapper">
                 <Table data-testid="detailed-interest-table">
                   <TableHeader className="bg-slate-950">
                     <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', 'عائد السنة الحالية', 'مستحق سنوات سابقة', 'الإجمالي المستحق'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', detailedFilter.period_type === "monthly" ? 'عائد الشهر' : 'عائد السنة', 'مستحق سنوات سابقة', 'الإجمالي المستحق'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`detailed-interest-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>
