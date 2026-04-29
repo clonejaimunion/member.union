@@ -23,6 +23,11 @@ html {
         margin: 10mm;
     }
 
+    @page expenses-analysis-landscape {
+        size: A4 landscape;
+        margin: 7mm;
+    }
+
     body {
         background: #ffffff !important;
     }
@@ -94,6 +99,100 @@ html {
 
     [data-testid="expenses-analysis-preview-modal-actions"] {
         display: none !important;
+    }
+
+    [data-testid="expenses-analysis-content"] {
+        max-width: none !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="expenses-analysis-filters-section"] {
+        display: none !important;
+    }
+
+    [data-testid="expenses-analysis-report-section"],
+    [data-testid="expenses-analysis-preview-report-section"] {
+        page: expenses-analysis-landscape;
+        width: 283mm !important;
+        max-width: 283mm !important;
+        box-sizing: border-box !important;
+        padding: 0 !important;
+        margin: 0 auto !important;
+        overflow: visible !important;
+        box-shadow: none !important;
+        color: #000000 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    [data-testid="expenses-analysis-preview-report-section"] {
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    [data-testid="expenses-analysis-report-section"] *,
+    [data-testid="expenses-analysis-preview-report-section"] * {
+        color: #000000 !important;
+        border-color: #000000 !important;
+        opacity: 1 !important;
+    }
+
+    [data-testid="expenses-analysis-report-kpis"],
+    [data-testid="expenses-analysis-preview-report-kpis"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 5px !important;
+    }
+
+    [data-testid="expenses-analysis-report-heading"],
+    [data-testid="expenses-analysis-preview-report-heading"] {
+        margin-bottom: 5px !important;
+        gap: 5px !important;
+    }
+
+    [data-testid="expenses-analysis-report-title"],
+    [data-testid="expenses-analysis-preview-report-title"] {
+        font-size: 15px !important;
+        line-height: 1.25 !important;
+    }
+
+    [data-testid="expenses-analysis-table-wrapper"],
+    [data-testid="expenses-analysis-preview-table-wrapper"] {
+        overflow: visible !important;
+        border-width: 1px !important;
+    }
+
+    [data-testid="expenses-analysis-table"],
+    [data-testid="expenses-analysis-preview-table"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: fixed !important;
+        font-size: 7.5px !important;
+        line-height: 1.2 !important;
+    }
+
+    [data-testid="expenses-analysis-table"] th,
+    [data-testid="expenses-analysis-table"] td,
+    [data-testid="expenses-analysis-preview-table"] th,
+    [data-testid="expenses-analysis-preview-table"] td {
+        padding: 3px 2px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+        vertical-align: top !important;
+    }
+
+    [data-testid="expenses-analysis-table"] th:nth-child(1),
+    [data-testid="expenses-analysis-table"] td:nth-child(1),
+    [data-testid="expenses-analysis-preview-table"] th:nth-child(1),
+    [data-testid="expenses-analysis-preview-table"] td:nth-child(1) {
+        width: 18mm !important;
+    }
+
+    [data-testid="expenses-analysis-table"] th:nth-child(2),
+    [data-testid="expenses-analysis-table"] td:nth-child(2),
+    [data-testid="expenses-analysis-preview-table"] th:nth-child(2),
+    [data-testid="expenses-analysis-preview-table"] td:nth-child(2) {
+        width: 55mm !important;
     }
 
     [data-testid="expense-invoice-modal-overlay"] {
