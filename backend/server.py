@@ -1550,6 +1550,27 @@ def require_permission(permission_name: str):
     return checker
 
 
+async def require_einvoice_enabled(current_user: dict = Depends(get_current_user)) -> dict:
+    if current_user.get("organization_id") == "social-solidarity":
+        raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
+    return current_user
+
+
+async def require_einvoice_admin(current_user: dict = Depends(require_admin)) -> dict:
+    if current_user.get("organization_id") == "social-solidarity":
+        raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
+    return current_user
+
+
+def require_einvoice_permission(permission_names: List[str]):
+    async def checker(current_user: dict = Depends(require_any_permission(permission_names))) -> dict:
+        if current_user.get("organization_id") == "social-solidarity":
+            raise HTTPException(status_code=404, detail="الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي")
+        return current_user
+
+    return checker
+
+
 def require_any_permission(permission_names: List[str]):
     async def checker(current_user: dict = Depends(get_current_user)) -> dict:
         if current_user.get("role") == "admin":
@@ -2807,12 +2828,12 @@ async def save_banking_manual_charges(
 
 
 @api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
-async def get_electronic_invoice_settings(_: dict = Depends(get_current_user)):
+async def get_electronic_invoice_settings(_: dict = Depends(require_einvoice_enabled)):
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(await get_einvoice_settings_document()))
 
 
 @api_router.put("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
-async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _: dict = Depends(require_admin)):
+async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _: dict = Depends(require_einvoice_admin)):
     now = datetime.now(timezone.utc)
     document = attach_organization({"id": "default", **payload.model_dump(), "updated_at": serialize_datetime(now)})
     await db.einvoice_settings.update_one(with_organization({"id": "default"}), {"$set": document}, upsert=True)
@@ -2820,13 +2841,13 @@ async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _
 
 
 @api_router.get("/electronic-invoice/customers", response_model=List[ElectronicCustomer])
-async def list_electronic_customers(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
+async def list_electronic_customers(_: dict = Depends(require_einvoice_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
     documents = await db.einvoice_customers.find(with_organization({}), {"_id": 0}).sort("name", 1).to_list(1000)
     return [ElectronicCustomer(**hydrate_einvoice_document(document)) for document in documents]
 
 
 @api_router.post("/electronic-invoice/customers", response_model=ElectronicCustomer)
-async def create_electronic_customer(payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+async def create_electronic_customer(payload: ElectronicCustomerCreate, _: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
     now = datetime.now(timezone.utc)
     document = attach_organization({"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)})
     await db.einvoice_customers.insert_one(document.copy())
@@ -2834,7 +2855,7 @@ async def create_electronic_customer(payload: ElectronicCustomerCreate, _: dict 
 
 
 @api_router.put("/electronic-invoice/customers/{customer_id}", response_model=ElectronicCustomer)
-async def update_electronic_customer(customer_id: str, payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+async def update_electronic_customer(customer_id: str, payload: ElectronicCustomerCreate, _: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
     existing = await db.einvoice_customers.find_one(with_organization({"id": customer_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="العميل غير موجود")
@@ -2845,7 +2866,7 @@ async def update_electronic_customer(customer_id: str, payload: ElectronicCustom
 
 
 @api_router.get("/electronic-invoice/service-codes", response_model=List[ElectronicServiceCode])
-async def list_electronic_service_codes(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
+async def list_electronic_service_codes(_: dict = Depends(require_einvoice_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
     settings = await get_einvoice_settings_document()
     await get_default_service_code(settings)
     documents = await db.einvoice_service_codes.find(with_organization({}), {"_id": 0}).sort("is_default", -1).sort("name", 1).to_list(1000)
@@ -2853,7 +2874,7 @@ async def list_electronic_service_codes(_: dict = Depends(require_any_permission
 
 
 @api_router.post("/electronic-invoice/service-codes", response_model=ElectronicServiceCode)
-async def create_electronic_service_code(payload: ElectronicServiceCodeCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+async def create_electronic_service_code(payload: ElectronicServiceCodeCreate, _: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
     now = datetime.now(timezone.utc)
     if payload.is_default:
         await db.einvoice_service_codes.update_many(with_organization({}), {"$set": {"is_default": False}})
@@ -2867,7 +2888,7 @@ async def list_electronic_invoices(
     status: Optional[str] = Query(default=None),
     from_date: Optional[date] = Query(default=None),
     to_date: Optional[date] = Query(default=None),
-    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
+    _: dict = Depends(require_einvoice_permission(["enter_deposits", "view_reports", "manage_revenues"])),
 ):
     query = with_organization({})
     if status and status != "all":
@@ -2883,7 +2904,7 @@ async def list_electronic_invoices(
 
 
 @api_router.post("/electronic-invoices/generate-from-revenues", response_model=List[ElectronicInvoice])
-async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
     settings = await get_einvoice_settings_document()
     service = await get_default_service_code(settings)
     revenues = await db.revenues.find(with_organization({"bank_collection_status": "collected"}), {"_id": 0}).sort("issued_at", 1).to_list(1000)
@@ -2929,7 +2950,7 @@ async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_a
 
 
 @api_router.patch("/electronic-invoices/{invoice_id}/status", response_model=ElectronicInvoice)
-async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicInvoiceStatusUpdate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicInvoiceStatusUpdate, _: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
     existing = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")

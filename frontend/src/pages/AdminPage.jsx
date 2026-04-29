@@ -88,6 +88,8 @@ export default function AdminPage() {
   const [securityLoading, setSecurityLoading] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState("add-user");
   const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
+  const visiblePermissionEntries = Object.entries(permissionLabels).filter(([key]) => user?.organization_id !== "social-solidarity" || key !== "manage_einvoice");
+  const visiblePermissionKeys = new Set(visiblePermissionEntries.map(([key]) => key));
 
   const loadUsers = useCallback(() => {
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
@@ -426,7 +428,7 @@ export default function AdminPage() {
                 <Input id="new_password" type="password" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-user-password-input" />
               </div>
               <div className="md:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="new-user-permissions-grid">
-                {Object.entries(permissionLabels).map(([key, label]) => (
+                {visiblePermissionEntries.map(([key, label]) => (
                   <button key={key} type="button" onClick={() => toggleNewPermission(key)} className={`flex items-center justify-between rounded-lg border p-4 text-sm font-extrabold transition-colors ${newUser.permissions[key] ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-500"}`} data-testid={`new-user-permission-${key}-toggle`}>
                     {label}
                     {newUser.permissions[key] ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}
@@ -518,7 +520,7 @@ export default function AdminPage() {
                     </div>
                     <div className="flex flex-wrap gap-2" data-testid={`user-row-${item.id}-badges`}>
                       <Badge className={item.is_active ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-50" : "bg-red-50 text-red-700 hover:bg-red-50"} data-testid={`user-row-${item.id}-status`}>{item.is_active ? "نشط" : "موقوف"}</Badge>
-                      {Object.entries(item.permissions || {}).filter(([, enabled]) => enabled).map(([key]) => (
+                      {Object.entries(item.permissions || {}).filter(([key, enabled]) => enabled && visiblePermissionKeys.has(key)).map(([key]) => (
                         <Badge key={key} variant="outline" data-testid={`user-row-${item.id}-permission-${key}`}>{permissionLabels[key]}</Badge>
                       ))}
                     </div>
@@ -526,7 +528,7 @@ export default function AdminPage() {
                   {item.role !== "admin" && (
                     <div className="mt-4 space-y-3" data-testid={`user-row-${item.id}-actions`}>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid={`user-row-${item.id}-permissions-editor`}>
-                        {Object.entries(permissionLabels).map(([key, label]) => (
+                        {visiblePermissionEntries.map(([key, label]) => (
                           <button key={key} type="button" onClick={() => toggleExistingPermission(item, key)} className={`flex items-center justify-between rounded-lg border p-3 text-sm font-extrabold transition-colors ${item.permissions?.[key] ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"}`} data-testid={`user-row-${item.id}-permission-${key}-toggle`}>
                             {label}
                             {item.permissions?.[key] ? <ToggleRight className="h-5 w-5" /> : <ToggleLeft className="h-5 w-5" />}

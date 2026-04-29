@@ -70,6 +70,12 @@ function PrintOrganizationHeading() {
   );
 }
 
+function ElectronicInvoiceRoute() {
+  const { user } = useAuth();
+  if (user?.organization_id === "social-solidarity") return <Navigate to="/" replace />;
+  return <ElectronicInvoicePage />;
+}
+
 function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
@@ -94,7 +100,7 @@ function App() {
               <Route path="/expenses-analysis" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ExpensesAnalysisPage /></ProtectedRoute>} />
               <Route path="/banking-expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><BankingExpensesPage /></ProtectedRoute>} />
               <Route path="/ledger" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><LedgerPage /></ProtectedRoute>} />
-              <Route path="/electronic-invoice" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ElectronicInvoicePage /></ProtectedRoute>} />
+              <Route path="/electronic-invoice" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ElectronicInvoiceRoute /></ProtectedRoute>} />
               <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
               <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><DepositRegistration /></ProtectedRoute>} />
               <Route path="/bank/:bankId/current-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="current-year" /></ProtectedRoute>} />

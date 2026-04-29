@@ -17,7 +17,7 @@ export default function ModuleSelection() {
   const canUseExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses;
   const canUseBankingExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
   const canUseLedger = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
-  const canUseElectronicInvoice = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
+  const canUseElectronicInvoice = user?.organization_id !== "social-solidarity" && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
 
   const modules = [
     canUseDeposits && {
