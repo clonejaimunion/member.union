@@ -166,7 +166,7 @@ html {
         width: 100% !important;
         min-width: 0 !important;
         table-layout: fixed !important;
-        font-size: 7.5px !important;
+        font-size: 5.5px !important;
         line-height: 1.2 !important;
     }
 
@@ -179,6 +179,8 @@ html {
         word-break: break-word !important;
         overflow-wrap: anywhere !important;
         vertical-align: top !important;
+        font-size: 5.5px !important;
+        line-height: 1.2 !important;
     }
 
     [data-testid="expenses-analysis-table"] th:nth-child(1),

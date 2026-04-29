@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, BarChart3, Eye, Home, LogOut, Printer, RotateCcw, X } from "lucide-react";
+import { ArrowRight, BarChart3, Eye, FileDown, FileSpreadsheet, FileText, Home, LogOut, Printer, RotateCcw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -48,6 +48,30 @@ const analysisCategories = [
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
   { key: "death_benefits", label: "إعانات الوفاة", keywords: ["اعانات الوفاه", "اعانات الوفاة", "إعانات الوفاة", "اعانة وفاة", "إعانة وفاة"], expenseCategory: "death_benefits" },
 ];
+
+const escapeHtml = (value) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#039;");
+
+const makeSafeFileName = (value) => String(value || "expenses-analysis")
+  .replace(/[\\/:*?"<>|]/g, "-")
+  .replace(/\s+/g, "-")
+  .slice(0, 120);
+
+const triggerDownload = (content, filename, type) => {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
 
 const classifyExpense = (expense) => {
   if (expense.expense_category === "death_benefits") {
@@ -120,6 +144,56 @@ export default function ExpensesAnalysisPage() {
   const hasCompletePeriod = filters.period_type === "yearly" ? Boolean(filters.year) : Boolean(filters.year && filters.month);
   const periodLabel = filters.period_type === "yearly" ? `سنة ${filters.year || "—"}` : `${monthLabels[filters.month] || "—"} / ${filters.year || "—"}`;
 
+  const exportFileBaseName = useMemo(() => makeSafeFileName(`تحليل-المصروفات-${organizationLabels[filters.organization_scope]}-${periodLabel}`), [filters.organization_scope, periodLabel]);
+
+  const buildExportTableHtml = useCallback((forExcel = false) => {
+    const headers = ["التاريخ", "البيان بالكامل من المصروفات", ...analysisCategories.map((category) => category.label), "إجمالي الصف"];
+    const rows = visibleAnalysisRows.map((row) => [
+      row.issued_at,
+      `${row.gross_statement || ""}${row.expense_number ? `\nإذن رقم ${row.expense_number}` : ""}${row.bank_name ? ` — ${row.bank_name}` : ""}`,
+      ...analysisCategories.map((category) => row.categoryAmounts[category.key] ? Number(row.categoryAmounts[category.key]).toFixed(2) : ""),
+      Number(row.analysis_total || 0).toFixed(2),
+    ]);
+    const totalRow = [
+      "—",
+      "الإجمالي العام",
+      ...analysisCategories.map((category) => Number(categoryTotals[category.key] || 0).toFixed(2)),
+      Number(grandTotal || 0).toFixed(2),
+    ];
+    const tableRows = [...rows, totalRow];
+    const emptyRow = `<tr><td colspan="${headers.length}">لا توجد مصروفات مطابقة لهذه الاختيارات</td></tr>`;
+    const tableBody = tableRows.length > 1 ? tableRows.map((row, rowIndex) => `<tr>${row.map((cell) => `<td${rowIndex === tableRows.length - 1 ? " style='font-weight:700;background:#fef2f2;'" : ""}>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("") : emptyRow;
+    const workbookMeta = forExcel ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>تحليل المصروفات</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>` : "";
+
+    return `<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="utf-8" />
+  ${workbookMeta}
+  <style>
+    body { font-family: Tahoma, Arial, sans-serif; direction: rtl; color: #111827; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    p { margin: 0 0 12px; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    th, td { border: 1px solid #111827; padding: 6px; text-align: right; vertical-align: top; white-space: pre-line; }
+    th { background: #111827; color: #ffffff; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(`تحليل المصروفات - ${periodLabel}`)}</h1>
+  <p>${escapeHtml(organizationLabels[filters.organization_scope])}</p>
+  <table>
+    <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+    <tbody>${tableBody}</tbody>
+  </table>
+</body>
+</html>`;
+  }, [categoryTotals, filters.organization_scope, grandTotal, periodLabel, visibleAnalysisRows]);
+
+  const exportToPdf = () => window.print();
+  const exportToExcel = () => triggerDownload(buildExportTableHtml(true), `${exportFileBaseName}.xls`, "application/vnd.ms-excel;charset=utf-8");
+  const exportToWord = () => triggerDownload(buildExportTableHtml(false), `${exportFileBaseName}.doc`, "application/msword;charset=utf-8");
+
   const updateFilter = (field, value) => {
     setFilters((current) => {
       if (field === "period_type") return { ...current, period_type: value, month: value === "yearly" ? "" : current.month };
@@ -185,7 +259,10 @@ export default function ExpensesAnalysisPage() {
             <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-filter-actions">
               <Button type="button" onClick={loadExpenses} variant="outline" className="h-11 rounded-lg bg-white" data-testid="refresh-expenses-analysis-button"><RotateCcw className="h-4 w-4" /> تحديث</Button>
               <Button type="button" onClick={() => setPreviewOpen(true)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="preview-expenses-analysis-button"><Eye className="h-4 w-4" /> معاينة التقرير</Button>
-              <Button type="button" onClick={() => window.print()} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
+              <Button type="button" onClick={exportToPdf} disabled={!hasCompletePeriod || loading} className="h-11 rounded-lg bg-slate-950 text-white disabled:opacity-50" data-testid="export-expenses-analysis-pdf-button"><FileDown className="h-4 w-4" /> PDF</Button>
+              <Button type="button" onClick={exportToExcel} disabled={!hasCompletePeriod || loading} variant="outline" className="h-11 rounded-lg bg-white disabled:opacity-50" data-testid="export-expenses-analysis-excel-button"><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+              <Button type="button" onClick={exportToWord} disabled={!hasCompletePeriod || loading} variant="outline" className="h-11 rounded-lg bg-white disabled:opacity-50" data-testid="export-expenses-analysis-word-button"><FileText className="h-4 w-4" /> Word</Button>
+              <Button type="button" onClick={exportToPdf} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="expenses-analysis-filters-grid">
@@ -204,7 +281,9 @@ export default function ExpensesAnalysisPage() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3" data-testid="expenses-analysis-preview-modal-actions">
               <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expenses-analysis-preview-modal-title">معاينة تقرير تحليل المصروفات</h3>
               <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-preview-modal-buttons">
-                <Button type="button" onClick={() => window.print()} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-preview-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
+                <Button type="button" onClick={exportToPdf} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-preview-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
+                <Button type="button" onClick={exportToExcel} variant="outline" className="h-11 rounded-lg bg-white" data-testid="export-expenses-analysis-preview-excel-button"><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+                <Button type="button" onClick={exportToWord} variant="outline" className="h-11 rounded-lg bg-white" data-testid="export-expenses-analysis-preview-word-button"><FileText className="h-4 w-4" /> Word</Button>
                 <Button type="button" onClick={() => setPreviewOpen(false)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="close-expenses-analysis-preview-button"><X className="h-4 w-4" /> خروج من المعاينة</Button>
               </div>
             </div>
