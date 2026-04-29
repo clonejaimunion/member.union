@@ -70,7 +70,8 @@ const defaultApprovalForm = { report_type: "عام", report_name: "", report_ref
 
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
-  { id: "users", title: "المستخدمون", subtitle: "إضافة مستخدم لإدخال البيانات والمستخدمون المسجلون", icon: UsersRound },
+  { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
+  { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
   { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
   { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
   { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
@@ -113,7 +114,7 @@ export default function AdminPage() {
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
-  const [activeAdminSection, setActiveAdminSection] = useState("users");
+  const [activeAdminSection, setActiveAdminSection] = useState("add-user");
   const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
 
   const loadUsers = useCallback(() => {
@@ -496,7 +497,7 @@ export default function AdminPage() {
 
       <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="admin-content-grid">
         <div className="space-y-6" data-testid="admin-users-column">
-          {activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
+          {activeAdminSection === "add-user" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
             <div className="mb-5 flex items-center gap-3" data-testid="create-user-heading">
               <UsersRound className="h-6 w-6 text-emerald-700" />
               <h2 className="text-2xl font-extrabold" data-testid="create-user-title">إضافة مستخدم لإدخال البيانات</h2>
