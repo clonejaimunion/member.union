@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -13,6 +13,7 @@ export default function ModuleSelection() {
   const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
   const canUseExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses;
   const canUseBankingExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
+  const canUseLedger = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
 
   const modules = [
     canUseDeposits && {
@@ -56,6 +57,13 @@ export default function ModuleSelection() {
       path: "/banking-expenses",
       icon: Banknote,
       testId: "module-banking-expenses-card",
+    },
+    canUseLedger && {
+      title: "دفتر الأستاذ",
+      description: "تجميع محاسبي للحركات المدينة والدائنة والرصيد المتراكم.",
+      path: "/ledger",
+      icon: BookOpenText,
+      testId: "module-ledger-card",
     },
   ].filter(Boolean);
 

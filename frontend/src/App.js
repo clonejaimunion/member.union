@@ -18,6 +18,7 @@ import RevenuesPage from "@/pages/RevenuesPage";
 import ExpensesPage from "@/pages/ExpensesPage";
 import ExpensesAnalysisPage from "@/pages/ExpensesAnalysisPage";
 import BankingExpensesPage from "@/pages/BankingExpensesPage";
+import LedgerPage from "@/pages/LedgerPage";
 
 const appTitle = "النقابة العامة للعاملين بالزراعة والري";
 
@@ -30,6 +31,7 @@ const sectionTitles = [
   { test: (path) => path === "/expenses", title: "المصروفات" },
   { test: (path) => path === "/expenses-analysis", title: "تحليل المصروفات" },
   { test: (path) => path === "/banking-expenses", title: "المصروفات البنكية" },
+  { test: (path) => path === "/ledger", title: "دفتر الأستاذ" },
   { test: (path) => path === "/secure-admin-control-panel", title: "لوحة الأدمن" },
   { test: (path) => path.endsWith("/register"), title: "تسجيل الودائع" },
   { test: (path) => path.endsWith("/current-year"), title: "تقرير السنة الحالية" },
@@ -71,6 +73,7 @@ function App() {
             <Route path="/expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ExpensesPage /></ProtectedRoute>} />
             <Route path="/expenses-analysis" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ExpensesAnalysisPage /></ProtectedRoute>} />
             <Route path="/banking-expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><BankingExpensesPage /></ProtectedRoute>} />
+            <Route path="/ledger" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><LedgerPage /></ProtectedRoute>} />
             <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
             <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><DepositRegistration /></ProtectedRoute>} />
             <Route path="/bank/:bankId/current-year" element={<ProtectedRoute permission="view_reports"><ReportPage type="current-year" /></ProtectedRoute>} />
