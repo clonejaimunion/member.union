@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, FileSearch, Home, LogOut, Pencil, ReceiptText, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowRight, Banknote, CheckCircle2, FileSearch, Home, LogOut, Pencil, ReceiptText, RotateCcw, Save, Search, Trash2, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,7 @@ const defaultForm = () => ({
   value: "",
   issued_at: today(),
   responsible_employee: "يوسف عبدالغني",
+  bank_collection_status: "under_collection",
 });
 
 const methodLabels = {
@@ -40,6 +41,11 @@ const methodLabels = {
 const checkClearingLabels = {
   internal: "داخلي",
   external: "خارجي",
+};
+
+const collectionStatusLabels = {
+  collected: "تم التحصيل",
+  under_collection: "تحت التحصيل",
 };
 
 const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
@@ -138,6 +144,7 @@ export default function RevenuesPage() {
       value: item.value || "",
       issued_at: item.issued_at || today(),
       responsible_employee: item.responsible_employee || "يوسف عبدالغني",
+      bank_collection_status: item.bank_collection_status || "under_collection",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -151,6 +158,16 @@ export default function RevenuesPage() {
       loadRevenues();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حذف الإيراد");
+    }
+  };
+
+  const updateRevenueBankingStatus = async (item, status) => {
+    try {
+      await api.patch(`/revenues/${item.id}/banking-status`, { bank_collection_status: status });
+      toast.success("تم تحديث حالة التحصيل");
+      loadRevenues();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تحديث حالة التحصيل");
     }
   };
 
@@ -173,6 +190,16 @@ export default function RevenuesPage() {
     if (item.collection_method === "cash") return item.supplier_name || "—";
     if (item.collection_method === "check") return `${item.check_number || "—"} — ${checkClearingLabels[item.check_clearing_type || "internal"]}`;
     return item.payment_order_number || "—";
+  };
+
+  const renderRevenueStatusActions = (item) => {
+    const status = item.bank_collection_status || "under_collection";
+    return (
+      <div className="grid grid-cols-1 gap-2" data-testid={`revenue-row-${item.id}-status-actions`}>
+        <button type="button" onClick={() => updateRevenueBankingStatus(item, "collected")} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-extrabold ${status === "collected" ? "border-emerald-800 bg-emerald-700 text-white" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`} data-testid={`mark-revenue-collected-button-${item.id}`}><CheckCircle2 className="h-4 w-4" /> {collectionStatusLabels.collected}</button>
+        <button type="button" onClick={() => updateRevenueBankingStatus(item, "under_collection")} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-extrabold ${status === "under_collection" ? "border-slate-900 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`} data-testid={`mark-revenue-under-collection-button-${item.id}`}><XCircle className="h-4 w-4" /> {collectionStatusLabels.under_collection}</button>
+      </div>
+    );
   };
 
   const DetailGrid = ({ item, prefix }) => (
@@ -275,7 +302,7 @@ export default function RevenuesPage() {
           <div className="overflow-hidden rounded-xl border border-slate-200" data-testid="revenues-table-wrapper">
             <Table data-testid="revenues-table">
               <TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950" data-testid="revenues-table-header-row">{["رقم الإذن", "المبلغ", "طريقة التحصيل", "بيان التحصيل", "البنك", "بتاريخ", "قيمة", "تحريراً في", "الموظف"].map((title) => <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`revenues-header-${title}`}>{title}</TableHead>)}{canManage && <TableHead className="text-right font-extrabold text-white print:hidden" data-testid="revenues-header-actions">إجراءات</TableHead>}</TableRow></TableHeader>
-              <TableBody>{revenues.map((item) => <TableRow key={item.id} data-testid={`revenue-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`revenue-row-${item.id}-receipt`}>{item.receipt_number}</TableCell><TableCell data-testid={`revenue-row-${item.id}-amount`}>{formatCurrency(item.amount)}</TableCell><TableCell data-testid={`revenue-row-${item.id}-method`}>{methodLabels[item.collection_method]}</TableCell><TableCell data-testid={`revenue-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`revenue-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`revenue-row-${item.id}-dated`}>{item.dated}</TableCell><TableCell className="max-w-xs break-words" data-testid={`revenue-row-${item.id}-value`}>{item.value}</TableCell><TableCell data-testid={`revenue-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`revenue-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`revenue-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`revenue-row-${item.id}-manage-actions`}><button type="button" onClick={() => editRevenue(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-revenue-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button><button type="button" onClick={() => deleteRevenue(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-revenue-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody>
+              <TableBody>{revenues.map((item) => <TableRow key={item.id} data-testid={`revenue-row-${item.id}`}><TableCell className="font-extrabold" data-testid={`revenue-row-${item.id}-receipt`}>{item.receipt_number}</TableCell><TableCell data-testid={`revenue-row-${item.id}-amount`}>{formatCurrency(item.amount)}</TableCell><TableCell data-testid={`revenue-row-${item.id}-method`}>{methodLabels[item.collection_method]}</TableCell><TableCell data-testid={`revenue-row-${item.id}-detail`}>{detailValue(item)}</TableCell><TableCell data-testid={`revenue-row-${item.id}-bank`}>{item.bank_name}</TableCell><TableCell data-testid={`revenue-row-${item.id}-dated`}>{item.dated}</TableCell><TableCell className="max-w-xs break-words" data-testid={`revenue-row-${item.id}-value`}>{item.value}</TableCell><TableCell data-testid={`revenue-row-${item.id}-issued`}>{item.issued_at}</TableCell><TableCell data-testid={`revenue-row-${item.id}-employee`}>{item.responsible_employee}</TableCell>{canManage && <TableCell className="print:hidden" data-testid={`revenue-row-${item.id}-actions`}><div className="flex flex-col gap-2" data-testid={`revenue-row-${item.id}-manage-actions`}><button type="button" onClick={() => editRevenue(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-extrabold text-amber-700" data-testid={`edit-revenue-button-${item.id}`}><Pencil className="h-4 w-4" /> تعديل</button>{renderRevenueStatusActions(item)}<button type="button" onClick={() => deleteRevenue(item)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-extrabold text-red-700" data-testid={`delete-revenue-button-${item.id}`}><Trash2 className="h-4 w-4" /> حذف</button></div></TableCell>}</TableRow>)}</TableBody>
             </Table>
           </div>
         </section>

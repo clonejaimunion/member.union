@@ -486,7 +486,7 @@ def hydrate_revenue(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
-    if clean.get("collection_method") in {"check", "payment_order"} and not clean.get("bank_collection_status"):
+    if clean.get("collection_method") in {"cash", "check", "payment_order"} and not clean.get("bank_collection_status"):
         clean["bank_collection_status"] = "under_collection"
     if clean.get("collection_method") == "check" and not clean.get("check_clearing_type"):
         clean["check_clearing_type"] = "internal"
@@ -500,7 +500,7 @@ def hydrate_expense(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
-    if clean.get("payment_method") == "check" and not clean.get("bank_payment_status"):
+    if clean.get("payment_method") in {"cash", "check", "bank_transfer"} and not clean.get("bank_payment_status"):
         clean["bank_payment_status"] = "not_presented"
     if clean.get("payment_method") == "check" and not clean.get("check_clearing_type"):
         clean["check_clearing_type"] = "internal"
@@ -566,7 +566,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
         "value": payload.value.strip(),
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
-        "bank_collection_status": payload.bank_collection_status if method in ["check", "payment_order"] else None,
+        "bank_collection_status": payload.bank_collection_status if method in ["cash", "check", "payment_order"] else None,
     }
 
 
@@ -640,7 +640,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         "net_amount": net_amount,
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
-        "bank_payment_status": payload.bank_payment_status if payload.payment_method == "check" else None,
+        "bank_payment_status": payload.bank_payment_status if payload.payment_method in ["cash", "check", "bank_transfer"] else None,
     }
 
 
@@ -1578,8 +1578,6 @@ async def update_revenue_banking_status(
     existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
-    if existing.get("collection_method") not in {"check", "payment_order"}:
-        raise HTTPException(status_code=400, detail="حالة التحصيل البنكية متاحة للشيكات وأوامر الدفع فقط")
     await db.revenues.update_one(
         {"id": revenue_id},
         {"$set": {"bank_collection_status": payload.bank_collection_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
@@ -1689,8 +1687,6 @@ async def update_expense_banking_status(
     existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
-    if existing.get("payment_method") != "check":
-        raise HTTPException(status_code=400, detail="حالة الصرف البنكية متاحة للشيكات فقط")
     await db.expenses.update_one(
         {"id": expense_id},
         {"$set": {"bank_payment_status": payload.bank_payment_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
