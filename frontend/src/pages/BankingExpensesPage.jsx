@@ -172,7 +172,6 @@ export default function BankingExpensesPage() {
 
   const reportRows = useMemo(() => {
     const paymentOrdersCollected = revenues.filter((item) => item.collection_method === "payment_order" && (item.bank_collection_status || "under_collection") === "collected");
-    const paymentOrdersUnderCollection = revenues.filter((item) => item.collection_method === "payment_order" && (item.bank_collection_status || "under_collection") === "under_collection");
     const checksCollected = revenues.filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "collected");
     const internalChecksCollected = checksCollected.filter((item) => (item.check_clearing_type || "internal") === "internal");
     const externalChecksCollected = checksCollected.filter((item) => item.check_clearing_type === "external");
@@ -187,7 +186,6 @@ export default function BankingExpensesPage() {
 
     return [
       { key: "payment-orders-collected", statement: "أوامر دفع إلكتروني محصلة", count: paymentOrdersCollected.length, bankExpense: paymentOrdersCollected.length * rules.paymentOrderFee },
-      { key: "payment-orders-under", statement: "أوامر دفع إلكتروني تحت التحصيل", count: paymentOrdersUnderCollection.length, bankExpense: 0 },
       { key: "checks-collected-internal", statement: "شيكات محصلة داخلي", count: internalChecksCollected.length, bankExpense: internalChecksCollected.length * rules.incomingCheckFee },
       { key: "checks-collected-external", statement: "شيكات محصلة خارجي", count: externalChecksCollected.length, bankExpense: externalChecksCollected.reduce((sum, item) => sum + rules.incomingExternalCheckFee(item.amount), 0) },
       { key: "checks-under", statement: "شيكات تحت التحصيل", count: checksUnderCollection.length, bankExpense: 0 },
