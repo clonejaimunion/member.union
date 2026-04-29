@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, ReceiptText, Scale, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -14,6 +14,7 @@ export default function ModuleSelection() {
   const organizationName = user?.organization_name || settings.system_name;
   const canUseDeposits = isModuleEnabled(user, "deposits") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports);
   const canUseChartAccounts = isModuleEnabled(user, "chart_accounts") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseTrialBalance = isModuleEnabled(user, "trial_balance") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseJournalEntries = isModuleEnabled(user, "journal_entries") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseReconciliation = isModuleEnabled(user, "reconciliations") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations);
   const canUseRevenues = isModuleEnabled(user, "revenues") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
@@ -51,6 +52,13 @@ export default function ModuleSelection() {
       path: "/journal-entries",
       icon: NotebookPen,
       testId: "module-journal-entries-card",
+    },
+    canUseTrialBalance && {
+      title: "ميزان المراجعة",
+      description: "تقرير تلقائي بالمجاميع والأرصدة من القيود اليومية وشجرة الحسابات.",
+      path: "/trial-balance",
+      icon: Scale,
+      testId: "module-trial-balance-card",
     },
     canUseRevenues && {
       title: "الإيرادات",

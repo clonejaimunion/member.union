@@ -1,0 +1,65 @@
+{
+  "summary": "Tested trial balance end-to-end (API + UI): module card visibility, /api/trial-balance aggregation, banking manual expense auto-journal reflection, filters, page KPIs/table/export, and module disable route-guard behavior. Most flows passed; account_type filter has a backend logic bug and auth CORS preflight remains misconfigured at public edge.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/trial-balance?account_type=expense",
+        "issue": "Account-type filter leaks non-expense rows. Observed account types: ['asset','expense'] under expense-only filter; report can incorrectly remain متوازن.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Preflight returns access-control-allow-origin='*' and lacks access-control-allow-credentials=true on public endpoint, conflicting with credentialed auth posture.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Trial balance account-type filtering",
+        "issue": "Selecting مصروفات (expense) still shows balanced status with mixed account classes due backend filter leakage.",
+        "affected_selectors": [
+          "[data-testid='trial-balance-account-type-select']",
+          "[data-testid='trial-balance-status-value']",
+          "[data-testid='trial-balance-table']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration23_trial_balance.py",
+    "/app/backend/tests/test_iteration23_seed_trial_balance_ui.py",
+    "/app/test_reports/pytest/pytest_results_iter23_backend.xml",
+    "/app/test_reports/pytest/pytest_results_iter23_seed_ui.xml",
+    "/app/test_reports/iter23_cors_options_headers.txt"
+  ],
+  "action_items": [
+    "Fix /api/trial-balance account_type filtering to exclude journal-derived rows outside selected account class.",
+    "Recheck row construction path in get_trial_balance: when account_type is set, prevent fallback insertion of unmatched lines with non-target account_type.",
+    "Fix edge/ingress preflight headers for auth to return explicit allowed origin and allow-credentials=true."
+  ],
+  "critical_code_review_comments": [
+    "Root cause for account-type filter bug: account query is filtered, but unmatched journal lines are still added later via fallback row creation (key not in rows_by_key path), bypassing account_type restriction.",
+    "backend/server.py is still a large monolith (>3900 LOC), increasing regression risk in accounting-sensitive logic changes.",
+    "Official Egyptian Tax Authority e-invoice submission remains MOCKED/internal and was not validated against a live external authority endpoint."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration23_trial_balance.py",
+    "/app/backend/tests/test_iteration23_seed_trial_balance_ui.py",
+    "/app/test_reports/iteration_23.json"
+  ],
+  "success_rate": {
+    "backend": "86%",
+    "frontend": "90%"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md and used admin_takaful/Admin@123 on social-solidarity for backend and UI checks.",
+  "seed_data_creation": "Created trial-balance UI seed movement via banking manual charges (industrial-development, 2101/11, total 100).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Module trial_balance was restored to enabled at end of UI run. Stable seed exists at 2101-11 for social-solidarity. Repro for bug: call /api/trial-balance with from_date=2101-11-01, to_date=2101-11-30, account_type=expense, non_zero_only=true; API still returns asset row.",
+  "rca of the issue": "RCA: In get_trial_balance, accounts are pre-filtered by account_type, but journal line processing later adds rows for keys not present in rows_by_key using account/code/name fallback. This path reintroduces non-target account classes (e.g., asset bank row) even when account_type=expense. Mitigation: skip fallback row insertion when account_type filter is active and resolved/fallback account_type does not match filter."
+}
