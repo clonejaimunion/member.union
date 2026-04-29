@@ -111,6 +111,18 @@ export default function LedgerPage() {
       rows.push({ ...row, debit: Number(row.debit || 0), credit: Number(row.credit || 0) });
     };
 
+    if (filters.account_type === "bank" && Number(selectedBank?.opening_balance || 0) !== 0) {
+      const openingBalance = Number(selectedBank.opening_balance || 0);
+      pushRow({
+        date: filters.from_date,
+        source: "رصيد افتتاحي",
+        reference: "—",
+        statement: `الرصيد الافتتاحي - ${selectedBank.name}`,
+        debit: openingBalance > 0 ? openingBalance : 0,
+        credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
+      });
+    }
+
     revenues.filter((item) => (item.bank_collection_status || "under_collection") === "collected").forEach((item) => {
       const statement = `إيراد محصل - ${item.collection_method === "check" ? `شيك رقم ${item.check_number}` : item.collection_method === "payment_order" ? `أمر دفع رقم ${item.payment_order_number}` : "نقدي"}`;
       if (["bank", "revenues"].includes(filters.account_type)) pushRow({ date: item.issued_at || item.dated, source: "الإيرادات", reference: item.receipt_number, statement, debit: filters.account_type === "bank" ? item.amount : 0, credit: filters.account_type === "revenues" ? item.amount : 0 });
@@ -164,7 +176,7 @@ export default function LedgerPage() {
       balance += selectedAccount.balance(row);
       return { ...row, serial: index + 1, balance };
     });
-  }, [deposits, expenses, filters.account_type, filters.from_date, filters.to_date, manualCharges, revenues, selectedAccount, tariff]);
+  }, [deposits, expenses, filters.account_type, filters.from_date, filters.to_date, manualCharges, revenues, selectedAccount, selectedBank, tariff]);
 
   const totals = useMemo(() => ledgerRows.reduce((acc, row) => ({ debit: acc.debit + row.debit, credit: acc.credit + row.credit, balance: row.balance }), { debit: 0, credit: 0, balance: 0 }), [ledgerRows]);
 

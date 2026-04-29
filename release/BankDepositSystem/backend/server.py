@@ -93,6 +93,7 @@ class Bank(BaseModel):
     swift_code: Optional[str] = None
     logo_url: Optional[str] = None
     color: Optional[str] = None
+    opening_balance: float = 0
 
 
 class BankCreate(BaseModel):
@@ -101,6 +102,11 @@ class BankCreate(BaseModel):
     swift_code: Optional[str] = None
     logo_url: Optional[str] = None
     color: Optional[str] = "#0f172a"
+    opening_balance: float = 0
+
+
+class BankOpeningBalanceUpdate(BaseModel):
+    opening_balance: float = 0
 
 
 class BankingTariffRules(BaseModel):
@@ -461,6 +467,8 @@ def slugify_bank_name(name: str) -> str:
 async def get_all_banks() -> List[dict]:
     deleted_documents = await db.deleted_banks.find({}, {"_id": 0, "id": 1}).to_list(500)
     deleted_ids = {document["id"] for document in deleted_documents}
+    settings_documents = await db.bank_settings.find({}, {"_id": 0}).to_list(500)
+    opening_balances = {document["bank_id"]: float(document.get("opening_balance", 0) or 0) for document in settings_documents}
     custom_banks = await db.banks.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
     merged = list(BANKS.values()) + custom_banks
     seen = set()
@@ -468,7 +476,9 @@ async def get_all_banks() -> List[dict]:
     for bank in merged:
         if bank["id"] not in seen and bank["id"] not in deleted_ids:
             seen.add(bank["id"])
-            result.append(bank)
+            clean_bank = dict(bank)
+            clean_bank["opening_balance"] = opening_balances.get(bank["id"], float(bank.get("opening_balance", 0) or 0))
+            result.append(clean_bank)
     return result
 
 
@@ -478,10 +488,15 @@ async def ensure_bank_async(bank_id: str) -> dict:
         raise HTTPException(status_code=404, detail="البنك محذوف أو غير موجود")
     bank = BANKS.get(bank_id)
     if bank:
-        return bank
+        setting = await db.bank_settings.find_one({"bank_id": bank_id}, {"_id": 0})
+        clean_bank = dict(bank)
+        clean_bank["opening_balance"] = float(setting.get("opening_balance", 0) or 0) if setting else 0
+        return clean_bank
     custom_bank = await db.banks.find_one({"id": bank_id}, {"_id": 0})
     if not custom_bank:
         raise HTTPException(status_code=404, detail="البنك غير موجود")
+    setting = await db.bank_settings.find_one({"bank_id": bank_id}, {"_id": 0})
+    custom_bank["opening_balance"] = float(setting.get("opening_balance", custom_bank.get("opening_balance", 0)) or 0) if setting else float(custom_bank.get("opening_balance", 0) or 0)
     return custom_bank
 
 
@@ -1321,6 +1336,7 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
         "swift_code": payload.swift_code.strip().upper() if payload.swift_code else None,
         "logo_url": payload.logo_url.strip() if payload.logo_url else None,
         "color": payload.color or "#0f172a",
+        "opening_balance": round(float(payload.opening_balance or 0), 2),
         "created_at": serialize_datetime(now),
         "updated_at": serialize_datetime(now),
     }
@@ -1332,6 +1348,22 @@ async def create_bank(payload: BankCreate, _: dict = Depends(require_admin)):
         upsert=True,
     )
     return Bank(**{key: value for key, value in bank_doc.items() if key not in {"created_at", "updated_at"}})
+
+
+@api_router.put("/admin/banks/{bank_id}/opening-balance", response_model=Bank)
+async def update_bank_opening_balance(bank_id: str, payload: BankOpeningBalanceUpdate, _: dict = Depends(require_admin)):
+    bank = await ensure_bank_async(bank_id)
+    opening_balance = round(float(payload.opening_balance or 0), 2)
+    now = datetime.now(timezone.utc)
+    await db.bank_settings.update_one(
+        {"bank_id": bank_id},
+        {"$set": {"bank_id": bank_id, "opening_balance": opening_balance, "updated_at": serialize_datetime(now)}},
+        upsert=True,
+    )
+    if await db.banks.find_one({"id": bank_id}, {"_id": 0}):
+        await db.banks.update_one({"id": bank_id}, {"$set": {"opening_balance": opening_balance, "updated_at": serialize_datetime(now)}})
+    bank["opening_balance"] = opening_balance
+    return Bank(**{key: value for key, value in bank.items() if key not in {"created_at", "updated_at"}})
 
 
 @api_router.get("/banking-tariffs/{bank_id}", response_model=BankingTariffResponse)

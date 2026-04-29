@@ -59,6 +59,7 @@ export default function AdminPage() {
   const [otpCode, setOtpCode] = useState("");
   const [bankForm, setBankForm] = useState({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
   const [banks, setBanks] = useState([]);
+  const [openingBalances, setOpeningBalances] = useState({});
   const [tariffs, setTariffs] = useState([]);
   const [selectedTariffBankId, setSelectedTariffBankId] = useState("industrial-development");
   const [tariffRules, setTariffRules] = useState(emptyTariffRules);
@@ -74,6 +75,7 @@ export default function AdminPage() {
     try {
       const [banksResponse, tariffsResponse] = await Promise.all([api.get("/banks"), api.get("/admin/banking-tariffs")]);
       setBanks(banksResponse.data);
+      setOpeningBalances(banksResponse.data.reduce((acc, bank) => ({ ...acc, [bank.id]: String(bank.opening_balance || "") }), {}));
       setTariffs(tariffsResponse.data);
       const nextBankId = selectedTariffBankId || banksResponse.data[0]?.id || "industrial-development";
       setSelectedTariffBankId(nextBankId);
@@ -198,6 +200,21 @@ export default function AdminPage() {
 
   const selectedTariff = tariffs.find((item) => item.bank_id === selectedTariffBankId);
 
+  const updateOpeningBalanceInput = (bankId, value) => {
+    const clean = value.replace(/[^0-9.-]/g, "").replace(/(?!^)-/g, "");
+    setOpeningBalances((current) => ({ ...current, [bankId]: clean }));
+  };
+
+  const saveOpeningBalance = async (bankId) => {
+    try {
+      await api.put(`/admin/banks/${bankId}/opening-balance`, { opening_balance: Number(openingBalances[bankId] || 0) });
+      toast.success("تم حفظ الرصيد الافتتاحي");
+      await loadTariffs();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ الرصيد الافتتاحي");
+    }
+  };
+
   const updateTariffField = (field, value) => {
     setTariffRules((current) => ({ ...current, [field]: value.replace(/[^0-9.]/g, "") }));
   };
@@ -314,6 +331,28 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-bank-submit-button"><Plus className="h-4 w-4" /> إضافة البنك</Button>
             </form>
+          </section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="opening-balances-section">
+            <div className="mb-5" data-testid="opening-balances-heading">
+              <p className="text-sm font-extrabold text-emerald-700" data-testid="opening-balances-eyebrow">الأرصدة الافتتاحية</p>
+              <h2 className="text-2xl font-extrabold" data-testid="opening-balances-title">رصيد افتتاحي لكل بنك</h2>
+            </div>
+            <div className="space-y-3" data-testid="opening-balances-list">
+              {banks.map((bank) => (
+                <div key={bank.id} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_220px_auto] md:items-end" data-testid={`opening-balance-row-${bank.id}`}>
+                  <div data-testid={`opening-balance-bank-${bank.id}`}>
+                    <p className="font-extrabold text-slate-950" data-testid={`opening-balance-bank-name-${bank.id}`}>{bank.name}</p>
+                    <p className="text-xs font-bold text-slate-500" data-testid={`opening-balance-bank-code-${bank.id}`}>{bank.code}</p>
+                  </div>
+                  <div className="space-y-2" data-testid={`opening-balance-input-wrapper-${bank.id}`}>
+                    <Label data-testid={`opening-balance-label-${bank.id}`}>الرصيد الافتتاحي</Label>
+                    <Input inputMode="decimal" value={openingBalances[bank.id] || ""} onChange={(event) => updateOpeningBalanceInput(bank.id, event.target.value)} className="h-11 rounded-lg bg-white text-right" data-testid={`opening-balance-input-${bank.id}`} />
+                  </div>
+                  <Button type="button" onClick={() => saveOpeningBalance(bank.id)} className="h-11 rounded-lg bg-slate-950 text-white" data-testid={`save-opening-balance-button-${bank.id}`}><Save className="h-4 w-4" /> حفظ</Button>
+                </div>
+              ))}
+            </div>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="banking-tariff-admin-section">
