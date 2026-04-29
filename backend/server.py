@@ -318,6 +318,7 @@ class RevenueBase(BaseModel):
     value: str = Field(..., min_length=1)
     issued_at: date
     responsible_employee: Literal["يوسف عبدالغني", "دعاء علي"]
+    bank_collection_status: Optional[Literal["collected", "under_collection"]] = None
 
 
 class RevenueCreate(RevenueBase):
@@ -356,6 +357,34 @@ class ExpenseBase(BaseModel):
     deductions: List[ExpenseDeduction] = Field(default_factory=list)
     issued_at: date
     responsible_employee: Literal["يوسف عبدالغني", "دعاء علي"]
+    bank_payment_status: Optional[Literal["paid", "not_presented"]] = None
+
+
+class RevenueBankingStatusUpdate(BaseModel):
+    bank_collection_status: Literal["collected", "under_collection"]
+
+
+class ExpenseBankingStatusUpdate(BaseModel):
+    bank_payment_status: Literal["paid", "not_presented"]
+
+
+class BankingManualCharges(BaseModel):
+    bank_id: str
+    year: int = Field(..., ge=1900, le=2200)
+    month: int = Field(..., ge=1, le=12)
+    stamp: float = Field(default=0, ge=0)
+    bank_correspondence: float = Field(default=0, ge=0)
+    correspondence_safekeeping: float = Field(default=0, ge=0)
+    internal_transfer_fee: float = Field(default=0, ge=0)
+    external_transfer_fee: float = Field(default=0, ge=0)
+
+
+class BankingManualChargesResponse(BankingManualCharges):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    bank_name: str
+    updated_at: datetime
 
 
 class ExpenseCreate(ExpenseBase):
@@ -455,6 +484,8 @@ def hydrate_revenue(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if clean.get("collection_method") in {"check", "payment_order"} and not clean.get("bank_collection_status"):
+        clean["bank_collection_status"] = "under_collection"
     return clean
 
 
@@ -465,6 +496,15 @@ def hydrate_expense(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if clean.get("payment_method") == "check" and not clean.get("bank_payment_status"):
+        clean["bank_payment_status"] = "not_presented"
+    return clean
+
+
+def hydrate_banking_manual_charges(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    if isinstance(clean.get("updated_at"), str):
+        clean["updated_at"] = datetime.fromisoformat(clean["updated_at"])
     return clean
 
 
@@ -519,6 +559,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
         "value": payload.value.strip(),
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
+        "bank_collection_status": payload.bank_collection_status if method in ["check", "payment_order"] else None,
     }
 
 
@@ -591,6 +632,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         "net_amount": net_amount,
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
+        "bank_payment_status": payload.bank_payment_status if payload.payment_method == "check" else None,
     }
 
 
@@ -1519,6 +1561,25 @@ async def update_revenue(
     return Revenue(**hydrate_revenue(updated))
 
 
+@api_router.patch("/revenues/{revenue_id}/banking-status", response_model=Revenue)
+async def update_revenue_banking_status(
+    revenue_id: str,
+    payload: RevenueBankingStatusUpdate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"])),
+):
+    existing = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    if existing.get("collection_method") not in {"check", "payment_order"}:
+        raise HTTPException(status_code=400, detail="حالة التحصيل البنكية متاحة للشيكات وأوامر الدفع فقط")
+    await db.revenues.update_one(
+        {"id": revenue_id},
+        {"$set": {"bank_collection_status": payload.bank_collection_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
+    )
+    updated = await db.revenues.find_one({"id": revenue_id}, {"_id": 0})
+    return Revenue(**hydrate_revenue(updated))
+
+
 @api_router.delete("/revenues/{revenue_id}")
 async def delete_revenue(
     revenue_id: str,
@@ -1611,6 +1672,25 @@ async def update_expense(
     return Expense(**hydrate_expense(updated))
 
 
+@api_router.patch("/expenses/{expense_id}/banking-status", response_model=Expense)
+async def update_expense_banking_status(
+    expense_id: str,
+    payload: ExpenseBankingStatusUpdate,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"])),
+):
+    existing = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    if existing.get("payment_method") != "check":
+        raise HTTPException(status_code=400, detail="حالة الصرف البنكية متاحة للشيكات فقط")
+    await db.expenses.update_one(
+        {"id": expense_id},
+        {"$set": {"bank_payment_status": payload.bank_payment_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
+    )
+    updated = await db.expenses.find_one({"id": expense_id}, {"_id": 0})
+    return Expense(**hydrate_expense(updated))
+
+
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(
     expense_id: str,
@@ -1620,6 +1700,60 @@ async def delete_expense(
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
     return {"message": "تم حذف المصروف", "deleted_expense_id": expense_id}
+
+
+@api_router.get("/banking-expenses/manual", response_model=BankingManualChargesResponse)
+async def get_banking_manual_charges(
+    bank_id: str = Query(...),
+    year: int = Query(..., ge=1900, le=2200),
+    month: int = Query(..., ge=1, le=12),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    bank = await ensure_bank_async(bank_id)
+    document = await db.banking_manual_charges.find_one({"bank_id": bank_id, "year": year, "month": month}, {"_id": 0})
+    if not document:
+        document = {
+            "id": f"{bank_id}-{year}-{month}",
+            "bank_id": bank_id,
+            "bank_name": bank["name"],
+            "year": year,
+            "month": month,
+            "stamp": 0,
+            "bank_correspondence": 0,
+            "correspondence_safekeeping": 0,
+            "internal_transfer_fee": 0,
+            "external_transfer_fee": 0,
+            "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+        }
+    return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
+
+
+@api_router.put("/banking-expenses/manual", response_model=BankingManualChargesResponse)
+async def save_banking_manual_charges(
+    payload: BankingManualCharges,
+    _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"])),
+):
+    bank = await ensure_bank_async(payload.bank_id)
+    now = datetime.now(timezone.utc)
+    document = {
+        "id": f"{payload.bank_id}-{payload.year}-{payload.month}",
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "year": payload.year,
+        "month": payload.month,
+        "stamp": round(float(payload.stamp or 0), 2),
+        "bank_correspondence": round(float(payload.bank_correspondence or 0), 2),
+        "correspondence_safekeeping": round(float(payload.correspondence_safekeeping or 0), 2),
+        "internal_transfer_fee": round(float(payload.internal_transfer_fee or 0), 2),
+        "external_transfer_fee": round(float(payload.external_transfer_fee or 0), 2),
+        "updated_at": serialize_datetime(now),
+    }
+    await db.banking_manual_charges.update_one(
+        {"bank_id": payload.bank_id, "year": payload.year, "month": payload.month},
+        {"$set": document},
+        upsert=True,
+    )
+    return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
 
 # Include the router in the main app
 app.include_router(api_router)

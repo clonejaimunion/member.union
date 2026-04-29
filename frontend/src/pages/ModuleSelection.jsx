@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, BarChart3, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -12,6 +12,7 @@ export default function ModuleSelection() {
   const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
   const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
   const canUseExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses;
+  const canUseBankingExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
 
   const modules = [
     canUseDeposits && {
@@ -49,6 +50,13 @@ export default function ModuleSelection() {
       icon: BarChart3,
       testId: "module-expenses-analysis-card",
     },
+    canUseBankingExpenses && {
+      title: "المصروفات البنكية",
+      description: "حساب رسوم وعمولات البنك من الإيرادات والمصروفات المسجلة.",
+      path: "/banking-expenses",
+      icon: Banknote,
+      testId: "module-banking-expenses-card",
+    },
   ].filter(Boolean);
 
   return (
@@ -84,7 +92,7 @@ export default function ModuleSelection() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" data-testid="module-cards-grid">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-testid="module-cards-grid">
           {modules.map((module) => {
             const Icon = module.icon;
             return (
