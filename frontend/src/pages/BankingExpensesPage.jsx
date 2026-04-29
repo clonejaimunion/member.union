@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, CheckCircle2, Home, Landmark, LogOut, Save, XCircle } from "lucide-react";
+import { ArrowRight, Banknote, CheckCircle2, Home, LogOut, Save, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ const manualFields = [
 const emptyManual = () => ({ stamp: "", bank_correspondence: "", correspondence_safekeeping: "", internal_transfer_fee: "", external_transfer_fee: "" });
 const currentYear = String(new Date().getFullYear());
 const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
+const months = Object.keys(monthLabels);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -70,14 +71,16 @@ const getBankRules = (bankId) => {
   };
 };
 
-const sumAmounts = (items, field = "amount") => items.reduce((sum, item) => sum + Number(item[field] || 0), 0);
-const periodBounds = (year, month) => ({ from: `${year}-${month}-01`, to: `${year}-${month}-${new Date(Number(year), Number(month), 0).getDate()}` });
+const periodBounds = (filters) => {
+  if (filters.period_type === "yearly") return { from: `${filters.year}-01-01`, to: `${filters.year}-12-31` };
+  return { from: `${filters.year}-${filters.month}-01`, to: `${filters.year}-${filters.month}-${new Date(Number(filters.year), Number(filters.month), 0).getDate()}` };
+};
 
 export default function BankingExpensesPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [banks, setBanks] = useState(fallbackBanks);
-  const [filters, setFilters] = useState({ bank_id: "industrial-development", year: currentYear, month: currentMonth });
+  const [filters, setFilters] = useState({ bank_id: "industrial-development", period_type: "monthly", year: currentYear, month: currentMonth });
   const [revenues, setRevenues] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [deposits, setDeposits] = useState([]);
@@ -88,24 +91,28 @@ export default function BankingExpensesPage() {
   const canManage = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
   const selectedBank = banks.find((bank) => bank.id === filters.bank_id) || fallbackBanks.find((bank) => bank.id === filters.bank_id) || banks[0];
   const rules = useMemo(() => getBankRules(filters.bank_id), [filters.bank_id]);
-  const periodLabel = `${monthLabels[filters.month] || filters.month} / ${filters.year}`;
+  const isYearly = filters.period_type === "yearly";
+  const periodLabel = isYearly ? `سنة ${filters.year}` : `${monthLabels[filters.month] || filters.month} / ${filters.year}`;
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const { from, to } = periodBounds(filters.year, filters.month);
+    const { from, to } = periodBounds(filters);
     try {
-      const [banksResponse, revenuesResponse, expensesResponse, depositsResponse, manualResponse] = await Promise.all([
+      const manualRequests = isYearly
+        ? months.map((month) => api.get(`/banking-expenses/manual?bank_id=${filters.bank_id}&year=${filters.year}&month=${Number(month)}`))
+        : [api.get(`/banking-expenses/manual?bank_id=${filters.bank_id}&year=${filters.year}&month=${Number(filters.month)}`)];
+      const [banksResponse, revenuesResponse, expensesResponse, depositsResponse, ...manualResponses] = await Promise.all([
         api.get("/banks"),
         api.get(`/revenues?bank_id=${filters.bank_id}&from_date=${from}&to_date=${to}`),
         api.get(`/expenses?bank_id=${filters.bank_id}&from_date=${from}&to_date=${to}`),
         api.get(`/banks/${filters.bank_id}/deposits`),
-        api.get(`/banking-expenses/manual?bank_id=${filters.bank_id}&year=${filters.year}&month=${Number(filters.month)}`),
+        ...manualRequests,
       ]);
       setBanks(banksResponse.data);
       setRevenues(revenuesResponse.data);
       setExpenses(expensesResponse.data);
       setDeposits(depositsResponse.data);
-      setManual(manualFields.reduce((acc, field) => ({ ...acc, [field.key]: String(manualResponse.data[field.key] || "") }), {}));
+      setManual(manualFields.reduce((acc, field) => ({ ...acc, [field.key]: String(manualResponses.reduce((sum, response) => sum + Number(response.data[field.key] || 0), 0) || "") }), {}));
     } catch (error) {
       toast.error("تعذر تحميل بيانات المصروفات البنكية");
       setRevenues([]);
@@ -115,7 +122,7 @@ export default function BankingExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters.bank_id, filters.month, filters.year]);
+  }, [filters, isYearly]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -140,6 +147,10 @@ export default function BankingExpensesPage() {
   };
 
   const saveManual = async () => {
+    if (isYearly) {
+      toast.error("يتم حفظ البنود اليدوية من العرض الشهري فقط");
+      return;
+    }
     setSavingManual(true);
     try {
       await api.put("/banking-expenses/manual", {
@@ -168,7 +179,8 @@ export default function BankingExpensesPage() {
     const notPresentedChecks = expenses.filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "not_presented");
     const transfers = expenses.filter((item) => item.payment_method === "bank_transfer");
     const cashExpenses = expenses.filter((item) => item.payment_method === "cash");
-    const depositLinks = deposits.filter((item) => String(item.creation_datetime || item.created_at || "").startsWith(`${filters.year}-${filters.month}`));
+    const depositLinks = deposits.filter((item) => String(item.creation_datetime || item.created_at || "").startsWith(isYearly ? filters.year : `${filters.year}-${filters.month}`));
+    const statementCount = isYearly ? 12 : 1;
 
     return [
       { key: "payment-orders-collected", statement: "أوامر دفع إلكتروني محصلة", count: paymentOrdersCollected.length, bankExpense: paymentOrdersCollected.length * rules.paymentOrderFee },
@@ -176,7 +188,7 @@ export default function BankingExpensesPage() {
       { key: "checks-collected-internal", statement: "شيكات محصلة داخلي", count: internalChecksCollected.length, bankExpense: internalChecksCollected.length * rules.incomingCheckFee },
       { key: "checks-collected-external", statement: "شيكات محصلة خارجي", count: externalChecksCollected.length, bankExpense: externalChecksCollected.reduce((sum, item) => sum + rules.incomingExternalCheckFee(item.amount), 0) },
       { key: "checks-under", statement: "شيكات تحت التحصيل", count: checksUnderCollection.length, bankExpense: 0 },
-      { key: "monthly-statement", statement: "رسوم كشف الحساب الشهري", count: 1, bankExpense: rules.monthlyStatementFee },
+      { key: "monthly-statement", statement: isYearly ? "رسوم كشف الحساب الشهري - سنوي" : "رسوم كشف الحساب الشهري", count: statementCount, bankExpense: statementCount * rules.monthlyStatementFee },
       ...manualFields.map((field) => ({ key: field.key, statement: field.label, count: manual[field.key] ? 1 : 0, bankExpense: Number(sanitizeDecimalInput(manual[field.key]) || 0) })),
       { key: "paid-checks", statement: "شيكات تم الصرف", count: paidChecks.length, bankExpense: paidChecks.reduce((sum, item) => sum + rules.issuedCheckFee(item.net_amount), 0) },
       { key: "not-presented-checks", statement: "شيكات لم تقدم للصرف", count: notPresentedChecks.length, bankExpense: 0 },
@@ -184,7 +196,7 @@ export default function BankingExpensesPage() {
       { key: "cash", statement: "نقدي", count: cashExpenses.length, bankExpense: cashExpenses.reduce((sum, item) => sum + rules.cashFee(item.net_amount), 0) },
       { key: "deposit-link", statement: "ربط وديعة", count: depositLinks.length, bankExpense: depositLinks.reduce((sum, item) => sum + rules.depositLinkFee(item.amount), 0) },
     ];
-  }, [deposits, expenses, filters.month, filters.year, manual, revenues, rules]);
+  }, [deposits, expenses, filters.month, filters.year, isYearly, manual, revenues, rules]);
 
   const totalBankExpenses = useMemo(() => reportRows.reduce((sum, row) => sum + Number(row.bankExpense || 0), 0), [reportRows]);
   const revenueStatusRows = useMemo(() => revenues.filter((item) => ["check", "payment_order"].includes(item.collection_method)), [revenues]);
@@ -211,21 +223,28 @@ export default function BankingExpensesPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="banking-expenses-filters-section">
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="banking-expenses-filters-heading">
             <div><h2 className="text-3xl font-extrabold" data-testid="banking-expenses-filters-title">اختيارات التقرير</h2><p className="mt-1 text-sm font-bold text-slate-500" data-testid="banking-expenses-rules-source">{rules.source}</p></div>
-            <ExportReportButtons title={`تقرير المصروفات البنكية - ${selectedBank?.name || ""} - ${periodLabel}`} fileName={`تقرير-المصروفات-البنكية-${selectedBank?.name || ""}-${periodLabel}`} selectors={["[data-testid='banking-expenses-report-section']"]} disabled={loading} pdfTestId="print-banking-expenses-report-button" excelTestId="export-banking-expenses-excel-button" wordTestId="export-banking-expenses-word-button" />
+            <ExportReportButtons title={`تقرير المصروفات البنكية - ${selectedBank?.name || ""} - ${periodLabel}`} fileName={`تقرير-المصروفات-البنكية-${selectedBank?.name || ""}-${periodLabel}`} selectors={["[data-testid='banking-expenses-report-section']"]} disabled={loading} pdfLabel="طباعة PDF" pdfTestId="print-banking-expenses-report-button" excelTestId="export-banking-expenses-excel-button" wordTestId="export-banking-expenses-word-button" />
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="banking-expenses-filters-grid">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="banking-expenses-filters-grid">
             <div data-testid="banking-expenses-bank-wrapper"><Label data-testid="banking-expenses-bank-label">البنك</Label><select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="banking-expenses-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`banking-expenses-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
+            <div data-testid="banking-expenses-period-type-wrapper"><Label data-testid="banking-expenses-period-type-label">عرض التقرير</Label><select value={filters.period_type} onChange={(event) => setFilters((current) => ({ ...current, period_type: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="banking-expenses-period-type-select"><option value="monthly" data-testid="banking-expenses-period-monthly-option">شهري</option><option value="yearly" data-testid="banking-expenses-period-yearly-option">سنوي</option></select></div>
             <div data-testid="banking-expenses-year-wrapper"><Label data-testid="banking-expenses-year-label">السنة</Label><Input value={filters.year} onChange={(event) => setFilters((current) => ({ ...current, year: event.target.value.replace(/[^0-9]/g, "").slice(0, 4) || current.year }))} className="mt-2 h-12 rounded-lg bg-slate-50 text-right" data-testid="banking-expenses-year-input" /></div>
-            <div data-testid="banking-expenses-month-wrapper"><Label data-testid="banking-expenses-month-label">الشهر</Label><select value={filters.month} onChange={(event) => setFilters((current) => ({ ...current, month: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="banking-expenses-month-select">{Object.entries(monthLabels).map(([value, label]) => <option key={value} value={value} data-testid={`banking-expenses-month-option-${value}`}>{label}</option>)}</select></div>
+            <div data-testid="banking-expenses-month-wrapper"><Label data-testid="banking-expenses-month-label">الشهر</Label><select value={filters.month} onChange={(event) => setFilters((current) => ({ ...current, month: event.target.value }))} disabled={isYearly} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none disabled:opacity-50" data-testid="banking-expenses-month-select">{Object.entries(monthLabels).map(([value, label]) => <option key={value} value={value} data-testid={`banking-expenses-month-option-${value}`}>{label}</option>)}</select></div>
           </div>
         </section>
 
-        {canManage && (
+        {canManage && !isYearly && (
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="banking-expenses-manual-section">
             <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="banking-expenses-manual-heading"><h2 className="text-2xl font-extrabold" data-testid="banking-expenses-manual-title">بنود يدوية للشهر</h2><Button onClick={saveManual} disabled={savingManual} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="save-banking-expenses-manual-button"><Save className="h-4 w-4" /> {savingManual ? "جاري الحفظ..." : "حفظ البنود"}</Button></div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-5" data-testid="banking-expenses-manual-grid">
               {manualFields.map((field) => <div key={field.key} data-testid={`banking-expenses-manual-${field.key}-wrapper`}><Label data-testid={`banking-expenses-manual-${field.key}-label`}>{field.label}</Label><Input inputMode="decimal" value={manual[field.key] || ""} onChange={(event) => setManual((current) => ({ ...current, [field.key]: sanitizeDecimalInput(event.target.value) }))} className="mt-2 h-12 rounded-lg bg-slate-50 text-right" data-testid={`banking-expenses-manual-${field.key}-input`} /></div>)}
             </div>
+          </section>
+        )}
+
+        {canManage && isYearly && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5 text-sm font-bold text-slate-600 shadow-sm print:hidden sm:p-8" data-testid="banking-expenses-yearly-manual-note">
+            البنود اليدوية في العرض السنوي هي مجموع القيم المحفوظة في الشهور، ولتعديلها اختر عرض شهري ثم احفظ قيمة الشهر المطلوب.
           </section>
         )}
 
