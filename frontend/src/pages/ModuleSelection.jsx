@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, Landmark, LogOut, ReceiptText, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -14,6 +14,7 @@ export default function ModuleSelection() {
   const canUseExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses;
   const canUseBankingExpenses = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
   const canUseLedger = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues;
+  const canUseElectronicInvoice = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
 
   const modules = [
     canUseDeposits && {
@@ -64,6 +65,13 @@ export default function ModuleSelection() {
       path: "/ledger",
       icon: BookOpenText,
       testId: "module-ledger-card",
+    },
+    canUseElectronicInvoice && {
+      title: "الفاتورة الإلكترونية",
+      description: "توليد فواتير إلكترونية تلقائياً من الإيرادات المحصلة.",
+      path: "/electronic-invoice",
+      icon: FileCheck2,
+      testId: "module-electronic-invoice-card",
     },
   ].filter(Boolean);
 

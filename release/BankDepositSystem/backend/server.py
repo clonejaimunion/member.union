@@ -436,6 +436,94 @@ class BankingManualChargesResponse(BankingManualCharges):
     updated_at: datetime
 
 
+class ElectronicInvoiceSettings(BaseModel):
+    organization_name: str = "النقابة العامة للعاملين بالزراعة والري"
+    tax_registration_number: Optional[str] = None
+    address: Optional[str] = None
+    governorate: Optional[str] = None
+    activity_code: Optional[str] = None
+    default_tax_rate: float = Field(default=0, ge=0, le=100)
+    auto_generate_from_collected_revenues: bool = True
+
+
+class ElectronicInvoiceSettingsResponse(ElectronicInvoiceSettings):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    updated_at: datetime
+
+
+class ElectronicCustomerBase(BaseModel):
+    name: str = Field(..., min_length=1)
+    tax_number: Optional[str] = None
+    customer_type: Literal["person", "company", "government", "union"] = "person"
+    address: Optional[str] = None
+    governorate: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
+class ElectronicCustomerCreate(ElectronicCustomerBase):
+    pass
+
+
+class ElectronicCustomer(ElectronicCustomerBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ElectronicServiceCodeBase(BaseModel):
+    code: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    tax_rate: float = Field(default=0, ge=0, le=100)
+    is_default: bool = False
+
+
+class ElectronicServiceCodeCreate(ElectronicServiceCodeBase):
+    pass
+
+
+class ElectronicServiceCode(ElectronicServiceCodeBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ElectronicInvoice(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    revenue_id: str
+    invoice_number: str
+    issue_date: date
+    customer_name: str
+    customer_tax_number: Optional[str] = None
+    customer_type: Literal["person", "company", "government", "union"] = "person"
+    service_code: str
+    service_name: str
+    description: str
+    net_amount: float
+    tax_rate: float
+    tax_amount: float
+    total_amount: float
+    payment_method: str
+    bank_id: str
+    bank_name: str
+    status: Literal["draft", "ready", "needs_review", "submitted", "accepted", "rejected"] = "draft"
+    validation_notes: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ElectronicInvoiceStatusUpdate(BaseModel):
+    status: Literal["draft", "ready", "needs_review", "submitted", "accepted", "rejected"]
+
+
 class ExpenseCreate(ExpenseBase):
     pass
 
@@ -722,6 +810,85 @@ def hydrate_banking_manual_charges(document: dict) -> dict:
     if isinstance(clean.get("updated_at"), str):
         clean["updated_at"] = datetime.fromisoformat(clean["updated_at"])
     return clean
+
+
+def hydrate_einvoice_document(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if isinstance(clean.get("issue_date"), str):
+        clean["issue_date"] = date.fromisoformat(clean["issue_date"])
+    return clean
+
+
+async def get_einvoice_settings_document() -> dict:
+    document = await db.einvoice_settings.find_one({"id": "default"}, {"_id": 0})
+    if document:
+        return document
+    now = datetime.now(timezone.utc)
+    return {
+        "id": "default",
+        "organization_name": "النقابة العامة للعاملين بالزراعة والري",
+        "tax_registration_number": None,
+        "address": None,
+        "governorate": None,
+        "activity_code": None,
+        "default_tax_rate": 0,
+        "auto_generate_from_collected_revenues": True,
+        "updated_at": serialize_datetime(now),
+    }
+
+
+async def get_default_service_code(settings: dict) -> dict:
+    service = await db.einvoice_service_codes.find_one({"is_default": True}, {"_id": 0})
+    if service:
+        return service
+    now = datetime.now(timezone.utc)
+    service = {
+        "id": str(uuid.uuid4()),
+        "code": "EGS-SERVICE-001",
+        "name": "خدمة عامة",
+        "tax_rate": float(settings.get("default_tax_rate", 0) or 0),
+        "is_default": True,
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+    await db.einvoice_service_codes.insert_one(service.copy())
+    return service
+
+
+async def find_or_create_einvoice_customer(name: str) -> dict:
+    clean_name = (name or "عميل غير محدد").strip() or "عميل غير محدد"
+    customer = await db.einvoice_customers.find_one({"name": clean_name}, {"_id": 0})
+    if customer:
+        return customer
+    now = datetime.now(timezone.utc)
+    customer = {
+        "id": str(uuid.uuid4()),
+        "name": clean_name,
+        "tax_number": None,
+        "customer_type": "person",
+        "address": None,
+        "governorate": None,
+        "phone": None,
+        "email": None,
+        "created_at": serialize_datetime(now),
+        "updated_at": serialize_datetime(now),
+    }
+    await db.einvoice_customers.insert_one(customer.copy())
+    return customer
+
+
+def invoice_status_from_data(settings: dict, customer: dict, service: dict) -> tuple[str, List[str]]:
+    notes = []
+    if not settings.get("tax_registration_number"):
+        notes.append("الرقم الضريبي للجهة غير مسجل")
+    if not customer.get("tax_number") and customer.get("customer_type") != "person":
+        notes.append("الرقم الضريبي للعميل غير مسجل")
+    if not service.get("code"):
+        notes.append("كود الخدمة غير مسجل")
+    return ("needs_review" if notes else "ready"), notes
 
 
 WESTERN_DIGIT_MAP = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -2096,6 +2263,137 @@ async def save_banking_manual_charges(
         upsert=True,
     )
     return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
+
+
+@api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
+async def get_electronic_invoice_settings(_: dict = Depends(get_current_user)):
+    return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(await get_einvoice_settings_document()))
+
+
+@api_router.put("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
+async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _: dict = Depends(require_admin)):
+    now = datetime.now(timezone.utc)
+    document = {"id": "default", **payload.model_dump(), "updated_at": serialize_datetime(now)}
+    await db.einvoice_settings.update_one({"id": "default"}, {"$set": document}, upsert=True)
+    return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(document))
+
+
+@api_router.get("/electronic-invoice/customers", response_model=List[ElectronicCustomer])
+async def list_electronic_customers(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
+    documents = await db.einvoice_customers.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    return [ElectronicCustomer(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/electronic-invoice/customers", response_model=ElectronicCustomer)
+async def create_electronic_customer(payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+    now = datetime.now(timezone.utc)
+    document = {"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)}
+    await db.einvoice_customers.insert_one(document.copy())
+    return ElectronicCustomer(**hydrate_einvoice_document(document))
+
+
+@api_router.put("/electronic-invoice/customers/{customer_id}", response_model=ElectronicCustomer)
+async def update_electronic_customer(customer_id: str, payload: ElectronicCustomerCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+    existing = await db.einvoice_customers.find_one({"id": customer_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العميل غير موجود")
+    updates = {**payload.model_dump(), "updated_at": serialize_datetime(datetime.now(timezone.utc))}
+    await db.einvoice_customers.update_one({"id": customer_id}, {"$set": updates})
+    updated = await db.einvoice_customers.find_one({"id": customer_id}, {"_id": 0})
+    return ElectronicCustomer(**hydrate_einvoice_document(updated))
+
+
+@api_router.get("/electronic-invoice/service-codes", response_model=List[ElectronicServiceCode])
+async def list_electronic_service_codes(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
+    settings = await get_einvoice_settings_document()
+    await get_default_service_code(settings)
+    documents = await db.einvoice_service_codes.find({}, {"_id": 0}).sort("is_default", -1).sort("name", 1).to_list(1000)
+    return [ElectronicServiceCode(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/electronic-invoice/service-codes", response_model=ElectronicServiceCode)
+async def create_electronic_service_code(payload: ElectronicServiceCodeCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+    now = datetime.now(timezone.utc)
+    if payload.is_default:
+        await db.einvoice_service_codes.update_many({}, {"$set": {"is_default": False}})
+    document = {"id": str(uuid.uuid4()), **payload.model_dump(), "created_at": serialize_datetime(now), "updated_at": serialize_datetime(now)}
+    await db.einvoice_service_codes.insert_one(document.copy())
+    return ElectronicServiceCode(**hydrate_einvoice_document(document))
+
+
+@api_router.get("/electronic-invoices", response_model=List[ElectronicInvoice])
+async def list_electronic_invoices(
+    status: Optional[str] = Query(default=None),
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
+):
+    query = {}
+    if status and status != "all":
+        query["status"] = status
+    if from_date or to_date:
+        query["issue_date"] = {}
+        if from_date:
+            query["issue_date"]["$gte"] = serialize_date(from_date)
+        if to_date:
+            query["issue_date"]["$lte"] = serialize_date(to_date)
+    documents = await db.electronic_invoices.find(query, {"_id": 0}).sort("issue_date", -1).sort("created_at", -1).to_list(1000)
+    return [ElectronicInvoice(**hydrate_einvoice_document(document)) for document in documents]
+
+
+@api_router.post("/electronic-invoices/generate-from-revenues", response_model=List[ElectronicInvoice])
+async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+    settings = await get_einvoice_settings_document()
+    service = await get_default_service_code(settings)
+    revenues = await db.revenues.find({"bank_collection_status": "collected"}, {"_id": 0}).sort("issued_at", 1).to_list(1000)
+    generated = []
+    now = datetime.now(timezone.utc)
+    for revenue in revenues:
+        if await db.electronic_invoices.find_one({"revenue_id": revenue["id"]}, {"_id": 0, "id": 1}):
+            continue
+        bank = await ensure_bank_async(revenue["bank_id"])
+        customer_name = revenue.get("supplier_name") or revenue.get("value") or "عميل غير محدد"
+        customer = await find_or_create_einvoice_customer(customer_name)
+        tax_rate = float(service.get("tax_rate", settings.get("default_tax_rate", 0)) or 0)
+        net_amount = round(float(revenue.get("amount", 0) or 0), 2)
+        tax_amount = round(net_amount * tax_rate / 100, 2)
+        status, notes = invoice_status_from_data(settings, customer, service)
+        document = {
+            "id": str(uuid.uuid4()),
+            "revenue_id": revenue["id"],
+            "invoice_number": f"EINV-{revenue.get('receipt_number')}",
+            "issue_date": revenue.get("issued_at") or revenue.get("dated"),
+            "customer_name": customer["name"],
+            "customer_tax_number": customer.get("tax_number"),
+            "customer_type": customer.get("customer_type", "person"),
+            "service_code": service["code"],
+            "service_name": service["name"],
+            "description": revenue.get("value") or service["name"],
+            "net_amount": net_amount,
+            "tax_rate": tax_rate,
+            "tax_amount": tax_amount,
+            "total_amount": round(net_amount + tax_amount, 2),
+            "payment_method": revenue.get("collection_method", "cash"),
+            "bank_id": revenue["bank_id"],
+            "bank_name": bank["name"],
+            "status": status,
+            "validation_notes": notes,
+            "created_at": serialize_datetime(now),
+            "updated_at": serialize_datetime(now),
+        }
+        await db.electronic_invoices.insert_one(document.copy())
+        generated.append(ElectronicInvoice(**hydrate_einvoice_document(document)))
+    return generated
+
+
+@api_router.patch("/electronic-invoices/{invoice_id}/status", response_model=ElectronicInvoice)
+async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicInvoiceStatusUpdate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_revenues"]))):
+    existing = await db.electronic_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    await db.electronic_invoices.update_one({"id": invoice_id}, {"$set": {"status": payload.status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    updated = await db.electronic_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    return ElectronicInvoice(**hydrate_einvoice_document(updated))
 
 # Include the router in the main app
 app.include_router(api_router)
