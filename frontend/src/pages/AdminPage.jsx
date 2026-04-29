@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileUp, KeyRound, Link as LinkIcon, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, FileImage, FileUp, KeyRound, Link as LinkIcon, LockKeyhole, Plus, QrCode, Save, ShieldCheck, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 
@@ -66,6 +67,7 @@ const defaultApprovalForm = { report_type: "عام", report_name: "", report_ref
 export default function AdminPage() {
   const navigate = useNavigate();
   const { user, logout, refreshMe } = useAuth();
+  const { refreshSettings } = useAppSettings();
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState(defaultUserForm);
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "" });
@@ -90,6 +92,10 @@ export default function AdminPage() {
   const [backupPassword, setBackupPassword] = useState("");
   const [restorePassword, setRestorePassword] = useState("");
   const [restoreFile, setRestoreFile] = useState(null);
+  const [appSettings, setAppSettings] = useState(null);
+  const [systemName, setSystemName] = useState("نظام محاسبي متكامل");
+  const [shortcutIconFile, setShortcutIconFile] = useState(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
 
   const loadUsers = useCallback(() => {
@@ -131,11 +137,22 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadAppSettings = useCallback(async () => {
+    try {
+      const response = await api.get("/admin/app-settings");
+      setAppSettings(response.data);
+      setSystemName(response.data.system_name || "نظام محاسبي متكامل");
+    } catch (error) {
+      toast.error("تعذر تحميل إعدادات النظام العامة");
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadTariffs();
     loadSecurityReview();
-  }, [loadTariffs, loadSecurityReview, loadUsers]);
+    loadAppSettings();
+  }, [loadTariffs, loadSecurityReview, loadUsers, loadAppSettings]);
 
   useEffect(() => {
     const selected = tariffs.find((item) => item.bank_id === selectedTariffBankId);
@@ -383,6 +400,40 @@ export default function AdminPage() {
     }
   };
 
+  const saveAppSystemName = async (event) => {
+    event.preventDefault();
+    if (!systemName.trim()) return toast.error("أدخل اسم النظام");
+    setSettingsLoading(true);
+    try {
+      const response = await api.put("/admin/app-settings", { system_name: systemName.trim() });
+      setAppSettings(response.data);
+      await refreshSettings();
+      toast.success("تم تحديث اسم النظام");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ اسم النظام");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const saveShortcutIcon = async () => {
+    if (!shortcutIconFile) return toast.error("اختر ملف أيقونة أولاً");
+    setSettingsLoading(true);
+    try {
+      const data = new FormData();
+      data.append("icon_file", shortcutIconFile);
+      const response = await api.post("/admin/app-settings/icon", data);
+      setAppSettings(response.data);
+      setShortcutIconFile(null);
+      await refreshSettings();
+      toast.success("تم تحديث شعار الاختصار");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تحديث الأيقونة");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="admin-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="admin-header">
@@ -590,6 +641,39 @@ export default function AdminPage() {
         </div>
 
         <aside className="space-y-6" data-testid="admin-security-column">
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="general-app-settings-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="general-app-settings-heading">
+              <FileImage className="h-6 w-6 text-emerald-700" />
+              <div>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="general-app-settings-eyebrow">الإعدادات العامة</p>
+                <h2 className="text-2xl font-extrabold" data-testid="general-app-settings-title">اسم النظام وشعار الاختصار</h2>
+              </div>
+            </div>
+            <form onSubmit={saveAppSystemName} className="space-y-3" data-testid="general-app-name-form">
+              <div className="space-y-2" data-testid="app-system-name-wrapper">
+                <Label htmlFor="app_system_name" data-testid="app-system-name-label">اسم النظام</Label>
+                <Input id="app_system_name" value={systemName} onChange={(event) => setSystemName(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-system-name-input" />
+              </div>
+              <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ اسم النظام</Button>
+            </form>
+            <div className="mt-5 space-y-3" data-testid="shortcut-icon-settings-panel">
+              <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="shortcut-icon-preview-card">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-slate-200" data-testid="shortcut-icon-preview-frame">
+                  {appSettings?.shortcut_icon_url ? <img src={appSettings.shortcut_icon_url} alt="شعار الاختصار الحالي" className="h-10 w-10 object-contain" data-testid="shortcut-icon-preview-image" /> : <FileImage className="h-7 w-7 text-slate-500" data-testid="shortcut-icon-preview-placeholder" />}
+                </div>
+                <div className="min-w-0" data-testid="shortcut-icon-status-block">
+                  <p className="font-extrabold text-slate-950" data-testid="shortcut-icon-status-title">أيقونة اختصار سطح المكتب</p>
+                  <p className="text-xs font-bold text-slate-500" data-testid="shortcut-icon-status-text">{appSettings?.shortcut_update_status || "لم يتم رفع أيقونة مخصصة بعد"}</p>
+                </div>
+              </div>
+              <div className="space-y-2" data-testid="shortcut-icon-file-wrapper">
+                <Label htmlFor="shortcut_icon_file" data-testid="shortcut-icon-file-label">رفع PNG / JPG / ICO</Label>
+                <Input id="shortcut_icon_file" type="file" accept=".png,.jpg,.jpeg,.ico,image/png,image/jpeg,image/x-icon,image/vnd.microsoft.icon" onChange={(event) => setShortcutIconFile(event.target.files?.[0] || null)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="shortcut-icon-file-input" />
+              </div>
+              <Button type="button" onClick={saveShortcutIcon} disabled={settingsLoading} variant="outline" className="h-11 w-full rounded-lg bg-white" data-testid="save-shortcut-icon-button"><FileUp className="h-4 w-4" /> تحديث شعار الاختصار</Button>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-password-section">
             <div className="mb-5 flex items-center gap-3" data-testid="admin-password-heading">
               <LockKeyhole className="h-6 w-6 text-slate-950" />

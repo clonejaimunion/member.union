@@ -20,11 +20,13 @@ import urllib.request
 import json
 import hashlib
 import secrets
+import subprocess
 
 import bcrypt
 import jwt
 import pyotp
 import qrcode
+from PIL import Image
 from pypdf import PdfReader
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -42,6 +44,10 @@ JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
 ADMIN_USERNAME = os.environ['ADMIN_USERNAME']
 ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
+APP_ASSETS_DIR = ROOT_DIR.parent / "app_assets"
+APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+APP_ICON_PATH = APP_ASSETS_DIR / "accounting_app_custom.ico"
+DEFAULT_SYSTEM_NAME = "نظام محاسبي متكامل"
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -246,6 +252,18 @@ class UserUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
+
+
+class AppSettingsResponse(BaseModel):
+    system_name: str
+    shortcut_icon_url: Optional[str] = None
+    shortcut_icon_updated_at: Optional[str] = None
+    shortcut_update_status: Optional[str] = None
+    updated_at: str
+
+
+class AppSettingsUpdate(BaseModel):
+    system_name: str = Field(..., min_length=2, max_length=120)
 
 
 class TwoFactorSetupResponse(BaseModel):
@@ -847,6 +865,83 @@ def serialize_datetime(value: datetime) -> str:
     return normalize_datetime(value).isoformat()
 
 
+def app_icon_url(updated_at: Optional[str] = None) -> Optional[str]:
+    if not APP_ICON_PATH.exists():
+        return None
+    version = re.sub(r"[^0-9A-Za-z]", "", updated_at or str(int(APP_ICON_PATH.stat().st_mtime)))
+    return f"/api/app-settings/icon?v={version}"
+
+
+async def get_app_settings_document() -> dict:
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = await db.app_settings.find_one({"id": "global"}, {"_id": 0})
+    if document:
+        document["shortcut_icon_url"] = app_icon_url(document.get("shortcut_icon_updated_at"))
+        return document
+    document = {
+        "id": "global",
+        "system_name": DEFAULT_SYSTEM_NAME,
+        "shortcut_icon_updated_at": None,
+        "shortcut_update_status": "لم يتم رفع أيقونة مخصصة بعد",
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await db.app_settings.insert_one(document.copy())
+    document["shortcut_icon_url"] = app_icon_url(document.get("shortcut_icon_updated_at"))
+    return document
+
+
+def build_app_settings_response(document: dict) -> AppSettingsResponse:
+    return AppSettingsResponse(
+        system_name=document.get("system_name") or DEFAULT_SYSTEM_NAME,
+        shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
+        shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
+        shortcut_update_status=document.get("shortcut_update_status"),
+        updated_at=document.get("updated_at") or serialize_datetime(datetime.now(timezone.utc)),
+    )
+
+
+def convert_uploaded_icon_to_ico(content: bytes, filename: str, content_type: Optional[str]) -> bytes:
+    extension = Path(filename or "").suffix.lower()
+    normalized_type = (content_type or "").lower()
+    if len(content) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الأيقونة يجب ألا يتجاوز 4 ميجابايت")
+    if extension == ".ico" or normalized_type in {"image/x-icon", "image/vnd.microsoft.icon"}:
+        if not content.startswith(b"\x00\x00\x01\x00"):
+            raise HTTPException(status_code=400, detail="ملف ICO غير صالح")
+        return content
+    if extension not in {".png", ".jpg", ".jpeg"} and normalized_type not in {"image/png", "image/jpeg", "image/jpg"}:
+        raise HTTPException(status_code=400, detail="ارفع أيقونة بصيغة PNG أو JPG أو ICO فقط")
+    try:
+        image = Image.open(BytesIO(content)).convert("RGBA")
+        icon_buffer = BytesIO()
+        image.save(icon_buffer, format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        return icon_buffer.getvalue()
+    except Exception:
+        raise HTTPException(status_code=400, detail="تعذر تحويل الصورة إلى أيقونة")
+
+
+def update_windows_shortcut_icon(icon_path: Path) -> str:
+    if os.name != "nt":
+        return "تم حفظ الأيقونة، وسيتم تحديث اختصارات Windows عند تشغيل النسخة المثبتة محلياً"
+    user_profile = Path(os.environ.get("USERPROFILE", ""))
+    app_data = Path(os.environ.get("APPDATA", ""))
+    shortcut_paths = [
+        user_profile / "Desktop" / "Bank Deposit System.lnk",
+        app_data / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Bank Deposit Interest System" / "Bank Deposit System.lnk",
+    ]
+    updated = 0
+    for shortcut_path in shortcut_paths:
+        if not shortcut_path.exists():
+            continue
+        safe_shortcut = str(shortcut_path).replace("'", "''")
+        safe_icon = str(icon_path).replace("'", "''")
+        script = f"$w=New-Object -ComObject WScript.Shell;$s=$w.CreateShortcut('{safe_shortcut}');$s.IconLocation='{safe_icon},0';$s.Save();"
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], check=False, capture_output=True, text=True, timeout=20)
+        updated += 1
+    return f"تم حفظ الأيقونة وتحديث {updated} اختصار على Windows" if updated else "تم حفظ الأيقونة، ولم يتم العثور على اختصارات لتحديثها"
+
+
 def serialize_date(value: date) -> str:
     return value.isoformat()
 
@@ -1237,6 +1332,64 @@ async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="هذه الصفحة للأدمن فقط")
     return current_user
+
+
+@api_router.get("/app-settings/public", response_model=AppSettingsResponse)
+async def get_public_app_settings():
+    document = await get_app_settings_document()
+    return build_app_settings_response(document)
+
+
+@api_router.get("/app-settings/icon")
+async def get_app_icon():
+    if not APP_ICON_PATH.exists():
+        raise HTTPException(status_code=404, detail="لا توجد أيقونة مخصصة")
+    return FileResponse(str(APP_ICON_PATH), media_type="image/x-icon", filename="accounting_app_custom.ico")
+
+
+@api_router.get("/admin/app-settings", response_model=AppSettingsResponse)
+async def get_admin_app_settings(_: dict = Depends(require_admin)):
+    document = await get_app_settings_document()
+    return build_app_settings_response(document)
+
+
+@api_router.put("/admin/app-settings", response_model=AppSettingsResponse)
+async def update_admin_app_settings(payload: AppSettingsUpdate, _: dict = Depends(require_admin)):
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    system_name = payload.system_name.strip()
+    if len(system_name) < 2:
+        raise HTTPException(status_code=400, detail="اسم النظام مطلوب")
+    await db.app_settings.update_one(
+        {"id": "global"},
+        {"$set": {"system_name": system_name, "updated_at": now_iso}, "$setOnInsert": {"id": "global", "created_at": now_iso}},
+        upsert=True,
+    )
+    document = await get_app_settings_document()
+    return build_app_settings_response(document)
+
+
+@api_router.post("/admin/app-settings/icon", response_model=AppSettingsResponse)
+async def update_admin_app_icon(icon_file: UploadFile = File(...), _: dict = Depends(require_admin)):
+    content = await icon_file.read()
+    icon_bytes = convert_uploaded_icon_to_ico(content, icon_file.filename or "icon", icon_file.content_type)
+    APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    APP_ICON_PATH.write_bytes(icon_bytes)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    shortcut_status = update_windows_shortcut_icon(APP_ICON_PATH)
+    await db.app_settings.update_one(
+        {"id": "global"},
+        {
+            "$set": {
+                "shortcut_icon_updated_at": now_iso,
+                "shortcut_update_status": shortcut_status,
+                "updated_at": now_iso,
+            },
+            "$setOnInsert": {"id": "global", "system_name": DEFAULT_SYSTEM_NAME, "created_at": now_iso},
+        },
+        upsert=True,
+    )
+    document = await get_app_settings_document()
+    return build_app_settings_response(document)
 
 
 def require_permission(permission_name: str):
@@ -2652,7 +2805,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])

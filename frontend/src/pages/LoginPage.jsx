@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { loginWithToken } = useAuth();
+  const { settings } = useAppSettings();
   const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
   const [requires2fa, setRequires2fa] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -91,7 +93,7 @@ export default function LoginPage() {
           </div>
           <div className="space-y-4" data-testid="login-hero-title-block">
             <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الاراضي</h2>
-            <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">نظام محاسبي متكامل</p>
+            <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">{settings.system_name}</p>
           </div>
         </section>
       </div>

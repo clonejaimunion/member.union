@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 
 export default function ModuleSelection() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { settings } = useAppSettings();
   const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
   const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
   const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
@@ -83,7 +85,7 @@ export default function ModuleSelection() {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
             <div>
               <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">الصفحة الرئيسية</p>
-              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">النقابة العامة للعاملين بالزراعة والري</h1>
+              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{settings.system_name}</h1>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="module-selection-actions">
