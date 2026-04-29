@@ -1,0 +1,60 @@
+{
+  "summary": "Executed backend + frontend verification for organization split across login, auth scoping, admin user scoping, deposit data isolation, and org label presence. Core requested split/isolation features passed on public preview URL; optional auth-hardening playbook checks exposed gaps.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No brute-force lockout after 5 failed attempts; valid login still returns 200 immediately.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "No app-issued auth cookie observed; only Cloudflare __cf_bm HttpOnly cookie present."
+      },
+      {
+        "endpoint": "CORS preflight /api/auth/login",
+        "issue": "Response has access-control-allow-origin='*' and missing access-control-allow-credentials in observed preflight response; explicit credentialed-origin posture not met."
+      },
+      {
+        "endpoint": "startup ensure_default_admin",
+        "issue": "Existing admin documents are updated without reconciling password_hash, so ADMIN_INITIAL_PASSWORD changes are not applied to already-seeded admins."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration21_org_isolation_and_auth.py",
+    "/app/test_reports/pytest/pytest_results_iter21_backend.xml"
+  ],
+  "action_items": [
+    "Implement failed-attempt tracking and lockout/rate-limit policy for /api/auth/login after 5 failures.",
+    "If cookie-based auth is required by policy, set an app-issued HttpOnly/Secure auth cookie (not relying on edge cookies).",
+    "Set explicit CORS origin allowlist with credential support instead of wildcard behavior.",
+    "Make admin seed idempotent for password updates by reconciling existing admin password_hash when env password changes."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is a very large monolith (>3000 lines), increasing regression risk and slowing focused changes; should be split into routers/services/modules.",
+    "Password hashing path uses bcrypt.gensalt(rounds=12), which is compatible with expected $2b$ bcrypt format.",
+    "Frontend export title logic prepends organization_name in ExportReportButtons; UI confirmed export controls are present on current-year report flow."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration21_org_isolation_and_auth.py",
+    "/app/test_reports/iteration_21.json"
+  ],
+  "success_rate": {
+    "backend": "62%",
+    "frontend": "90%"
+  },
+  "test_credentials": "Read and used /app/memory/test_credentials.md accounts: admin_takaful/admin_union with Admin@123.",
+  "seed_data_creation": "Created one temporary TEST deposit in social-solidarity during backend isolation test and deleted it in same test.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Requested org-split features validated as working: org buttons, correct/wrong-org login behavior, scoped admin users, and cross-org deposit isolation (union delete returns 404). UI login for admins currently routes directly to admin page (expected due requires_2fa_setup branch), so tests should allow both home/admin post-login destinations.",
+  "rca of the issue": "RCA: Login handler verifies credentials and immediately issues token without failed-attempt persistence/check, so no lockout occurs. CORS middleware is configured with default wildcard origins; observed preflight does not satisfy explicit credentialed-origin expectation. ensure_default_admin updates existing admin metadata but does not update password_hash, leaving ADMIN_INITIAL_PASSWORD changes unapplied for existing seeded admins. NOTE: Official Egyptian Tax Authority e-invoice submission is MOCKED (internal JSON/PDF flow) and was not validated as a live external integration in this run."
+}

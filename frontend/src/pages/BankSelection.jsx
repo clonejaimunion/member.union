@@ -64,6 +64,7 @@ export default function BankSelection({ mode = "deposits" }) {
             <ShieldCheck className="ml-1 h-4 w-4 text-emerald-600" /> {isReconciliation ? "قسم التسويات البنكية" : "قسم فوائد الودائع"}
           </Badge>
           <div className="space-y-4">
+            <p className="text-sm font-extrabold text-emerald-700" data-testid="bank-selection-organization-name">{user?.organization_name}</p>
             <h1 className="max-w-3xl text-4xl font-extrabold leading-tight text-slate-950 sm:text-5xl lg:text-6xl" data-testid="bank-selection-title">
               {isReconciliation ? "اختر البنك وابدأ مذكرة التسوية البنكية" : "اختر البنك وابدأ إدارة عوائد الودائع بدقة"}
             </h1>

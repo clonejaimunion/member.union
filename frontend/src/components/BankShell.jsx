@@ -54,6 +54,7 @@ export const BankShell = ({ children }) => {
             <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className={`h-14 w-24 ${palette.ring} ring-2`} testId="bank-logo-mark" />
             <div>
               <p className="text-xs font-bold text-slate-500" data-testid="bank-code-label">{bank.code}</p>
+              <p className="text-xs font-extrabold text-emerald-700" data-testid="bank-organization-name-label">{user?.organization_name}</p>
               <p className="text-xs font-bold text-slate-500" data-testid="bank-swift-code-label">SWIFT CODE: {bank.swift_code || "غير مسجل"}</p>
               <h1 className="text-xl font-extrabold text-slate-950" data-testid="bank-name-heading">{bank.name}</h1>
             </div>

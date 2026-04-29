@@ -33,3 +33,21 @@
 ## 2FA Testing Safety
 - Test `/api/admin/2fa/setup` for QR/manual secret.
 - Avoid calling `/api/admin/2fa/verify` in automated tests unless the generated TOTP secret is recorded and a recovery plan exists.
+
+## Organization Login Isolation
+- Login must include `organization_id` selected by the user before entering credentials.
+- Correct credentials with the wrong organization must fail.
+- Admin users are scoped to one organization.
+- Existing operational data is migrated to `social-solidarity`.
+- Collections that store operational data must be filtered by authenticated user's `organization_id`.
+
+## Organization API Checks
+```bash
+curl -X POST "$REACT_APP_BACKEND_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin_takaful","password":"Admin@123","organization_id":"social-solidarity"}'
+
+curl -X POST "$REACT_APP_BACKEND_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin_union","password":"Admin@123","organization_id":"general-union"}'
+```

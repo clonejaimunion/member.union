@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { KeyRound, LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
@@ -15,8 +15,26 @@ export default function LoginPage() {
   const { loginWithToken } = useAuth();
   const { settings } = useAppSettings();
   const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
+  const [organizations, setOrganizations] = useState([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState(() => window.localStorage.getItem("bank_selected_organization") || "");
   const [requires2fa, setRequires2fa] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    api.get("/organizations/public").then((response) => {
+      setOrganizations(response.data);
+      if (!selectedOrganizationId && response.data[0]?.id) setSelectedOrganizationId(response.data[0].id);
+    }).catch(() => toast.error("تعذر تحميل الجهات"));
+  }, [selectedOrganizationId]);
+
+  const selectedOrganization = organizations.find((item) => item.id === selectedOrganizationId);
+
+  const selectOrganization = (organizationId) => {
+    setSelectedOrganizationId(organizationId);
+    window.localStorage.setItem("bank_selected_organization", organizationId);
+    setRequires2fa(false);
+    setForm((current) => ({ ...current, otp_code: "" }));
+  };
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -25,6 +43,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const payload = { username: form.username, password: form.password };
+      if (!selectedOrganizationId) {
+        toast.error("اختر الجهة أولاً");
+        return;
+      }
+      payload.organization_id = selectedOrganizationId;
       if (requires2fa) payload.otp_code = form.otp_code;
       const response = await api.post("/auth/login", payload);
       if (response.data.requires_2fa) {
@@ -57,6 +80,21 @@ export default function LoginPage() {
               <h1 className="text-3xl font-extrabold text-slate-950" data-testid="login-title">تسجيل الدخول</h1>
             </div>
           </div>
+          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="login-organization-selector">
+            {organizations.map((organization) => (
+              <button
+                key={organization.id}
+                type="button"
+                onClick={() => selectOrganization(organization.id)}
+                className={`min-h-24 rounded-xl border p-4 text-right transition-[transform,background-color,border-color,box-shadow] hover:-translate-y-0.5 ${selectedOrganizationId === organization.id ? "border-emerald-300 bg-emerald-50 shadow-lg shadow-emerald-100" : "border-slate-200 bg-slate-50 hover:bg-white"}`}
+                data-testid={`login-organization-button-${organization.id}`}
+              >
+                <span className="block text-lg font-extrabold text-slate-950" data-testid={`login-organization-label-${organization.id}`}>{organization.login_label}</span>
+                <span className="mt-2 block text-xs font-bold leading-5 text-slate-500" data-testid={`login-organization-name-${organization.id}`}>{organization.name}</span>
+              </button>
+            ))}
+          </div>
+          {selectedOrganization && <p className="mb-5 rounded-lg bg-slate-50 p-3 text-sm font-extrabold text-emerald-700" data-testid="login-selected-organization-label">الدخول على: {selectedOrganization.name}</p>}
           <form onSubmit={submitLogin} className="space-y-5" data-testid="login-form">
             <div className="space-y-2" data-testid="login-username-wrapper">
               <Label htmlFor="username" data-testid="login-username-label">اسم المستخدم</Label>
@@ -92,7 +130,7 @@ export default function LoginPage() {
             <ShieldCheck className="h-4 w-4" /> حماية بالصلاحيات والمصادقة الثنائية
           </div>
           <div className="space-y-4" data-testid="login-hero-title-block">
-            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الاراضي</h2>
+            <h2 className="max-w-2xl text-3xl font-extrabold leading-tight sm:text-4xl" data-testid="login-hero-organization">{selectedOrganization?.name || "اختر الجهة التابعة لك"}</h2>
             <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">{settings.system_name}</p>
           </div>
         </section>

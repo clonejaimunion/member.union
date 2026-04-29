@@ -10,6 +10,7 @@ export default function ModuleSelection() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { settings } = useAppSettings();
+  const organizationName = user?.organization_name || settings.system_name;
   const canUseDeposits = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports;
   const canUseReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations;
   const canUseRevenues = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues;
@@ -85,7 +86,7 @@ export default function ModuleSelection() {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
             <div>
               <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">الصفحة الرئيسية</p>
-              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{settings.system_name}</h1>
+              <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{organizationName}</h1>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="module-selection-actions">
@@ -103,7 +104,7 @@ export default function ModuleSelection() {
 
       <section className="mx-auto flex min-h-[calc(100vh-88px)] max-w-7xl flex-col justify-center gap-10 px-4 py-10 sm:px-6 lg:px-8" data-testid="module-selection-content">
         <div className="mx-auto max-w-4xl space-y-5 text-center" data-testid="module-selection-intro">
-          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">الصفحة الرئيسية</h2>
+          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">{settings.system_name}</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-testid="module-cards-grid">

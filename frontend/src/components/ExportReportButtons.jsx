@@ -1,5 +1,6 @@
 import { FileDown, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
@@ -74,8 +75,11 @@ export const exportReportToOffice = ({ title, fileName, selectors, type }) => {
 };
 
 export const ExportReportButtons = ({ title, fileName, selectors, printSelectors = null, disabled = false, className = "", pdfLabel = "PDF", pdfTestId, excelTestId, wordTestId }) => {
-  const exportExcel = () => exportReportToOffice({ title, fileName, selectors, type: "excel" });
-  const exportWord = () => exportReportToOffice({ title, fileName, selectors, type: "word" });
+  const { user } = useAuth();
+  const reportTitle = user?.organization_name ? `${user.organization_name} - ${title}` : title;
+  const reportFileName = user?.organization_name ? `${user.organization_name}-${fileName || title}` : fileName;
+  const exportExcel = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "excel" });
+  const exportWord = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "word" });
   const printPdf = () => {
     if (!printSelectors) {
       window.print();
@@ -86,7 +90,7 @@ export const ExportReportButtons = ({ title, fileName, selectors, printSelectors
       window.print();
       return;
     }
-    printWindow.document.write(buildOfficeHtml({ title, selectors: printSelectors, excel: false }));
+    printWindow.document.write(buildOfficeHtml({ title: reportTitle, selectors: printSelectors, excel: false }));
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => {

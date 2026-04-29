@@ -94,6 +94,7 @@ export default function AdminPage() {
   const [restoreFile, setRestoreFile] = useState(null);
   const [appSettings, setAppSettings] = useState(null);
   const [systemName, setSystemName] = useState("نظام محاسبي متكامل");
+  const [organizationName, setOrganizationName] = useState("");
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -142,6 +143,7 @@ export default function AdminPage() {
       const response = await api.get("/admin/app-settings");
       setAppSettings(response.data);
       setSystemName(response.data.system_name || "نظام محاسبي متكامل");
+      setOrganizationName(response.data.organization_name || "");
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -405,12 +407,13 @@ export default function AdminPage() {
     if (!systemName.trim()) return toast.error("أدخل اسم النظام");
     setSettingsLoading(true);
     try {
-      const response = await api.put("/admin/app-settings", { system_name: systemName.trim() });
+      const response = await api.put("/admin/app-settings", { system_name: systemName.trim(), organization_name: organizationName.trim() });
       setAppSettings(response.data);
+      setOrganizationName(response.data.organization_name || organizationName.trim());
       await refreshSettings();
-      toast.success("تم تحديث اسم النظام");
+      toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
-      toast.error(error?.response?.data?.detail || "تعذر حفظ اسم النظام");
+      toast.error(error?.response?.data?.detail || "تعذر حفظ إعدادات الاسم");
     } finally {
       setSettingsLoading(false);
     }
@@ -654,7 +657,11 @@ export default function AdminPage() {
                 <Label htmlFor="app_system_name" data-testid="app-system-name-label">اسم النظام</Label>
                 <Input id="app_system_name" value={systemName} onChange={(event) => setSystemName(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-system-name-input" />
               </div>
-              <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ اسم النظام</Button>
+              <div className="space-y-2" data-testid="app-organization-name-wrapper">
+                <Label htmlFor="app_organization_name" data-testid="app-organization-name-label">اسم الجهة/النقابة</Label>
+                <Input id="app_organization_name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-organization-name-input" />
+              </div>
+              <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ الاسم والجهة</Button>
             </form>
             <div className="mt-5 space-y-3" data-testid="shortcut-icon-settings-panel">
               <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="shortcut-icon-preview-card">

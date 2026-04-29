@@ -2,7 +2,7 @@ import "@/App.css";
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppSettingsProvider, useAppSettings } from "@/contexts/AppSettingsContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { applyEasternArabicNumeralsToDocument } from "@/lib/format";
@@ -58,6 +58,18 @@ function PageTitleManager() {
   return null;
 }
 
+function PrintOrganizationHeading() {
+  const { user } = useAuth();
+  const { settings } = useAppSettings();
+  if (!user?.organization_name) return null;
+  return (
+    <div className="hidden print:block print:p-4 print:text-center print:font-bold" data-testid="print-organization-heading">
+      <div>{user.organization_name}</div>
+      <div>{settings.system_name}</div>
+    </div>
+  );
+}
+
 function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
@@ -71,6 +83,7 @@ function App() {
         <AuthProvider>
           <BrowserRouter>
             <PageTitleManager />
+            <PrintOrganizationHeading />
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />
