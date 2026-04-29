@@ -68,6 +68,7 @@ ORGANIZATIONS = {
 }
 
 MODULE_DEFINITIONS = {
+    "chart_accounts": "شجرة الحسابات",
     "deposits": "فوائد الودائع",
     "journal_entries": "القيود اليومية",
     "reconciliations": "التسويات البنكية",
@@ -412,10 +413,48 @@ class AccruedInterestReport(BaseModel):
 
 
 class JournalLine(BaseModel):
+    account_id: Optional[str] = None
+    account_code: Optional[str] = None
     account_name: str = Field(..., min_length=2)
+    account_type: Optional[str] = None
     debit: float = Field(default=0, ge=0)
     credit: float = Field(default=0, ge=0)
     notes: Optional[str] = None
+
+
+class ChartAccountBase(BaseModel):
+    code: str = Field(..., min_length=1, max_length=30)
+    name: str = Field(..., min_length=2, max_length=160)
+    account_type: Literal["asset", "liability", "equity", "revenue", "expense"]
+    nature: Literal["debit", "credit"]
+    parent_id: Optional[str] = None
+    is_postable: bool = True
+    is_active: bool = True
+    opening_balance: float = 0
+
+
+class ChartAccountCreate(ChartAccountBase):
+    pass
+
+
+class ChartAccountUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    nature: Optional[Literal["debit", "credit"]] = None
+    parent_id: Optional[str] = None
+    is_postable: Optional[bool] = None
+    is_active: Optional[bool] = None
+    opening_balance: Optional[float] = None
+
+
+class ChartAccountResponse(ChartAccountBase):
+    id: str
+    organization_id: str
+    parent_code: Optional[str] = None
+    parent_name: Optional[str] = None
+    level: int = 1
+    system_key: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class JournalEntryCreate(BaseModel):
@@ -1126,7 +1165,113 @@ def hydrate_journal_entry(document: dict) -> dict:
     return clean
 
 
-def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float, float]:
+def hydrate_chart_account(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
+    base_accounts = [
+        {"code": "1000", "name": "الأصول", "account_type": "asset", "nature": "debit", "is_postable": False, "system_key": "assets"},
+        {"code": "1100", "name": "البنوك", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "banks"},
+        {"code": "1200", "name": "شيكات تحت التحصيل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "checks_under_collection"},
+        {"code": "1300", "name": "عوائد ودائع مستحقة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "accrued_deposit_interest"},
+        {"code": "2000", "name": "الالتزامات", "account_type": "liability", "nature": "credit", "is_postable": False, "system_key": "liabilities"},
+        {"code": "2100", "name": "شيكات صادرة", "account_type": "liability", "nature": "credit", "is_postable": True, "parent_code": "2000", "system_key": "issued_checks"},
+        {"code": "3000", "name": "حقوق الملكية / الفائض", "account_type": "equity", "nature": "credit", "is_postable": False, "system_key": "equity"},
+        {"code": "4000", "name": "الإيرادات", "account_type": "revenue", "nature": "credit", "is_postable": False, "system_key": "revenues"},
+        {"code": "4101", "name": "الإيرادات", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "revenue_general"},
+        {"code": "4102", "name": "إيرادات فوائد ودائع", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "deposit_interest_revenue"},
+        {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
+        {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
+        {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
+    ]
+    for index, bank in enumerate(banks, start=1):
+        base_accounts.append({"code": f"11{index:02d}", "name": bank["name"], "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1100", "system_key": f"bank:{bank['id']}", "bank_id": bank["id"]})
+    return base_accounts
+
+
+async def sync_chart_accounts_for_organization(organization_id: str) -> List[dict]:
+    token = CURRENT_ORGANIZATION_ID.set(organization_id)
+    try:
+        banks = await get_all_banks()
+    finally:
+        CURRENT_ORGANIZATION_ID.reset(token)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    existing = await db.chart_accounts.find({"organization_id": organization_id}, {"_id": 0}).to_list(2000)
+    by_code = {account["code"]: account for account in existing}
+    by_system = {account.get("system_key"): account for account in existing if account.get("system_key")}
+    created_or_updated = []
+    for account in default_chart_accounts_for_banks(banks):
+        parent = by_code.get(account.get("parent_code")) if account.get("parent_code") else None
+        system_key = account.get("system_key")
+        current = by_system.get(system_key) or by_code.get(account["code"])
+        document = {
+            "organization_id": organization_id,
+            "code": account["code"],
+            "name": account["name"],
+            "account_type": account["account_type"],
+            "nature": account["nature"],
+            "parent_id": parent.get("id") if parent else None,
+            "parent_code": parent.get("code") if parent else None,
+            "parent_name": parent.get("name") if parent else None,
+            "level": 2 if parent else 1,
+            "is_postable": bool(account.get("is_postable", True)),
+            "is_active": True,
+            "opening_balance": float(current.get("opening_balance", 0) if current else 0),
+            "system_key": system_key,
+            "bank_id": account.get("bank_id"),
+            "updated_at": now_iso,
+        }
+        if current:
+            await db.chart_accounts.update_one({"id": current["id"], "organization_id": organization_id}, {"$set": document})
+            document = {**current, **document}
+        else:
+            document.update({"id": str(uuid.uuid4()), "created_at": now_iso})
+            await db.chart_accounts.insert_one(document.copy())
+            by_code[document["code"]] = document
+            if system_key:
+                by_system[system_key] = document
+        created_or_updated.append(document)
+    return created_or_updated
+
+
+async def account_for_system_key(system_key: str, fallback_name: str) -> dict:
+    organization_id = organization_id_or_default()
+    account = await db.chart_accounts.find_one(with_organization({"system_key": system_key, "is_active": True}, organization_id), {"_id": 0})
+    if not account:
+        await sync_chart_accounts_for_organization(organization_id)
+        account = await db.chart_accounts.find_one(with_organization({"system_key": system_key, "is_active": True}, organization_id), {"_id": 0})
+    return account or {"id": None, "code": None, "name": fallback_name, "account_type": None}
+
+
+async def resolve_journal_account(line: dict) -> dict:
+    account_name = str(line.get("account_name") or "").strip()
+    bank_id = line.get("bank_id")
+    system_key_map = {
+        "البنك": f"bank:{bank_id}" if bank_id else "banks",
+        "الإيرادات": "revenue_general",
+        "المصروفات": "expense_general",
+        "المصروفات البنكية": "bank_expenses",
+        "شيكات تحت التحصيل": "checks_under_collection",
+        "شيكات صادرة": "issued_checks",
+        "عوائد ودائع مستحقة": "accrued_deposit_interest",
+        "إيرادات فوائد ودائع": "deposit_interest_revenue",
+    }
+    system_key = line.get("system_key") or system_key_map.get(account_name)
+    account = await account_for_system_key(system_key, account_name) if system_key else await db.chart_accounts.find_one(with_organization({"name": account_name, "is_active": True, "is_postable": True}), {"_id": 0})
+    if account:
+        line["account_id"] = account.get("id")
+        line["account_code"] = account.get("code")
+        line["account_name"] = account.get("name") or account_name
+        line["account_type"] = account.get("account_type")
+    return line
+
+
+async def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float, float]:
     normalized = []
     for line in lines:
         account_name = str(line.get("account_name") or "").strip()
@@ -1136,7 +1281,7 @@ def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float, float
             continue
         if debit > 0 and credit > 0:
             raise HTTPException(status_code=400, detail="كل سطر في القيد يجب أن يكون مدين أو دائن فقط")
-        normalized.append({"account_name": account_name, "debit": debit, "credit": credit, "notes": line.get("notes")})
+        normalized.append(await resolve_journal_account({"account_name": account_name, "bank_id": line.get("bank_id"), "system_key": line.get("system_key"), "debit": debit, "credit": credit, "notes": line.get("notes")}))
     total_debit = round(sum(line["debit"] for line in normalized), 2)
     total_credit = round(sum(line["credit"] for line in normalized), 2)
     if len(normalized) < 2 or total_debit <= 0 or total_debit != total_credit:
@@ -1156,7 +1301,7 @@ async def next_journal_entry_number(organization_id: str) -> int:
 
 async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None) -> dict:
     organization_id = organization_id_or_default()
-    normalized_lines, total_debit, total_credit = normalize_journal_lines(lines)
+    normalized_lines, total_debit, total_credit = await normalize_journal_lines(lines)
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     query = with_organization({"source_type": source_type, "source_id": source_id}, organization_id) if source_id else None
     existing = await db.journal_entries.find_one(query, {"_id": 0}) if query else None
@@ -1201,7 +1346,7 @@ async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None
         source_id=revenue.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": debit_account, "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
+        lines=[{"account_name": debit_account, "bank_id": revenue.get("bank_id"), "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
     )
 
 
@@ -1218,7 +1363,7 @@ async def journal_for_expense(expense: dict, current_user: Optional[dict] = None
         source_id=expense.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": "المصروفات", "debit": amount, "credit": 0}, {"account_name": credit_account, "debit": 0, "credit": amount}],
+        lines=[{"account_name": "المصروفات", "debit": amount, "credit": 0}, {"account_name": credit_account, "bank_id": expense.get("bank_id"), "debit": 0, "credit": amount}],
     )
 
 
@@ -1236,7 +1381,7 @@ async def journal_for_banking_expense(document: dict, current_user: Optional[dic
         source_id=source_id,
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": "المصروفات البنكية", "debit": total, "credit": 0}, {"account_name": "البنك", "debit": 0, "credit": total}],
+        lines=[{"account_name": "المصروفات البنكية", "debit": total, "credit": 0}, {"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": 0, "credit": total}],
     )
 
 
@@ -1254,7 +1399,7 @@ async def journal_for_deposit_interest(deposit: dict, current_user: Optional[dic
         source_id=deposit.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": "عوائد ودائع مستحقة", "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
+        lines=[{"account_name": "عوائد ودائع مستحقة", "debit": amount, "credit": 0}, {"account_name": "إيرادات فوائد ودائع", "debit": 0, "credit": amount}],
     )
 
 
@@ -1263,7 +1408,7 @@ async def journal_for_reconciliation(document: dict, current_user: Optional[dict
     if difference <= 0:
         await delete_journal_for_source("reconciliation", document.get("id"))
         return
-    lines = [{"account_name": "المصروفات", "debit": difference, "credit": 0}, {"account_name": "البنك", "debit": 0, "credit": difference}] if float(document.get("difference") or 0) > 0 else [{"account_name": "البنك", "debit": difference, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": difference}]
+    lines = [{"account_name": "المصروفات", "debit": difference, "credit": 0}, {"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": 0, "credit": difference}] if float(document.get("difference") or 0) > 0 else [{"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": difference, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": difference}]
     await save_journal_entry_document(
         entry_date=datetime.fromisoformat(document.get("created_at")).date(),
         description=f"قيد تلقائي لفروق تسوية بنكية {document.get('period_label') or ''}".strip(),
@@ -2094,6 +2239,8 @@ async def ensure_organization_seed_data():
     tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
+    for organization_id in ORGANIZATIONS:
+        await sync_chart_accounts_for_organization(organization_id)
 
 
 @app.on_event("startup")
@@ -3197,7 +3344,7 @@ async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, curre
     existing = await db.journal_entries.find_one(with_organization({"id": entry_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="القيد غير موجود")
-    normalized_lines, total_debit, total_credit = normalize_journal_lines([line.model_dump() for line in payload.lines])
+    normalized_lines, total_debit, total_credit = await normalize_journal_lines([line.model_dump() for line in payload.lines])
     updates = {
         "entry_date": payload.entry_date.isoformat(),
         "description": payload.description.strip(),
@@ -3212,6 +3359,67 @@ async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, curre
     await db.journal_entries.update_one(with_organization({"id": entry_id}), {"$set": updates})
     updated = await db.journal_entries.find_one(with_organization({"id": entry_id}), {"_id": 0})
     return JournalEntryResponse(**hydrate_journal_entry(updated))
+
+
+@api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])
+async def list_chart_accounts(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    documents = await db.chart_accounts.find(with_organization({}), {"_id": 0}).sort("code", 1).to_list(2000)
+    return [ChartAccountResponse(**hydrate_chart_account(document)) for document in documents]
+
+
+@api_router.post("/chart-accounts/sync", response_model=List[ChartAccountResponse])
+async def sync_chart_accounts(_: dict = Depends(require_admin)):
+    documents = await sync_chart_accounts_for_organization(organization_id_or_default())
+    return [ChartAccountResponse(**hydrate_chart_account(document)) for document in documents]
+
+
+@api_router.post("/chart-accounts", response_model=ChartAccountResponse)
+async def create_chart_account(payload: ChartAccountCreate, _: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
+    if await db.chart_accounts.find_one(with_organization({"code": payload.code.strip()}, organization_id), {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="كود الحساب موجود بالفعل داخل هذه الجهة")
+    parent = await db.chart_accounts.find_one(with_organization({"id": payload.parent_id}, organization_id), {"_id": 0}) if payload.parent_id else None
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {
+        "id": str(uuid.uuid4()),
+        "organization_id": organization_id,
+        "code": payload.code.strip(),
+        "name": payload.name.strip(),
+        "account_type": payload.account_type,
+        "nature": payload.nature,
+        "parent_id": parent.get("id") if parent else None,
+        "parent_code": parent.get("code") if parent else None,
+        "parent_name": parent.get("name") if parent else None,
+        "level": (int(parent.get("level", 1)) + 1) if parent else 1,
+        "is_postable": payload.is_postable,
+        "is_active": payload.is_active,
+        "opening_balance": round(float(payload.opening_balance or 0), 2),
+        "system_key": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await db.chart_accounts.insert_one(document.copy())
+    return ChartAccountResponse(**hydrate_chart_account(document))
+
+
+@api_router.put("/chart-accounts/{account_id}", response_model=ChartAccountResponse)
+async def update_chart_account(account_id: str, payload: ChartAccountUpdate, _: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
+    existing = await db.chart_accounts.find_one(with_organization({"id": account_id}, organization_id), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    parent = await db.chart_accounts.find_one(with_organization({"id": payload.parent_id}, organization_id), {"_id": 0}) if payload.parent_id else None
+    updates = {"updated_at": serialize_datetime(datetime.now(timezone.utc))}
+    for field in ["name", "nature", "is_postable", "is_active", "opening_balance"]:
+        value = getattr(payload, field)
+        if value is not None:
+            updates[field] = value.strip() if isinstance(value, str) else value
+    if payload.parent_id is not None:
+        updates.update({"parent_id": parent.get("id") if parent else None, "parent_code": parent.get("code") if parent else None, "parent_name": parent.get("name") if parent else None, "level": (int(parent.get("level", 1)) + 1) if parent else 1})
+    await db.chart_accounts.update_one(with_organization({"id": account_id}, organization_id), {"$set": updates})
+    updated = await db.chart_accounts.find_one(with_organization({"id": account_id}, organization_id), {"_id": 0})
+    return ChartAccountResponse(**hydrate_chart_account(updated))
 
 
 @api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
@@ -3441,7 +3649,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])

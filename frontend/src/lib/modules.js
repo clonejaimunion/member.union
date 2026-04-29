@@ -1,4 +1,5 @@
 export const moduleDefinitions = {
+  chart_accounts: "شجرة الحسابات",
   deposits: "فوائد الودائع",
   journal_entries: "القيود اليومية",
   reconciliations: "التسويات البنكية",
