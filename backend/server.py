@@ -312,6 +312,7 @@ class RevenueBase(BaseModel):
     collection_method: Literal["cash", "check", "payment_order"]
     supplier_name: Optional[str] = None
     check_number: Optional[str] = None
+    check_clearing_type: Optional[Literal["internal", "external"]] = None
     payment_order_number: Optional[str] = None
     bank_id: str
     dated: date
@@ -486,6 +487,8 @@ def hydrate_revenue(document: dict) -> dict:
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     if clean.get("collection_method") in {"check", "payment_order"} and not clean.get("bank_collection_status"):
         clean["bank_collection_status"] = "under_collection"
+    if clean.get("collection_method") == "check" and not clean.get("check_clearing_type"):
+        clean["check_clearing_type"] = "internal"
     return clean
 
 
@@ -552,6 +555,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
         "collection_method": method,
         "supplier_name": payload.supplier_name.strip() if method == "cash" and payload.supplier_name else None,
         "check_number": normalize_digit_text(payload.check_number) if method == "check" else None,
+        "check_clearing_type": payload.check_clearing_type if method == "check" else None,
         "payment_order_number": normalize_digit_text(payload.payment_order_number) if method == "payment_order" else None,
         "bank_id": payload.bank_id,
         "bank_name": bank["name"],

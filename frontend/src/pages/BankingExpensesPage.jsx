@@ -50,6 +50,7 @@ const getBankRules = (bankId) => {
       monthlyStatementFee: 100,
       paymentOrderFee: 10,
       incomingCheckFee: 20,
+      incomingExternalCheckFee: (amount) => clamp(Number(amount || 0) * 0.003, 50, 500),
       outgoingTransferFee: (amount) => clamp(Number(amount || 0) * 0.003, 50, 500),
       cashFee: (amount) => Number(amount || 0) < 20000 ? 20 : 0,
       issuedCheckFee: () => 0,
@@ -61,6 +62,7 @@ const getBankRules = (bankId) => {
     monthlyStatementFee: 0,
     paymentOrderFee: 0,
     incomingCheckFee: 0,
+    incomingExternalCheckFee: () => 0,
     outgoingTransferFee: () => 0,
     cashFee: () => 0,
     issuedCheckFee: () => 0,
@@ -159,6 +161,8 @@ export default function BankingExpensesPage() {
     const paymentOrdersCollected = revenues.filter((item) => item.collection_method === "payment_order" && (item.bank_collection_status || "under_collection") === "collected");
     const paymentOrdersUnderCollection = revenues.filter((item) => item.collection_method === "payment_order" && (item.bank_collection_status || "under_collection") === "under_collection");
     const checksCollected = revenues.filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "collected");
+    const internalChecksCollected = checksCollected.filter((item) => (item.check_clearing_type || "internal") === "internal");
+    const externalChecksCollected = checksCollected.filter((item) => item.check_clearing_type === "external");
     const checksUnderCollection = revenues.filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "under_collection");
     const paidChecks = expenses.filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "paid");
     const notPresentedChecks = expenses.filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "not_presented");
@@ -169,7 +173,8 @@ export default function BankingExpensesPage() {
     return [
       { key: "payment-orders-collected", statement: "أوامر دفع إلكتروني محصلة", count: paymentOrdersCollected.length, bankExpense: paymentOrdersCollected.length * rules.paymentOrderFee },
       { key: "payment-orders-under", statement: "أوامر دفع إلكتروني تحت التحصيل", count: paymentOrdersUnderCollection.length, bankExpense: 0 },
-      { key: "checks-collected", statement: "شيكات محصلة", count: checksCollected.length, bankExpense: checksCollected.length * rules.incomingCheckFee },
+      { key: "checks-collected-internal", statement: "شيكات محصلة داخلي", count: internalChecksCollected.length, bankExpense: internalChecksCollected.length * rules.incomingCheckFee },
+      { key: "checks-collected-external", statement: "شيكات محصلة خارجي", count: externalChecksCollected.length, bankExpense: externalChecksCollected.reduce((sum, item) => sum + rules.incomingExternalCheckFee(item.amount), 0) },
       { key: "checks-under", statement: "شيكات تحت التحصيل", count: checksUnderCollection.length, bankExpense: 0 },
       { key: "monthly-statement", statement: "رسوم كشف الحساب الشهري", count: 1, bankExpense: rules.monthlyStatementFee },
       ...manualFields.map((field) => ({ key: field.key, statement: field.label, count: manual[field.key] ? 1 : 0, bankExpense: Number(sanitizeDecimalInput(manual[field.key]) || 0) })),
@@ -229,7 +234,7 @@ export default function BankingExpensesPage() {
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="banking-expenses-revenue-status-section">
               <h2 className="text-2xl font-extrabold" data-testid="banking-expenses-revenue-status-title">تحديد حالة إيرادات الشيكات وأوامر الدفع</h2>
               <div className="mt-4 space-y-3" data-testid="banking-expenses-revenue-status-list">
-                {revenueStatusRows.length === 0 ? <p className="rounded-lg border border-dashed border-slate-300 p-5 text-center font-bold text-slate-500" data-testid="banking-expenses-revenue-status-empty">لا توجد شيكات أو أوامر دفع لهذا الشهر</p> : revenueStatusRows.map((item) => <article key={item.id} className="rounded-lg border border-slate-200 p-4" data-testid={`banking-revenue-status-${item.id}`}><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="font-extrabold" data-testid={`banking-revenue-status-${item.id}-title`}>{item.collection_method === "check" ? `شيك رقم ${item.check_number}` : `أمر دفع رقم ${item.payment_order_number}`}</p><p className="mt-1 text-sm font-bold text-slate-500" data-testid={`banking-revenue-status-${item.id}-amount`}>{formatCurrency(item.amount)} — إذن {item.receipt_number}</p></div><div className="flex flex-wrap gap-2" data-testid={`banking-revenue-status-${item.id}-actions`}><Button type="button" onClick={() => updateRevenueStatus(item, "collected")} variant={(item.bank_collection_status || "under_collection") === "collected" ? "default" : "outline"} className="h-10 rounded-lg" data-testid={`mark-revenue-collected-button-${item.id}`}><CheckCircle2 className="h-4 w-4" /> تم التحصيل</Button><Button type="button" onClick={() => updateRevenueStatus(item, "under_collection")} variant={(item.bank_collection_status || "under_collection") === "under_collection" ? "default" : "outline"} className="h-10 rounded-lg" data-testid={`mark-revenue-under-collection-button-${item.id}`}><XCircle className="h-4 w-4" /> تحت التحصيل</Button></div></div></article>)}
+                {revenueStatusRows.length === 0 ? <p className="rounded-lg border border-dashed border-slate-300 p-5 text-center font-bold text-slate-500" data-testid="banking-expenses-revenue-status-empty">لا توجد شيكات أو أوامر دفع لهذا الشهر</p> : revenueStatusRows.map((item) => <article key={item.id} className="rounded-lg border border-slate-200 p-4" data-testid={`banking-revenue-status-${item.id}`}><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><p className="font-extrabold" data-testid={`banking-revenue-status-${item.id}-title`}>{item.collection_method === "check" ? `شيك رقم ${item.check_number} — ${item.check_clearing_type === "external" ? "خارجي" : "داخلي"}` : `أمر دفع رقم ${item.payment_order_number}`}</p><p className="mt-1 text-sm font-bold text-slate-500" data-testid={`banking-revenue-status-${item.id}-amount`}>{formatCurrency(item.amount)} — إذن {item.receipt_number}</p></div><div className="flex flex-wrap gap-2" data-testid={`banking-revenue-status-${item.id}-actions`}><Button type="button" onClick={() => updateRevenueStatus(item, "collected")} variant={(item.bank_collection_status || "under_collection") === "collected" ? "default" : "outline"} className="h-10 rounded-lg" data-testid={`mark-revenue-collected-button-${item.id}`}><CheckCircle2 className="h-4 w-4" /> تم التحصيل</Button><Button type="button" onClick={() => updateRevenueStatus(item, "under_collection")} variant={(item.bank_collection_status || "under_collection") === "under_collection" ? "default" : "outline"} className="h-10 rounded-lg" data-testid={`mark-revenue-under-collection-button-${item.id}`}><XCircle className="h-4 w-4" /> تحت التحصيل</Button></div></div></article>)}
               </div>
             </section>
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="banking-expenses-expense-status-section">
