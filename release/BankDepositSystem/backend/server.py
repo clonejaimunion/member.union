@@ -72,6 +72,7 @@ ORGANIZATIONS = {
 MODULE_DEFINITIONS = {
     "membership": "العضوية",
     "fixed_assets": "الأصول الثابتة",
+    "custody_advances": "العهد والسلف",
     "chart_accounts": "شجرة الحسابات",
     "trial_balance": "ميزان المراجعة",
     "deposits": "فوائد الودائع",
@@ -502,6 +503,10 @@ class FixedAssetCategory(BaseModel):
     items: List[str]
 
 
+class FixedAssetCategoryRateUpdate(BaseModel):
+    annual_depreciation_rate: float = Field(..., ge=0, le=100)
+
+
 class FixedAssetCatalogItem(BaseModel):
     id: str
     category_code: str
@@ -569,6 +574,45 @@ class FixedAssetDepreciationResponse(BaseModel):
     amount: float
     accumulated_after: float
     net_book_value_after: float
+    created_at: datetime
+    updated_at: datetime
+
+
+class CustodyAdvanceBase(BaseModel):
+    transaction_type: Literal["custody", "advance"]
+    recipient_name: str = Field(..., min_length=2, max_length=160)
+    issue_date: date
+    amount: float = Field(..., gt=0)
+    bank_id: str
+    purpose: str = Field(..., min_length=2, max_length=240)
+    due_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class CustodyAdvanceCreate(CustodyAdvanceBase):
+    pass
+
+
+class CustodyAdvanceSettle(BaseModel):
+    settlement_date: date
+    settlement_amount: float = Field(..., gt=0)
+    settlement_type: Literal["expense", "bank_return"] = "expense"
+    notes: Optional[str] = None
+
+
+class CustodyAdvanceResponse(CustodyAdvanceBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    reference_number: str
+    bank_name: str
+    settled_amount: float = 0
+    remaining_amount: float
+    status: Literal["open", "partial", "settled"]
+    settlement_date: Optional[date] = None
+    settlement_type: Optional[str] = None
+    settlement_notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -679,7 +723,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -1390,6 +1434,18 @@ def fixed_asset_category(category_code: str) -> dict:
     return category
 
 
+async def fixed_asset_category_with_rate(category_code: str, organization_id: Optional[str] = None) -> dict:
+    category = fixed_asset_category(category_code).copy()
+    setting = await db.fixed_asset_category_settings.find_one(with_organization({"code": category["code"]}, organization_id or organization_id_or_default()), {"_id": 0})
+    if setting and setting.get("annual_depreciation_rate") is not None:
+        category["annual_depreciation_rate"] = float(setting["annual_depreciation_rate"])
+    return category
+
+
+async def fixed_asset_categories_with_rates(organization_id: Optional[str] = None) -> List[dict]:
+    return [await fixed_asset_category_with_rate(category["code"], organization_id) for category in FIXED_ASSET_CATEGORIES]
+
+
 def month_end_date(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
@@ -1444,7 +1500,7 @@ async def list_fixed_asset_catalog_items_for_category(category_code: str, organi
 
 async def list_fixed_asset_categories_with_catalog(organization_id: Optional[str] = None) -> List[dict]:
     result = []
-    for category in FIXED_ASSET_CATEGORIES:
+    for category in await fixed_asset_categories_with_rates(organization_id):
         catalog_items = await list_fixed_asset_catalog_items_for_category(category["code"], organization_id)
         result.append({**category, "items": [item["name"] for item in catalog_items]})
     return result
@@ -1826,7 +1882,7 @@ async def enrich_fixed_asset(document: dict) -> dict:
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     category = fixed_asset_category(clean.get("category_code"))
     clean["category_name"] = category["name"]
-    clean["annual_depreciation_rate"] = float(category["annual_depreciation_rate"])
+    clean["annual_depreciation_rate"] = float(clean.get("annual_depreciation_rate") or category["annual_depreciation_rate"])
     clean["monthly_depreciation"] = fixed_asset_monthly_depreciation(clean.get("purchase_cost"), clean["annual_depreciation_rate"])
     clean["disposal_date"] = fixed_asset_disposal_date(clean["purchase_date"], clean.get("purchase_cost"), clean["annual_depreciation_rate"])
     clean["accumulated_depreciation"] = await depreciation_total_for_asset(clean["id"])
@@ -1865,6 +1921,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "1300", "name": "عوائد ودائع مستحقة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "accrued_deposit_interest"},
         {"code": "1400", "name": "الأصول الثابتة", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "fixed_assets_parent"},
         {"code": "1490", "name": "مجمع إهلاك الأصول الثابتة", "account_type": "asset", "nature": "credit", "is_postable": False, "parent_code": "1000", "system_key": "accumulated_depreciation_parent"},
+        {"code": "1500", "name": "العهد والسلف", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "custody_advances"},
         {"code": "2000", "name": "الالتزامات", "account_type": "liability", "nature": "credit", "is_postable": False, "system_key": "liabilities"},
         {"code": "2100", "name": "شيكات صادرة", "account_type": "liability", "nature": "credit", "is_postable": True, "parent_code": "2000", "system_key": "issued_checks"},
         {"code": "3000", "name": "حقوق الملكية / الفائض", "account_type": "equity", "nature": "credit", "is_postable": False, "system_key": "equity"},
@@ -1874,6 +1931,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
+        {"code": "5103", "name": "تسوية العهد والسلف", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "custody_advance_expense"},
         {"code": "5200", "name": "إهلاك الأصول الثابتة", "account_type": "expense", "nature": "debit", "is_postable": False, "parent_code": "5000", "system_key": "depreciation_expense_parent"},
     ]
     for category in FIXED_ASSET_CATEGORIES:
@@ -2152,6 +2210,51 @@ async def journal_for_asset_depreciation(depreciation: dict, current_user: Optio
         lines=[
             {"account_name": f"إهلاك {category['name']}", "system_key": f"depreciation_expense:{category['code']}", "debit": amount, "credit": 0},
             {"account_name": f"مجمع إهلاك {category['name']}", "system_key": f"accumulated_depreciation:{category['code']}", "debit": 0, "credit": amount},
+        ],
+    )
+
+
+async def journal_for_custody_advance(document: dict, current_user: Optional[dict] = None):
+    amount = round(float(document.get("amount") or 0), 2)
+    if amount <= 0:
+        return
+    issue_date = document.get("issue_date") if isinstance(document.get("issue_date"), date) else date.fromisoformat(str(document.get("issue_date")))
+    label = "عهدة" if document.get("transaction_type") == "custody" else "سلفة"
+    await save_journal_entry_document(
+        entry_date=issue_date,
+        description=f"قيد تلقائي لصرف {label}: {document.get('recipient_name')}",
+        reference=document.get("reference_number"),
+        source_type="custody_advance",
+        source_id=document.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[
+            {"account_name": "العهد والسلف", "system_key": "custody_advances", "debit": amount, "credit": 0},
+            {"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": 0, "credit": amount},
+        ],
+    )
+
+
+async def journal_for_custody_advance_settlement(document: dict, current_user: Optional[dict] = None):
+    amount = round(float(document.get("settled_amount") or 0), 2)
+    if amount <= 0 or not document.get("settlement_date"):
+        await delete_journal_for_source("custody_advance_settlement", document.get("id"))
+        return
+    settlement_date = document.get("settlement_date") if isinstance(document.get("settlement_date"), date) else date.fromisoformat(str(document.get("settlement_date")))
+    debit_line = {"account_name": "تسوية العهد والسلف", "system_key": "custody_advance_expense", "debit": amount, "credit": 0}
+    if document.get("settlement_type") == "bank_return":
+        debit_line = {"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": amount, "credit": 0}
+    await save_journal_entry_document(
+        entry_date=settlement_date,
+        description=f"قيد تلقائي لتسوية عهدة/سلفة: {document.get('recipient_name')}",
+        reference=document.get("reference_number"),
+        source_type="custody_advance_settlement",
+        source_id=document.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[
+            debit_line,
+            {"account_name": "العهد والسلف", "system_key": "custody_advances", "debit": 0, "credit": amount},
         ],
     )
 
@@ -2501,9 +2604,9 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
 
 async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
-    category = fixed_asset_category(payload.category_code)
     await ensure_period_is_open(payload.purchase_date)
     organization_id = organization_id_or_default()
+    category = await fixed_asset_category_with_rate(payload.category_code, organization_id)
     normalized_name = payload.asset_name.strip()
     if not normalized_name:
         raise HTTPException(status_code=400, detail="اسم الأصل الثابت مطلوب")
@@ -2563,6 +2666,52 @@ async def membership_document_from_payload(payload: MembershipCreate, membership
         "death_beneficiary": normalize_member_text(payload.death_beneficiary),
         **retirement,
     }
+
+
+async def custody_advance_document_from_payload(payload: CustodyAdvanceCreate, document_id: Optional[str] = None) -> dict:
+    bank = await ensure_bank_async(payload.bank_id)
+    await ensure_period_is_open(payload.issue_date)
+    organization_id = organization_id_or_default()
+    if payload.due_date and payload.due_date < payload.issue_date:
+        raise HTTPException(status_code=400, detail="تاريخ الاستحقاق لا يمكن أن يسبق تاريخ الصرف")
+    serial = await db.custody_advances.count_documents(with_organization({}, organization_id)) + 1
+    reference_number = f"AS-{serial:05d}"
+    if document_id:
+        current = await db.custody_advances.find_one(with_organization({"id": document_id}, organization_id), {"_id": 0, "reference_number": 1})
+        reference_number = current.get("reference_number") if current else reference_number
+    return {
+        "organization_id": organization_id,
+        "reference_number": reference_number,
+        "transaction_type": payload.transaction_type,
+        "recipient_name": normalize_member_text(payload.recipient_name),
+        "issue_date": serialize_date(payload.issue_date),
+        "amount": round(float(payload.amount), 2),
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "purpose": normalize_member_text(payload.purpose),
+        "due_date": serialize_date(payload.due_date) if payload.due_date else None,
+        "notes": normalize_member_text(payload.notes) if payload.notes else None,
+        "settled_amount": 0,
+        "remaining_amount": round(float(payload.amount), 2),
+        "status": "open",
+        "settlement_date": None,
+        "settlement_type": None,
+        "settlement_notes": None,
+    }
+
+
+def hydrate_custody_advance(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["issue_date", "due_date", "settlement_date"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = date.fromisoformat(clean[field_name])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    clean["settled_amount"] = round(float(clean.get("settled_amount") or 0), 2)
+    clean["remaining_amount"] = round(max(float(clean.get("amount") or 0) - clean["settled_amount"], 0), 2)
+    clean["status"] = "settled" if clean["remaining_amount"] <= 0 else ("partial" if clean["settled_amount"] > 0 else "open")
+    return clean
 
 
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
@@ -2750,6 +2899,22 @@ async def update_admin_organization_modules(payload: OrganizationModulesUpdate, 
     await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_modules": next_modules, "updated_at": now_iso}})
     updated = await get_organization_document(organization_id)
     return build_organization_modules_response(updated)
+
+
+@api_router.get("/admin/fixed-assets/categories", response_model=List[FixedAssetCategory])
+async def admin_list_fixed_asset_categories(_: dict = Depends(require_admin)):
+    return [FixedAssetCategory(**category) for category in await list_fixed_asset_categories_with_catalog()]
+
+
+@api_router.put("/admin/fixed-assets/categories/{category_code}", response_model=FixedAssetCategory)
+async def admin_update_fixed_asset_category_rate(category_code: str, payload: FixedAssetCategoryRateUpdate, _: dict = Depends(require_admin)):
+    category = fixed_asset_category(category_code)
+    organization_id = organization_id_or_default()
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {"id": f"{organization_id}-{category['code']}", "organization_id": organization_id, "code": category["code"], "annual_depreciation_rate": float(payload.annual_depreciation_rate), "updated_at": now_iso}
+    await db.fixed_asset_category_settings.update_one(with_organization({"code": category["code"]}, organization_id), {"$set": document, "$setOnInsert": {"created_at": now_iso}}, upsert=True)
+    updated = next(item for item in await list_fixed_asset_categories_with_catalog(organization_id) if item["code"] == category["code"])
+    return FixedAssetCategory(**updated)
 
 
 @api_router.post("/admin/app-settings/icon", response_model=AppSettingsResponse)
@@ -3037,7 +3202,7 @@ async def ensure_organization_seed_data():
         modules = normalize_modules(organization["id"], existing.get("modules") if existing else None)
         await db.organizations.update_one({"id": organization["id"]}, {"$set": {"modules": modules}})
         await db.users.update_many({"organization_id": organization["id"]}, {"$set": {"organization_modules": modules}})
-    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
     for organization_id in ORGANIZATIONS:
@@ -3061,6 +3226,8 @@ async def startup_tasks():
     await db.fixed_asset_depreciations.create_index([("organization_id", 1), ("asset_id", 1), ("year", 1), ("month", 1)], unique=True)
     await db.fixed_asset_catalog_items.create_index([("organization_id", 1), ("category_code", 1), ("name", 1)], unique=True)
     await db.fixed_asset_catalog_hidden.create_index([("organization_id", 1), ("category_code", 1), ("name", 1)], unique=True)
+    await db.fixed_asset_category_settings.create_index([("organization_id", 1), ("code", 1)], unique=True)
+    await db.custody_advances.create_index([("organization_id", 1), ("reference_number", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("membership_number", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("national_id", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("retirement_year", 1), ("retirement_month", 1)])
@@ -4284,6 +4451,68 @@ async def list_fixed_asset_depreciations(
     return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in documents]
 
 
+@api_router.get("/custody-advances", response_model=List[CustodyAdvanceResponse])
+async def list_custody_advances(
+    status: Optional[str] = Query(default=None),
+    transaction_type: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if status in ["open", "partial", "settled"]:
+        query["status"] = status
+    if transaction_type in ["custody", "advance"]:
+        query["transaction_type"] = transaction_type
+    documents = await db.custody_advances.find(query, {"_id": 0}).sort("issue_date", -1).sort("created_at", -1).to_list(5000)
+    return [CustodyAdvanceResponse(**hydrate_custody_advance(document)) for document in documents]
+
+
+@api_router.post("/custody-advances", response_model=CustodyAdvanceResponse)
+async def create_custody_advance(payload: CustodyAdvanceCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))) :
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    document = await custody_advance_document_from_payload(payload)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
+    await db.custody_advances.insert_one(document.copy())
+    await journal_for_custody_advance(document, current_user)
+    return CustodyAdvanceResponse(**hydrate_custody_advance(document))
+
+
+@api_router.post("/custody-advances/{document_id}/settle", response_model=CustodyAdvanceResponse)
+async def settle_custody_advance(document_id: str, payload: CustodyAdvanceSettle, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))) :
+    existing = await db.custody_advances.find_one(with_organization({"id": document_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العهدة/السلفة غير موجودة")
+    await ensure_period_is_open(payload.settlement_date)
+    amount = round(float(existing.get("amount") or 0), 2)
+    settlement_amount = round(float(payload.settlement_amount), 2)
+    if settlement_amount > amount:
+        raise HTTPException(status_code=400, detail="قيمة التسوية لا يمكن أن تتجاوز قيمة العهدة/السلفة")
+    updates = {
+        "settled_amount": settlement_amount,
+        "remaining_amount": round(max(amount - settlement_amount, 0), 2),
+        "status": "settled" if settlement_amount >= amount else "partial",
+        "settlement_date": serialize_date(payload.settlement_date),
+        "settlement_type": payload.settlement_type,
+        "settlement_notes": normalize_member_text(payload.notes) if payload.notes else None,
+        "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+    }
+    await db.custody_advances.update_one(with_organization({"id": document_id}), {"$set": updates})
+    updated = await db.custody_advances.find_one(with_organization({"id": document_id}), {"_id": 0})
+    await journal_for_custody_advance_settlement(updated, current_user)
+    return CustodyAdvanceResponse(**hydrate_custody_advance(updated))
+
+
+@api_router.delete("/custody-advances/{document_id}")
+async def delete_custody_advance(document_id: str, _: dict = Depends(require_admin)):
+    existing = await db.custody_advances.find_one(with_organization({"id": document_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العهدة/السلفة غير موجودة")
+    await db.custody_advances.delete_one(with_organization({"id": document_id}))
+    await delete_journal_for_source("custody_advance", document_id)
+    await delete_journal_for_source("custody_advance_settlement", document_id)
+    return {"message": "تم حذف العهدة/السلفة وقيودها التلقائية", "deleted_id": document_id}
+
+
 @api_router.post("/memberships", response_model=MembershipResponse)
 async def create_membership(payload: MembershipCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
     require_social_solidarity_membership(current_user)
@@ -4904,7 +5133,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
@@ -5018,6 +5247,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
         ("/api/admin/banks", "إدارة البنوك"),
         ("/api/memberships", "العضوية"),
         ("/api/fixed-assets", "الأصول الثابتة"),
+        ("/api/custody-advances", "العهد والسلف"),
         ("/api/banking-expenses", "المصروفات البنكية"),
         ("/api/electronic-invoice", "الفاتورة الإلكترونية"),
         ("/api/electronic-invoices", "الفاتورة الإلكترونية"),
