@@ -7,7 +7,9 @@
 
 ## Admin Permissions
 - Admin can access `/secure-admin-control-panel`.
-- Admin can create users with scoped permissions.
+- Only hidden super admin `admin` can create/list/edit/disable/enable/delete users and normal admins.
+- Normal admins cannot access `/api/admin/users` and must not see Add User or Registered Users sections.
+- Hidden super admin `admin` must not be returned in registered users and cannot be edited/deleted from user-management endpoints.
 - Admin can update mandatory Arabic `full_name` from the admin password/profile section.
 - Admin can change the admin password only after providing the current password.
 - Two-factor authentication is permanently disabled; admins cannot start Google Authenticator setup.
