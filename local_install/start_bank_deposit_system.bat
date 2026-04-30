@@ -5,6 +5,7 @@ title Bank Deposit Interest System
 cd /d %~dp0
 set APP_DIR=%~dp0
 set VENV_PY=%APP_DIR%backend\.venv\Scripts\python.exe
+set WHEEL_DIR=%APP_DIR%backend\wheels
 
 echo ============================================
 echo   Bank Deposit Interest System
@@ -13,7 +14,7 @@ echo ============================================
 
 where python >nul 2>nul
 if errorlevel 1 (
-  echo Python is not installed. Please install Python 3.11.9.
+  echo Python is not installed. Please install Python 3.11.9 once, then run the system again.
   pause
   exit /b 1
 )
@@ -33,13 +34,17 @@ if not exist "%APP_DIR%backend\.venv" (
   %PY_CMD% -m venv "%APP_DIR%backend\.venv"
 )
 
-echo Installing/Checking backend requirements...
-"%VENV_PY%" -m pip install --upgrade pip
-"%VENV_PY%" -m pip install -r "%APP_DIR%backend\requirements.txt"
+echo Installing/Checking backend requirements locally...
+if exist "%WHEEL_DIR%" (
+  "%VENV_PY%" -m pip install --no-index --find-links "%WHEEL_DIR%" -r "%APP_DIR%backend\requirements.txt"
+) else (
+  echo Local dependency folder was not found. Trying normal installation...
+  "%VENV_PY%" -m pip install -r "%APP_DIR%backend\requirements.txt"
+)
 if errorlevel 1 (
   echo.
   echo Requirements installation failed.
-  echo Please install Python 3.11.9 and make sure internet connection is available.
+  echo Make sure the installer includes backend\wheels, or connect once to install requirements.
   pause
   exit /b 1
 )
@@ -47,8 +52,9 @@ if errorlevel 1 (
 echo Checking application server package...
 "%VENV_PY%" -m pip show uvicorn >nul 2>nul
 if errorlevel 1 (
-  echo Uvicorn was not installed correctly. Installing it now...
-  "%VENV_PY%" -m pip install uvicorn
+  echo Uvicorn was not installed correctly from local packages.
+  pause
+  exit /b 1
 )
 
 echo Starting local system on http://localhost:8001 ...
