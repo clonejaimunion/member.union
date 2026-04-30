@@ -2,6 +2,7 @@ export const moduleDefinitions = {
   membership: "العضوية",
   fixed_assets: "الأصول الثابتة",
   custody_advances: "العهد والسلف",
+  financial_statements: "القوائم المالية",
   chart_accounts: "شجرة الحسابات",
   trial_balance: "ميزان المراجعة",
   deposits: "فوائد الودائع",

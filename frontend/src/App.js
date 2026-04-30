@@ -23,6 +23,7 @@ import LedgerPage from "@/pages/LedgerPage";
 import JournalEntriesPage from "@/pages/JournalEntriesPage";
 import ChartAccountsPage from "@/pages/ChartAccountsPage";
 import TrialBalancePage from "@/pages/TrialBalancePage";
+import FinancialStatementsPage from "@/pages/FinancialStatementsPage";
 import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import CustodyAdvancesPage from "@/pages/CustodyAdvancesPage";
 import MembershipPage from "@/pages/MembershipPage";
@@ -47,6 +48,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/fixed-assets", title: `الأصول الثابتة - ${appTitle}` },
   { test: (path) => path === "/chart-accounts", title: `شجرة الحسابات - ${appTitle}` },
   { test: (path) => path === "/trial-balance", title: `ميزان المراجعة - ${appTitle}` },
+  { test: (path) => path === "/financial-statements", title: `القوائم المالية - ${appTitle}` },
   { test: (path) => path === "/journal-entries", title: `القيود اليومية - ${appTitle}` },
   { test: (path) => path === "/electronic-invoice", title: `الفاتورة الإلكترونية - ${appTitle}` },
   { test: (path) => path === "/secure-admin-control-panel", title: `لوحة الأدمن - ${appTitle}` },
@@ -120,6 +122,7 @@ function App() {
               <Route path="/fixed-assets" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="fixed_assets"><FixedAssetsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/chart-accounts" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="chart_accounts"><ChartAccountsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/trial-balance" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="trial_balance"><TrialBalancePage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/financial-statements" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="financial_statements"><FinancialStatementsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/journal-entries" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="journal_entries"><JournalEntriesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/electronic-invoice" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ModuleRoute moduleKey="electronic_invoice"><ElectronicInvoicePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />

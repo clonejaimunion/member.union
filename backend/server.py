@@ -73,6 +73,7 @@ MODULE_DEFINITIONS = {
     "membership": "العضوية",
     "fixed_assets": "الأصول الثابتة",
     "custody_advances": "العهد والسلف",
+    "financial_statements": "القوائم المالية",
     "chart_accounts": "شجرة الحسابات",
     "trial_balance": "ميزان المراجعة",
     "deposits": "فوائد الودائع",
@@ -494,6 +495,44 @@ class TrialBalanceReport(BaseModel):
     total_balance_debit: float
     total_balance_credit: float
     is_balanced: bool
+
+
+class FinancialStatementLine(BaseModel):
+    code: Optional[str] = None
+    name: str
+    amount: float = 0
+    debit: float = 0
+    credit: float = 0
+    reference: Optional[str] = None
+    entry_number: Optional[int] = None
+    entry_date: Optional[date] = None
+    details: Optional[str] = None
+
+
+class FinancialStatementSection(BaseModel):
+    title: str
+    lines: List[FinancialStatementLine]
+    total: float = 0
+
+
+class AccountingErrorItem(BaseModel):
+    severity: Literal["critical", "warning", "info"]
+    error_type: str
+    location: str
+    details: str
+    suggested_fix: Optional[str] = None
+
+
+class FinancialStatementsReport(BaseModel):
+    organization_id: str
+    from_date: date
+    to_date: date
+    balance_sheet: Dict[str, FinancialStatementSection]
+    receipts_payments: Dict[str, FinancialStatementSection]
+    revenues_expenses: Dict[str, FinancialStatementSection]
+    accounting_errors: List[AccountingErrorItem]
+    is_accounting_valid: bool
+    generated_at: datetime
 
 
 class FixedAssetCategory(BaseModel):
@@ -2256,6 +2295,216 @@ async def journal_for_custody_advance_settlement(document: dict, current_user: O
             debit_line,
             {"account_name": "العهد والسلف", "system_key": "custody_advances", "debit": 0, "credit": amount},
         ],
+    )
+
+
+def row_net_amount(row: TrialBalanceRow) -> float:
+    return round(float(row.balance_debit or 0) - float(row.balance_credit or 0), 2)
+
+
+def normal_amount(row: TrialBalanceRow) -> float:
+    if row.account_type in ["asset", "expense"]:
+        return round(float(row.balance_debit or 0) - float(row.balance_credit or 0), 2)
+    return round(float(row.balance_credit or 0) - float(row.balance_debit or 0), 2)
+
+
+async def calculate_trial_balance_report(
+    organization_id: str,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    account_type: Optional[str] = None,
+    non_zero_only: bool = False,
+) -> TrialBalanceReport:
+    await sync_chart_accounts_for_organization(organization_id)
+    account_query = with_organization({}, organization_id)
+    if account_type:
+        account_query["account_type"] = account_type
+    accounts = await db.chart_accounts.find(account_query, {"_id": 0}).sort("code", 1).to_list(5000)
+    rows_by_key = {}
+    for account in accounts:
+        key = account.get("id") or account.get("code") or account.get("name")
+        rows_by_key[key] = {
+            "account_id": account.get("id"),
+            "account_code": account.get("code"),
+            "account_name": account.get("name"),
+            "account_type": account.get("account_type"),
+            "nature": account.get("nature"),
+            "opening_balance": round(float(account.get("opening_balance") or 0), 2),
+            "total_debit": 0.0,
+            "total_credit": 0.0,
+            "balance_debit": 0.0,
+            "balance_credit": 0.0,
+        }
+    entry_query = with_organization({"status": "approved"}, organization_id)
+    if from_date or to_date:
+        entry_query["entry_date"] = {}
+        if from_date:
+            entry_query["entry_date"]["$gte"] = from_date.isoformat()
+        if to_date:
+            entry_query["entry_date"]["$lte"] = to_date.isoformat()
+    entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1}).to_list(100000)
+    account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
+    account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
+    for entry in entries:
+        for line in entry.get("lines", []):
+            account = None
+            if line.get("account_id") and line["account_id"] in rows_by_key:
+                key = line["account_id"]
+            else:
+                account = account_by_code.get(line.get("account_code")) or account_by_name.get(line.get("account_name"))
+                if account_type and (not account or account.get("account_type") != account_type):
+                    continue
+                key = account.get("id") if account else (line.get("account_code") or line.get("account_name"))
+            if key not in rows_by_key:
+                if account_type and (account.get("account_type") if account else line.get("account_type")) != account_type:
+                    continue
+                rows_by_key[key] = {
+                    "account_id": account.get("id") if account else line.get("account_id"),
+                    "account_code": account.get("code") if account else line.get("account_code"),
+                    "account_name": account.get("name") if account else line.get("account_name") or "حساب غير محدد",
+                    "account_type": account.get("account_type") if account else line.get("account_type"),
+                    "nature": account.get("nature") if account else None,
+                    "opening_balance": 0.0,
+                    "total_debit": 0.0,
+                    "total_credit": 0.0,
+                    "balance_debit": 0.0,
+                    "balance_credit": 0.0,
+                }
+            rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + float(line.get("debit") or 0), 2)
+            rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + float(line.get("credit") or 0), 2)
+    rows = []
+    for row in rows_by_key.values():
+        signed_balance = row["total_debit"] - row["total_credit"]
+        if row.get("nature") == "credit":
+            signed_balance -= row["opening_balance"]
+        else:
+            signed_balance += row["opening_balance"]
+        if signed_balance >= 0:
+            row["balance_debit"] = round(signed_balance, 2)
+            row["balance_credit"] = 0.0
+        else:
+            row["balance_debit"] = 0.0
+            row["balance_credit"] = round(abs(signed_balance), 2)
+        if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
+            continue
+        rows.append(TrialBalanceRow(**row))
+    rows.sort(key=lambda item: item.account_code or "999999")
+    total_debit = round(sum(row.total_debit for row in rows), 2)
+    total_credit = round(sum(row.total_credit for row in rows), 2)
+    total_balance_debit = round(sum(row.balance_debit for row in rows), 2)
+    total_balance_credit = round(sum(row.balance_credit for row in rows), 2)
+    return TrialBalanceReport(
+        organization_id=organization_id,
+        from_date=from_date,
+        to_date=to_date,
+        account_type=account_type,
+        rows=rows,
+        total_debit=total_debit,
+        total_credit=total_credit,
+        total_balance_debit=total_balance_debit,
+        total_balance_credit=total_balance_credit,
+        is_balanced=round(total_debit - total_credit, 2) == 0,
+    )
+
+
+def financial_line_from_trial(row: TrialBalanceRow, amount: Optional[float] = None) -> FinancialStatementLine:
+    return FinancialStatementLine(code=row.account_code, name=row.account_name, amount=round(amount if amount is not None else normal_amount(row), 2), debit=row.balance_debit, credit=row.balance_credit)
+
+
+async def build_accounting_errors(organization_id: str, balance_report: TrialBalanceReport, income_report: TrialBalanceReport, balance_assets_total: float, balance_liability_equity_total: float) -> List[AccountingErrorItem]:
+    errors: List[AccountingErrorItem] = []
+    if not balance_report.is_balanced:
+        errors.append(AccountingErrorItem(severity="critical", error_type="ميزان غير متوازن", location="ميزان المراجعة", details=f"إجمالي المدين {balance_report.total_debit} لا يساوي إجمالي الدائن {balance_report.total_credit}", suggested_fix="راجع القيود اليومية غير المتوازنة أو الحسابات غير المرتبطة."))
+    if round(balance_assets_total - balance_liability_equity_total, 2) != 0:
+        errors.append(AccountingErrorItem(severity="critical", error_type="الميزانية غير متوازنة", location="قائمة الميزانية", details=f"إجمالي الأصول {balance_assets_total} لا يساوي إجمالي الالتزامات وحقوق الملكية {balance_liability_equity_total}", suggested_fix="راجع أرصدة الحسابات ونتيجة الفترة والحسابات ذات الطبيعة العكسية."))
+    bad_entries = await db.journal_entries.find(with_organization({"status": "approved"}, organization_id), {"_id": 0, "id": 1, "entry_number": 1, "entry_date": 1, "description": 1, "total_debit": 1, "total_credit": 1, "lines": 1}).to_list(100000)
+    for entry in bad_entries:
+        total_debit = round(float(entry.get("total_debit") or 0), 2)
+        total_credit = round(float(entry.get("total_credit") or 0), 2)
+        if total_debit != total_credit or total_debit <= 0:
+            errors.append(AccountingErrorItem(severity="critical", error_type="قيد غير متوازن", location=f"قيد رقم {entry.get('entry_number')} بتاريخ {entry.get('entry_date')}", details=f"{entry.get('description')} — مدين {total_debit} / دائن {total_credit}", suggested_fix="افتح القيد وعدّل السطور حتى يتساوى المدين والدائن."))
+        for index, line in enumerate(entry.get("lines", []), start=1):
+            if not line.get("account_id") and not line.get("account_code"):
+                errors.append(AccountingErrorItem(severity="critical", error_type="سطر قيد بلا حساب", location=f"قيد رقم {entry.get('entry_number')} - سطر {index}", details=f"السطر باسم {line.get('account_name') or 'غير محدد'} غير مرتبط بحساب في شجرة الحسابات", suggested_fix="اربط السطر بحساب صحيح أو أضف الحساب إلى شجرة الحسابات."))
+            if float(line.get("debit") or 0) > 0 and float(line.get("credit") or 0) > 0:
+                errors.append(AccountingErrorItem(severity="critical", error_type="سطر مدين ودائن معاً", location=f"قيد رقم {entry.get('entry_number')} - سطر {index}", details="السطر يحتوي قيمة في المدين والدائن معاً", suggested_fix="اجعل السطر مديناً أو دائناً فقط."))
+    for row in balance_report.rows:
+        if row.account_type in ["asset", "expense"] and row.balance_credit > 0:
+            errors.append(AccountingErrorItem(severity="warning", error_type="رصيد عكسي", location=f"حساب {row.account_code or '-'} - {row.account_name}", details=f"الحساب طبيعته مدينة لكن لديه رصيد دائن {row.balance_credit}", suggested_fix="راجع القيود المرتبطة بهذا الحساب."))
+        if row.account_type in ["liability", "equity", "revenue"] and row.balance_debit > 0:
+            errors.append(AccountingErrorItem(severity="warning", error_type="رصيد عكسي", location=f"حساب {row.account_code or '-'} - {row.account_name}", details=f"الحساب طبيعته دائنة لكن لديه رصيد مدين {row.balance_debit}", suggested_fix="راجع القيود المرتبطة بهذا الحساب."))
+    fixed_assets = await db.fixed_assets.find(with_organization({}), {"_id": 0}).to_list(10000)
+    for asset in fixed_assets:
+        accumulated = await depreciation_total_for_asset(asset["id"])
+        cost = round(float(asset.get("purchase_cost") or 0), 2)
+        if accumulated > cost:
+            errors.append(AccountingErrorItem(severity="critical", error_type="إهلاك أصل أكبر من تكلفته", location=f"الأصل {asset.get('asset_code')} - {asset.get('asset_name')}", details=f"مجمع الإهلاك {accumulated} أكبر من تكلفة الأصل {cost}", suggested_fix="راجع سجلات إهلاك هذا الأصل."))
+    return errors
+
+
+async def calculate_financial_statements_report(organization_id: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> FinancialStatementsReport:
+    today_value = date.today()
+    period_from = from_date or date(today_value.year, 1, 1)
+    period_to = to_date or today_value
+    balance_report = await calculate_trial_balance_report(organization_id=organization_id, to_date=period_to, non_zero_only=True)
+    income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True)
+    asset_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "asset" and normal_amount(row) != 0]
+    liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0]
+    equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
+    revenue_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "revenue" and normal_amount(row) != 0]
+    expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
+    revenue_total = round(sum(line.amount for line in revenue_lines), 2)
+    expense_total = round(sum(line.amount for line in expense_lines), 2)
+    period_result = round(revenue_total - expense_total, 2)
+    result_line = FinancialStatementLine(code=None, name="فائض / عجز الفترة", amount=period_result, details="محسوب تلقائياً من الإيرادات والمصروفات")
+    equity_with_result = equity_lines + [result_line]
+    assets_total = round(sum(line.amount for line in asset_lines), 2)
+    liabilities_total = round(sum(line.amount for line in liability_lines), 2)
+    equity_total = round(sum(line.amount for line in equity_with_result), 2)
+    liability_equity_total = round(liabilities_total + equity_total, 2)
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
+    receipts = []
+    payments = []
+    for entry in entries:
+        for line in entry.get("lines", []):
+            account_code = str(line.get("account_code") or "")
+            account_name = str(line.get("account_name") or "")
+            is_bank_line = account_code.startswith("11") or account_name in ["البنوك", "البنك"] or line.get("bank_id")
+            if not is_bank_line:
+                continue
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            statement_line = FinancialStatementLine(code=account_code or None, name=entry.get("description") or account_name, debit=debit, credit=credit, amount=debit or credit, reference=entry.get("reference"), entry_number=entry.get("entry_number"), entry_date=date.fromisoformat(entry["entry_date"]), details=account_name)
+            if debit > 0:
+                receipts.append(statement_line)
+            if credit > 0:
+                payments.append(statement_line)
+    receipts_total = round(sum(line.amount for line in receipts), 2)
+    payments_total = round(sum(line.amount for line in payments), 2)
+    errors = await build_accounting_errors(organization_id, balance_report, income_report, assets_total, liability_equity_total)
+    return FinancialStatementsReport(
+        organization_id=organization_id,
+        from_date=period_from,
+        to_date=period_to,
+        balance_sheet={
+            "assets": FinancialStatementSection(title="الأصول", lines=asset_lines, total=assets_total),
+            "liabilities": FinancialStatementSection(title="الالتزامات", lines=liability_lines, total=liabilities_total),
+            "equity": FinancialStatementSection(title="حقوق الملكية والفائض", lines=equity_with_result, total=equity_total),
+            "check": FinancialStatementSection(title="اتزان الميزانية", lines=[FinancialStatementLine(name="إجمالي الأصول", amount=assets_total), FinancialStatementLine(name="إجمالي الالتزامات وحقوق الملكية", amount=liability_equity_total), FinancialStatementLine(name="فرق الاتزان", amount=round(assets_total - liability_equity_total, 2))], total=round(assets_total - liability_equity_total, 2)),
+        },
+        receipts_payments={
+            "receipts": FinancialStatementSection(title="المقبوضات", lines=receipts, total=receipts_total),
+            "payments": FinancialStatementSection(title="المدفوعات", lines=payments, total=payments_total),
+            "net_cash_flow": FinancialStatementSection(title="صافي المقبوضات والمدفوعات", lines=[FinancialStatementLine(name="صافي الحركة النقدية", amount=round(receipts_total - payments_total, 2))], total=round(receipts_total - payments_total, 2)),
+        },
+        revenues_expenses={
+            "revenues": FinancialStatementSection(title="الإيرادات", lines=revenue_lines, total=revenue_total),
+            "expenses": FinancialStatementSection(title="المصروفات", lines=expense_lines, total=expense_total),
+            "result": FinancialStatementSection(title="نتيجة الفترة", lines=[result_line], total=period_result),
+        },
+        accounting_errors=errors,
+        is_accounting_valid=not any(error.severity == "critical" for error in errors),
+        generated_at=datetime.now(timezone.utc),
     )
 
 
@@ -4906,6 +5155,16 @@ async def get_trial_balance(
     )
 
 
+@api_router.get("/financial-statements", response_model=FinancialStatementsReport)
+async def get_financial_statements(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    organization_id = organization_id_or_default()
+    return await calculate_financial_statements_report(organization_id=organization_id, from_date=from_date, to_date=to_date)
+
+
 @api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
 async def get_electronic_invoice_settings(_: dict = Depends(require_einvoice_enabled)):
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(await get_einvoice_settings_document()))
@@ -5248,6 +5507,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
         ("/api/memberships", "العضوية"),
         ("/api/fixed-assets", "الأصول الثابتة"),
         ("/api/custody-advances", "العهد والسلف"),
+        ("/api/financial-statements", "القوائم المالية"),
         ("/api/banking-expenses", "المصروفات البنكية"),
         ("/api/electronic-invoice", "الفاتورة الإلكترونية"),
         ("/api/electronic-invoices", "الفاتورة الإلكترونية"),

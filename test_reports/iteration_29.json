@@ -1,0 +1,46 @@
+{
+  "summary": "تم تنفيذ اختبار backend + frontend لميزة القوائم المالية التلقائية عبر الجهتين (النقابة العامة/التكافل). API /api/financial-statements أعاد الأقسام الأربعة المطلوبة، وفحوصات واجهة /financial-statements نجحت مع تحميل تلقائي لفترة السنة الحالية وأزرار الطباعة/التصدير ظاهرة. فشل وحيد مستمر في CORS preflight على /api/auth/login في البيئة العامة.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "الاستجابة من الـ public endpoint تُرجع Access-Control-Allow-Origin=* بدون Access-Control-Allow-Credentials=true (على الرغم من إعداد allow_credentials في الخادم)، ما يكسر تدفق auth المعتمد على credentials عبر المتصفح.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration29_financial_statements_and_auth.py",
+    "/app/test_reports/pytest/pytest_results_iter29_backend.xml"
+  ],
+  "action_items": [
+    "إصلاح CORS preflight على /api/auth/login في طبقة النشر العامة بحيث تُعاد access-control-allow-credentials=true مع origin صريح (وليس *).",
+    "إعادة اختبار login من المتصفح بعد إصلاح CORS للتأكد من استقرار التوثيق عبر الجهات.",
+    "اختبار سيناريوهات محاسبية مُولدة عمداً (seeded invalid journals/assets) إذا كان المطلوب التحقق من ظهور كل نوع خطأ محاسبي في نفس البيئة." 
+  ],
+  "critical_code_review_comments": [
+    "منطق استخراج القوائم المالية موجود فعلياً في calculate_financial_statements_report ويعتمد على القيود + شجرة الحسابات بدون إدخال يدوي مباشر من المستخدم.",
+    "كشف أخطاء المحاسبة يغطي الأنواع المطلوبة في build_accounting_errors (ميزان/ميزانية/قيود/سطور/أرصدة عكسية/إهلاك زائد).",
+    "server.py ملف أحادي ضخم جداً (أكثر من 5000 سطر) ويحتاج تقسيم وحدات لتقليل مخاطر الانحدار وسهولة المراجعة."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration29_financial_statements_and_auth.py",
+    "/app/test_reports/iteration_29.json"
+  ],
+  "success_rate": {
+    "backend": "92%",
+    "frontend": "100%"
+  },
+  "test_credentials": "تمت قراءة /app/memory/test_credentials.md واستخدام: general-union/admin_union/Admin@123 و social-solidarity/admin_takaful/Admin@123.",
+  "seed_data_creation": "لم يتم إنشاء بيانات دائمة. لم يتم إدخال seed جديد؛ الاختبارات اعتمدت على البيانات الحالية.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "backend pytest: 12 tests (11 passed, 1 failed CORS preflight) في /app/backend/tests/test_iteration29_financial_statements_and_auth.py. UI تم التحقق منه بنجاح للجهتين: كارت القوائم المالية متاح، المسار المباشر/ModuleRoute يعمل، والأقسام الأربعة + أزرار الطباعة/التصدير ظاهرة.",
+  "rca of the issue": "RCA: فشل CORS ليس من كود endpoint نفسه فقط؛ نتيجة OPTIONS على public ingress تُظهر headers عامة (Access-Control-Allow-Origin=*) وتغيب عنها allow-credentials=true، ما يشير لاحتمال override/strip على طبقة edge/proxy قبل وصول رد FastAPI النهائي.\n\nMOCKED: تكامل إرسال الفاتورة الإلكترونية الخارجي لمصلحة الضرائب المصرية ما زال MOCKED (غير متعلق باختبار القوائم المالية الحالي)."
+}
