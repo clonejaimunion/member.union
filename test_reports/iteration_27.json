@@ -1,0 +1,56 @@
+{
+  "summary": "Completed backend and frontend regression for fixed-assets catalog updates and membership import preview flow. Backend scenarios for preview/commit/cancel, legacy import compatibility, disposal_date, and organization isolation passed. Frontend main flow passed, but organization switch on login did not switch to general-union in UI automation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "LoginPage organization selector",
+        "issue": "Clicking general-union organization card does not switch selected organization; selected label remains social-solidarity.",
+        "selector": "[data-testid=\"login-organization-button-general-union\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "general-union login/isolation UI path",
+        "issue": "UI automation could not proceed with union-org flow because organization selection stayed on social-solidarity before submit.",
+        "affected_selectors": [
+          "[data-testid=\"login-organization-button-general-union\"]",
+          "[data-testid=\"login-selected-organization-label\"]"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration27_fixed_assets_membership_preview.py",
+    "/app/test_reports/pytest/pytest_results_iter27_backend.xml"
+  ],
+  "action_items": [
+    "Fix login organization card interaction/state update for general-union selection.",
+    "After fixing selector/state issue, re-run union UI isolation scenario to confirm membership route remains blocked from UI path as expected."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains a large monolith (>5000 lines), increasing regression risk; split fixed-assets and membership import handlers into dedicated modules.",
+    "The new fixed-assets and membership preview endpoints correctly keep Mongo _id excluded in tested responses.",
+    "Electronic invoice tax-authority external submission remains MOCKED and was out of this test scope."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration27_fixed_assets_membership_preview.py",
+    "/app/test_reports/iteration_27.json",
+    "/app/tests/iter27_ui_membership.csv"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "85%"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md. Used social-solidarity admin_takaful/Admin@123 (fallback admin/Admin@123) and attempted general-union admin_union/Admin@123.",
+  "seed_data_creation": "Created temporary TEST_IT27_* fixed-assets/membership data via API tests; cleanup fixture removes DB artifacts for backend suite. UI used preview-cancel flow (no commit) with /app/tests/iter27_ui_membership.csv.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression file is reusable and currently green (5/5). Frontend membership/fixed-assets core flow passed. Union login selector issue blocked full union UI isolation verification; backend isolation APIs still passed.",
+  "rca of the issue": "RCA: Login organization selection appears sticky to social-solidarity despite clicking general-union card. Reproduced in 3 selector attempts (normal click, force click, DOM click) with selected label unchanged. Likely frontend state/event binding mismatch in organization card click handling or persisted localStorage value overriding state update immediately after click."
+}
