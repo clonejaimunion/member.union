@@ -68,6 +68,7 @@ ORGANIZATIONS = {
 }
 
 MODULE_DEFINITIONS = {
+    "membership": "العضوية",
     "fixed_assets": "الأصول الثابتة",
     "chart_accounts": "شجرة الحسابات",
     "trial_balance": "ميزان المراجعة",
@@ -554,6 +555,43 @@ class FixedAssetDepreciationResponse(BaseModel):
     net_book_value_after: float
     created_at: datetime
     updated_at: datetime
+
+
+class MembershipBase(BaseModel):
+    governorate: str = Field(..., min_length=2, max_length=80)
+    union_committee: str = Field(..., min_length=2, max_length=120)
+    membership_number: str = Field(..., min_length=1, max_length=40)
+    name: str = Field(..., min_length=2, max_length=160)
+    national_id: str = Field(..., min_length=14, max_length=14)
+    birth_date: date
+    address: str = Field(..., min_length=2, max_length=240)
+    death_beneficiary: str = Field(..., min_length=2, max_length=160)
+
+
+class MembershipCreate(MembershipBase):
+    pass
+
+
+class MembershipResponse(MembershipBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    retirement_age: int
+    retirement_date: date
+    retirement_year: int
+    retirement_month: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class MembershipCurrentSizeResponse(BaseModel):
+    organization_id: str
+    as_of_year: int
+    as_of_month: int
+    total_members: int
+    retired_members: int
+    current_membership_size: int
 
 
 class JournalEntryCreate(BaseModel):
@@ -1109,6 +1147,8 @@ def default_modules_for_organization(organization_id: str) -> Dict[str, bool]:
     modules = {key: True for key in MODULE_DEFINITIONS}
     if organization_id == "social-solidarity":
         modules["electronic_invoice"] = False
+    if organization_id == "general-union":
+        modules["membership"] = False
     return modules
 
 
@@ -1293,6 +1333,42 @@ def fixed_asset_monthly_depreciation(purchase_cost: float, annual_rate: float) -
     return round(float(purchase_cost or 0) * float(annual_rate or 0) / 100 / 12, 2)
 
 
+def retirement_age_for_birth_date(birth_date: date) -> int:
+    if birth_date >= date(1975, 7, 1):
+        return 65
+    if birth_date >= date(1974, 7, 1):
+        return 64
+    if birth_date >= date(1973, 7, 1):
+        return 63
+    if birth_date >= date(1972, 7, 1):
+        return 62
+    if birth_date >= date(1971, 7, 1):
+        return 61
+    return 60
+
+
+def add_years_safe(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:
+        return value.replace(year=value.year + years, day=28)
+
+
+def membership_retirement_fields(birth_date: date) -> dict:
+    retirement_age = retirement_age_for_birth_date(birth_date)
+    retirement_date = add_years_safe(birth_date, retirement_age)
+    return {"retirement_age": retirement_age, "retirement_date": serialize_date(retirement_date), "retirement_year": retirement_date.year, "retirement_month": retirement_date.month}
+
+
+def normalize_member_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip())
+
+
+def require_social_solidarity_membership(current_user: dict):
+    if (current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID) != "social-solidarity":
+        raise HTTPException(status_code=404, detail="صفحة العضوية متاحة لمشروع التكافل الاجتماعي فقط")
+
+
 async def depreciation_total_for_asset(asset_id: str) -> float:
     documents = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "amount": 1}).to_list(1000)
     return round(sum(float(item.get("amount") or 0) for item in documents), 2)
@@ -1320,6 +1396,17 @@ def hydrate_fixed_asset_depreciation(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
     if isinstance(clean.get("depreciation_date"), str):
         clean["depreciation_date"] = date.fromisoformat(clean["depreciation_date"])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+def hydrate_membership(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["birth_date", "retirement_date"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = date.fromisoformat(clean[field_name])
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -2003,6 +2090,35 @@ async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id:
     }
 
 
+async def membership_document_from_payload(payload: MembershipCreate, membership_id: Optional[str] = None) -> dict:
+    require_social_solidarity_membership({"organization_id": organization_id_or_default()})
+    organization_id = organization_id_or_default()
+    membership_number = normalize_digit_text(payload.membership_number)
+    national_id = normalize_digit_text(payload.national_id)
+    if not membership_number:
+        raise HTTPException(status_code=400, detail="رقم العضوية مطلوب")
+    if not national_id.isdigit() or len(national_id) != 14:
+        raise HTTPException(status_code=400, detail="الرقم القومي يجب أن يكون 14 رقم")
+    exclusion = {"id": {"$ne": membership_id}} if membership_id else {}
+    if await db.memberships.find_one(with_organization({"membership_number": membership_number, **exclusion}, organization_id), {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="رقم العضوية موجود بالفعل")
+    if await db.memberships.find_one(with_organization({"national_id": national_id, **exclusion}, organization_id), {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="الرقم القومي موجود بالفعل")
+    retirement = membership_retirement_fields(payload.birth_date)
+    return {
+        "organization_id": organization_id,
+        "governorate": normalize_member_text(payload.governorate),
+        "union_committee": normalize_member_text(payload.union_committee),
+        "membership_number": membership_number,
+        "name": normalize_member_text(payload.name),
+        "national_id": national_id,
+        "birth_date": serialize_date(payload.birth_date),
+        "address": normalize_member_text(payload.address),
+        "death_beneficiary": normalize_member_text(payload.death_beneficiary),
+        **retirement,
+    }
+
+
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
     total_outstanding = round(sum(item.amount for item in payload.outstanding_checks), 2)
     total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
@@ -2475,7 +2591,7 @@ async def ensure_organization_seed_data():
         modules = normalize_modules(organization["id"], existing.get("modules") if existing else None)
         await db.organizations.update_one({"id": organization["id"]}, {"$set": {"modules": modules}})
         await db.users.update_many({"organization_id": organization["id"]}, {"$set": {"organization_modules": modules}})
-    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "memberships", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
     for organization_id in ORGANIZATIONS:
@@ -2497,6 +2613,9 @@ async def startup_tasks():
     await db.expenses.create_index("transfer_number")
     await db.fixed_assets.create_index([("organization_id", 1), ("category_code", 1), ("asset_name", 1)])
     await db.fixed_asset_depreciations.create_index([("organization_id", 1), ("asset_id", 1), ("year", 1), ("month", 1)], unique=True)
+    await db.memberships.create_index([("organization_id", 1), ("membership_number", 1)], unique=True)
+    await db.memberships.create_index([("organization_id", 1), ("national_id", 1)], unique=True)
+    await db.memberships.create_index([("organization_id", 1), ("retirement_year", 1), ("retirement_month", 1)])
     await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
@@ -3676,6 +3795,73 @@ async def list_fixed_asset_depreciations(
     return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in documents]
 
 
+@api_router.post("/memberships", response_model=MembershipResponse)
+async def create_membership(payload: MembershipCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = await membership_document_from_payload(payload)
+    document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
+    await db.memberships.insert_one(document.copy())
+    return MembershipResponse(**hydrate_membership(document))
+
+
+@api_router.get("/memberships", response_model=List[MembershipResponse])
+async def list_memberships(
+    governorate: Optional[str] = Query(default=None),
+    union_committee: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"])),
+):
+    require_social_solidarity_membership(_)
+    query = with_organization({})
+    if governorate:
+        query["governorate"] = governorate.strip()
+    if union_committee:
+        query["union_committee"] = union_committee.strip()
+    documents = await db.memberships.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    return [MembershipResponse(**hydrate_membership(document)) for document in documents]
+
+
+@api_router.get("/memberships/search", response_model=List[MembershipResponse])
+async def search_memberships(name: str = Query(..., min_length=1), _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"]))):
+    require_social_solidarity_membership(_)
+    cleaned = normalize_member_text(name)
+    documents = await db.memberships.find(with_organization({"name": {"$regex": re.escape(cleaned), "$options": "i"}}), {"_id": 0}).sort("name", 1).to_list(50)
+    return [MembershipResponse(**hydrate_membership(document)) for document in documents]
+
+
+@api_router.get("/memberships/retirement", response_model=List[MembershipResponse])
+async def filter_retirement_memberships(
+    year: int = Query(..., ge=1900, le=2200),
+    month: int = Query(..., ge=1, le=12),
+    governorate: Optional[str] = Query(default=None),
+    union_committee: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"])),
+):
+    require_social_solidarity_membership(_)
+    query = with_organization({"retirement_year": year, "retirement_month": month})
+    if governorate:
+        query["governorate"] = governorate.strip()
+    if union_committee:
+        query["union_committee"] = union_committee.strip()
+    documents = await db.memberships.find(query, {"_id": 0}).sort("governorate", 1).sort("union_committee", 1).sort("name", 1).to_list(5000)
+    return [MembershipResponse(**hydrate_membership(document)) for document in documents]
+
+
+@api_router.get("/memberships/current-size", response_model=MembershipCurrentSizeResponse)
+async def get_membership_current_size(
+    as_of_year: Optional[int] = Query(default=None, ge=1900, le=2200),
+    as_of_month: Optional[int] = Query(default=None, ge=1, le=12),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"])),
+):
+    require_social_solidarity_membership(_)
+    today_value = date.today()
+    year = as_of_year or today_value.year
+    month = as_of_month or today_value.month
+    total = await db.memberships.count_documents(with_organization({}))
+    retired = await db.memberships.count_documents(with_organization({"$or": [{"retirement_year": {"$lt": year}}, {"retirement_year": year, "retirement_month": {"$lte": month}}]}))
+    return MembershipCurrentSizeResponse(organization_id=organization_id_or_default(), as_of_year=year, as_of_month=month, total_members=total, retired_members=retired, current_membership_size=max(total - retired, 0))
+
+
 @api_router.get("/journal-entries", response_model=List[JournalEntryResponse])
 async def list_journal_entries(
     from_date: Optional[date] = Query(default=None),
@@ -4122,7 +4308,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "memberships", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
@@ -4234,6 +4420,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
         ("/api/admin/organization/modules", "إعدادات الخواص"),
         ("/api/admin/app-settings", "الإعدادات العامة"),
         ("/api/admin/banks", "إدارة البنوك"),
+        ("/api/memberships", "العضوية"),
         ("/api/fixed-assets", "الأصول الثابتة"),
         ("/api/banking-expenses", "المصروفات البنكية"),
         ("/api/electronic-invoice", "الفاتورة الإلكترونية"),
@@ -4250,7 +4437,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
     actor = actor_name or "مستخدم غير معروف"
     details = []
     if isinstance(body, dict):
-        for key in ["username", "full_name", "system_name", "organization_name", "bank_id", "category_code", "asset_name", "year", "month", "report_name", "status", "action"]:
+        for key in ["username", "full_name", "system_name", "organization_name", "bank_id", "governorate", "union_committee", "membership_number", "category_code", "asset_name", "year", "month", "report_name", "status", "action"]:
             value = body.get(key)
             if value not in (None, ""):
                 details.append(f"{key}: {value}")

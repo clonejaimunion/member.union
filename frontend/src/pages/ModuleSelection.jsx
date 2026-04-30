@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { isModuleEnabled } from "@/lib/modules";
 
-export default function ModuleSelection() {
+export default function ModuleSelection({ accountingOnly = false }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { settings } = useAppSettings();
@@ -24,8 +24,27 @@ export default function ModuleSelection() {
   const canUseLedger = isModuleEnabled(user, "ledger") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
   const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseMembership = isModuleEnabled(user, "membership") && user?.organization_id === "social-solidarity" && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_users);
+  const showSocialHub = user?.organization_id === "social-solidarity" && !accountingOnly;
 
-  const modules = [
+  const hubModules = [
+    {
+      title: "الحسابات",
+      description: "كل ما يخص الحسابات داخل قسم مستقل.",
+      path: "/accounting",
+      icon: BookOpenText,
+      testId: "module-accounting-hub-card",
+    },
+    canUseMembership && {
+      title: "العضوية",
+      description: "تسجيل وبحث وتصفية عضوية مشروع التكافل الاجتماعي.",
+      path: "/membership",
+      icon: UsersRound,
+      testId: "module-membership-card",
+    },
+  ].filter(Boolean);
+
+  const accountingModules = [
     canUseFixedAssets && {
       title: "الأصول الثابتة",
       description: "تسجيل الأصول، حساب الإهلاك تلقائياً، وربطه بالقيود اليومية.",
@@ -112,6 +131,8 @@ export default function ModuleSelection() {
     },
   ].filter(Boolean);
 
+  const modules = showSocialHub ? hubModules : accountingModules;
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="module-selection-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="module-selection-header">
@@ -119,7 +140,7 @@ export default function ModuleSelection() {
           <div className="flex items-center gap-3" data-testid="module-selection-brand">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
             <div>
-              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">الصفحة الرئيسية</p>
+              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">{accountingOnly ? "الحسابات" : "الصفحة الرئيسية"}</p>
               <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{organizationName}</h1>
             </div>
           </div>
@@ -138,7 +159,7 @@ export default function ModuleSelection() {
 
       <section className="mx-auto flex min-h-[calc(100vh-88px)] max-w-7xl flex-col justify-center gap-10 px-4 py-10 sm:px-6 lg:px-8" data-testid="module-selection-content">
         <div className="mx-auto max-w-4xl space-y-5 text-center" data-testid="module-selection-intro">
-          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">{settings.system_name}</h2>
+          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">{accountingOnly ? "الحسابات" : settings.system_name}</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-testid="module-cards-grid">
