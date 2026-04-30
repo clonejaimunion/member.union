@@ -1,0 +1,52 @@
+{
+  "summary": "اختبار شامل لخصائص السوبر أدمن (backend + frontend) تم بنجاح لمعظم المتطلبات: تسجيل الدخول admin كسوبر أدمن على الجهتين، إدارة المستخدمين عبر الجهتين، إنشاء/تعطيل/تفعيل/حذف حسابات admin/user، ومنع تعديل/حذف حساب super_admin. واجهة الأدمن عرضت حقول نوع الحساب والجهة للسوبر أدمن فقط، وأخفتها عن admin_union، مع إخفاء حساب admin من القوائم. المتبقي: فشل CORS credentialed preflight على الـ public endpoint (طبقة edge).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "الـ public endpoint يعيد Access-Control-Allow-Origin=* بدون Access-Control-Allow-Credentials=true، ما يكسر credentialed auth preflight حسب playbook.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "استجابة Set-Cookie تحتوي أيضاً على __cf_bm من Cloudflare (خارجي/edge) بجانب access_token HttpOnly."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration32_super_admin_controls.py",
+    "/app/test_reports/pytest/pytest_results_iter32_backend.xml",
+    "/app/test_reports/pytest/pytest_results_iter32_auth_playbook.xml"
+  ],
+  "action_items": [
+    "إصلاح CORS على طبقة النشر العامة (ingress/edge) لإرجاع allow-credentials=true وorigin صريح بدلاً من * في preflight.",
+    "بعد إصلاح CORS، إعادة تشغيل اختبارات playbook auth للتأكد من ثبات تسجيل الدخول من المتصفح مع credentials."
+  ],
+  "critical_code_review_comments": [
+    "server.py ما زال كبيراً جداً (~5693 سطر) ويحتاج modularization لتقليل مخاطر الانحدار.",
+    "تم التحقق كودياً من bcrypt hash عبر bcrypt.gensalt (صيغة $2b$ متوقعة)، وتم التحقق كودياً من seed_admin update عند تغيير ADMIN_INITIAL_PASSWORD داخل ensure_default_admin؛ لكن لم يتم اختبار تغيير env Runtime في هذه الجولة."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration32_super_admin_controls.py",
+    "/app/test_reports/iter32_cors_options_headers.txt",
+    "/app/test_reports/iter32_login_headers.txt",
+    "/app/test_reports/iteration_32.json"
+  ],
+  "success_rate": {
+    "backend": "83%",
+    "frontend": "100%"
+  },
+  "test_credentials": "تمت قراءة /app/memory/test_credentials.md واستخدام: admin/Admin@123 (general-union + social-solidarity)، admin_union/Admin@123، admin_takaful/Admin@123.",
+  "seed_data_creation": "تم إنشاء مستخدمين TEST_ مؤقتين أثناء الاختبار وحذفهم داخل نفس الاختبارات، بدون بيانات دائمة.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "اختبار super_admin feature pass على API + UI. نقاط الفشل الوحيدة من playbook auth: CORS preflight على public ingress + وجود __cf_bm edge cookie. ملفات الأدلة: iter32_cors_options_headers.txt وiter32_login_headers.txt. lockout test نُفذ على admin_takaful (60 ثانية) لكنه مؤقت.",
+  "rca of the issue": "RCA: الكود الخلفي يحتوي CORSMiddleware allow_credentials=True مع origins صريحة، لكن الاستجابة الفعلية من الـ public endpoint ما زالت Access-Control-Allow-Origin=* وبدون allow-credentials في OPTIONS/POST، ما يشير إلى override/normalization في طبقة edge/proxy قبل وصولها للمتصفح (ليس منطق endpoint نفسه).\n\nMOCKED: تكامل إرسال الفاتورة الإلكترونية الخارجي لمصلحة الضرائب المصرية ما زال MOCKED (غير متعلق بسيناريو السوبر أدمن الحالي)."
+}

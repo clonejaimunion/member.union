@@ -60,7 +60,7 @@ export default function LoginPage() {
       }
       loginWithToken(response.data.token, response.data.user);
       toast.success(response.data.message);
-      if (response.data.user?.role === "admin" && response.data.requires_2fa_setup) {
+      if (["admin", "super_admin"].includes(response.data.user?.role) && response.data.requires_2fa_setup) {
         navigate("/secure-admin-control-panel");
       } else {
         navigate("/");

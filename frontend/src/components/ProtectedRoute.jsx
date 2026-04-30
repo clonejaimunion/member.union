@@ -13,9 +13,10 @@ export const ProtectedRoute = ({ children, adminOnly = false, permission = null,
   }
 
   if (!user) return <Navigate to="/login" replace />;
-  if (adminOnly && user.role !== "admin") return <Navigate to="/" replace />;
-  if (permission && user.role !== "admin" && !user.permissions?.[permission]) return <Navigate to="/" replace />;
-  if (anyPermissions.length > 0 && user.role !== "admin" && !anyPermissions.some((item) => user.permissions?.[item])) return <Navigate to="/" replace />;
+  const privilegedAdmin = user.role === "admin" || user.role === "super_admin";
+  if (adminOnly && !privilegedAdmin) return <Navigate to="/" replace />;
+  if (permission && !privilegedAdmin && !user.permissions?.[permission]) return <Navigate to="/" replace />;
+  if (anyPermissions.length > 0 && !privilegedAdmin && !anyPermissions.some((item) => user.permissions?.[item])) return <Navigate to="/" replace />;
 
   return children;
 };

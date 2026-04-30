@@ -38,6 +38,8 @@ const defaultUserForm = {
   username: "",
   full_name: "",
   password: "",
+  role: "user",
+  organization_id: "",
   permissions: { enter_deposits: true, view_reports: true, edit_deposits: false, manage_reconciliations: true, manage_revenues: true, manage_expenses: true, manage_users: false, add_revenue: true, approve_revenue: false, add_expense: true, approve_reports: false, lock_periods: false, edit_revenue: false, delete_revenue: false, edit_expense: false, delete_expense: false, unlock_periods: false, manage_einvoice: false, manage_backups: false },
   is_active: true,
 };
@@ -67,6 +69,7 @@ export default function AdminPage() {
   const { user, logout, refreshMe } = useAuth();
   const { refreshSettings } = useAppSettings();
   const [users, setUsers] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
   const [newUser, setNewUser] = useState(defaultUserForm);
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "" });
   const [adminFullName, setAdminFullName] = useState(user?.full_name || "");
@@ -100,6 +103,7 @@ export default function AdminPage() {
   const [activeAdminSection, setActiveAdminSection] = useState("add-user");
   const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
   const effectiveModuleSettings = Object.keys(moduleSettings).length ? moduleSettings : (user?.organization_modules || {});
+  const isSuperAdmin = user?.role === "super_admin";
   const visiblePermissionEntries = Object.entries(permissionLabels).filter(([key]) => key !== "manage_einvoice" || effectiveModuleSettings.electronic_invoice !== false);
   const visiblePermissionKeys = new Set(visiblePermissionEntries.map(([key]) => key));
 
@@ -169,6 +173,16 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadOrganizations = useCallback(async () => {
+    try {
+      const response = await api.get("/organizations/public");
+      setOrganizations(response.data);
+      setNewUser((current) => ({ ...current, organization_id: current.organization_id || response.data[0]?.id || user?.organization_id || "" }));
+    } catch (error) {
+      toast.error("تعذر تحميل الجهات");
+    }
+  }, [user?.organization_id]);
+
   useEffect(() => {
     loadUsers();
     loadBanks();
@@ -176,7 +190,8 @@ export default function AdminPage() {
     loadAppSettings();
     loadModuleSettings();
     loadFixedAssetRates();
-  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates]);
+    loadOrganizations();
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations]);
 
   useEffect(() => {
     setAdminFullName(user?.full_name || "");
@@ -194,7 +209,7 @@ export default function AdminPage() {
     try {
       await api.post("/admin/users", newUser);
       toast.success("تم إنشاء المستخدم");
-      setNewUser(defaultUserForm);
+      setNewUser((current) => ({ ...defaultUserForm, organization_id: current.organization_id || user?.organization_id || "" }));
       loadUsers();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر إنشاء المستخدم");
@@ -511,6 +526,14 @@ export default function AdminPage() {
                 <Label htmlFor="new_password" data-testid="new-user-password-label">كلمة المرور</Label>
                 <Input id="new_password" type="password" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-user-password-input" />
               </div>
+              {isSuperAdmin && <div className="space-y-2" data-testid="new-user-role-wrapper">
+                <Label data-testid="new-user-role-label">نوع الحساب</Label>
+                <select value={newUser.role} onChange={(event) => setNewUser((current) => ({ ...current, role: event.target.value }))} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="new-user-role-select"><option value="user" label="مستخدم" /><option value="admin" label="أدمن" /></select>
+              </div>}
+              {isSuperAdmin && <div className="space-y-2" data-testid="new-user-organization-wrapper">
+                <Label data-testid="new-user-organization-label">الجهة</Label>
+                <select value={newUser.organization_id} onChange={(event) => setNewUser((current) => ({ ...current, organization_id: event.target.value }))} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="new-user-organization-select">{organizations.map((organization) => <option key={organization.id} value={organization.id} label={organization.name} />)}</select>
+              </div>}
               <div className="md:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="new-user-permissions-grid">
                 {visiblePermissionEntries.map(([key, label]) => (
                   <button key={key} type="button" onClick={() => toggleNewPermission(key)} className={`flex items-center justify-between rounded-lg border p-4 text-sm font-extrabold transition-colors ${newUser.permissions[key] ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-500"}`} data-testid={`new-user-permission-${key}-toggle`}>
@@ -602,6 +625,7 @@ export default function AdminPage() {
                       <p className="text-lg font-extrabold" data-testid={`user-row-${item.id}-username`}>{item.username}</p>
                       <p className="text-sm font-extrabold text-emerald-700" data-testid={`user-row-${item.id}-full-name`}>{item.full_name}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`user-row-${item.id}-role`}>{item.role === "admin" ? "أدمن" : "مستخدم إدخال"}</p>
+                      {isSuperAdmin && <p className="text-xs font-bold text-slate-500" data-testid={`user-row-${item.id}-organization`}>{item.organization_name}</p>}
                     </div>
                     <div className="flex flex-wrap gap-2" data-testid={`user-row-${item.id}-badges`}>
                       <Badge className={item.is_active ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-50" : "bg-red-50 text-red-700 hover:bg-red-50"} data-testid={`user-row-${item.id}-status`}>{item.is_active ? "نشط" : "موقوف"}</Badge>

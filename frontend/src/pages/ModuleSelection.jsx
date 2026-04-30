@@ -12,21 +12,22 @@ export default function ModuleSelection({ accountingOnly = false }) {
   const { user, logout } = useAuth();
   const { settings } = useAppSettings();
   const organizationName = user?.organization_name || settings.system_name;
-  const canUseDeposits = isModuleEnabled(user, "deposits") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports);
-  const canUseChartAccounts = isModuleEnabled(user, "chart_accounts") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseTrialBalance = isModuleEnabled(user, "trial_balance") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseFinancialStatements = isModuleEnabled(user, "financial_statements") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseJournalEntries = isModuleEnabled(user, "journal_entries") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseReconciliation = isModuleEnabled(user, "reconciliations") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations);
-  const canUseRevenues = isModuleEnabled(user, "revenues") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
-  const canUseExpenses = isModuleEnabled(user, "expenses") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
-  const canUseExpensesAnalysis = isModuleEnabled(user, "expenses_analysis") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
-  const canUseBankingExpenses = isModuleEnabled(user, "banking_expenses") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseLedger = isModuleEnabled(user, "ledger") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
-  const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseCustodyAdvances = isModuleEnabled(user, "custody_advances") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseMembership = isModuleEnabled(user, "membership") && user?.organization_id === "social-solidarity" && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_users);
+  const privilegedAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const canUseDeposits = isModuleEnabled(user, "deposits") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports);
+  const canUseChartAccounts = isModuleEnabled(user, "chart_accounts") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseTrialBalance = isModuleEnabled(user, "trial_balance") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseFinancialStatements = isModuleEnabled(user, "financial_statements") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseJournalEntries = isModuleEnabled(user, "journal_entries") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseReconciliation = isModuleEnabled(user, "reconciliations") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations);
+  const canUseRevenues = isModuleEnabled(user, "revenues") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
+  const canUseExpenses = isModuleEnabled(user, "expenses") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
+  const canUseExpensesAnalysis = isModuleEnabled(user, "expenses_analysis") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses);
+  const canUseBankingExpenses = isModuleEnabled(user, "banking_expenses") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseLedger = isModuleEnabled(user, "ledger") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
+  const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseCustodyAdvances = isModuleEnabled(user, "custody_advances") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseMembership = isModuleEnabled(user, "membership") && user?.organization_id === "social-solidarity" && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_users);
   const showSocialHub = user?.organization_id === "social-solidarity" && !accountingOnly;
 
   const hubModules = [
@@ -162,7 +163,7 @@ export default function ModuleSelection({ accountingOnly = false }) {
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="module-selection-actions">
             <Badge className="border-slate-200 bg-white px-3 py-1 text-slate-700 shadow-sm hover:bg-white" data-testid="module-selection-user-badge">{user?.username}</Badge>
-            {user?.role === "admin" && (
+            {privilegedAdmin && (
               <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="module-selection-admin-button">
                 <Link to="/secure-admin-control-panel"><ShieldCheck className="h-4 w-4" /> لوحة الأدمن</Link>
               </Button>

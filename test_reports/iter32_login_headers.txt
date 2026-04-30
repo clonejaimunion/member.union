@@ -1,0 +1,18 @@
+HTTP/2 200 
+date: Thu, 30 Apr 2026 09:17:33 GMT
+content-type: application/json
+content-length: 1444
+cf-ray: 9f45743d4f31eae0-ORD
+cf-cache-status: DYNAMIC
+access-control-allow-origin: *
+cache-control: no-store, no-cache, must-revalidate
+server: cloudflare
+via: 1.1 google
+access-control-allow-headers: *
+access-control-allow-methods: GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH
+access-control-max-age: 300
+set-cookie: access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6InN1cGVyX2FkbWluIiwib3JnYW5pemF0aW9uX2lkIjoiZ2VuZXJhbC11bmlvbiIsInB1cnBvc2UiOiJhY2Nlc3MiLCJpYXQiOjE3Nzc1NDA2NTMsImV4cCI6MTc3NzU2OTQ1M30.0a-Vbk17WNZywBovAOmz8fZEMUrax2ykVSKLZgMnPV0; HttpOnly; Max-Age=28800; Path=/; SameSite=lax
+set-cookie: __cf_bm=99il9ibMxo3pIgNQFxpsvlreSUjLKiCKNz4D2TAL2dA-1777540653.6498082-1.0.1.1-ferb_430BFK83kmOHQkU2vsdJpWbJHrH9lY84RqpsON2yYPQbsdxhEvCimToOIU_KK8I1ZitIk0XhbDzLmTbMHMVc4FyQQuxfLL8wedE9vMotSGSaa1vTyLKMyYazEcc; HttpOnly; Secure; Path=/; Domain=preview.emergentagent.com; Expires=Thu, 30 Apr 2026 09:47:33 GMT
+x-robots-tag: noindex, nofollow
+
+{"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6InN1cGVyX2FkbWluIiwib3JnYW5pemF0aW9uX2lkIjoiZ2VuZXJhbC11bmlvbiIsInB1cnBvc2UiOiJhY2Nlc3MiLCJpYXQiOjE3Nzc1NDA2NTMsImV4cCI6MTc3NzU2OTQ1M30.0a-Vbk17WNZywBovAOmz8fZEMUrax2ykVSKLZgMnPV0","user":{"id":"bcb9af2c-3f7f-4d46-a20d-b332d0a2f519","username":"admin","full_name":"يوسف عبد الغني - مدير النظام","role":"super_admin","organization_id":"general-union","organization_name":"النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الاراضي","organization_modules":{"membership":false,"fixed_assets":true,"custody_advances":true,"financial_statements":true,"chart_accounts":true,"trial_balance":true,"deposits":true,"journal_entries":true,"reconciliations":true,"revenues":true,"expenses":true,"expenses_analysis":true,"banking_expenses":true,"ledger":true,"electronic_invoice":false},"permissions":{"enter_deposits":true,"view_reports":true,"edit_deposits":true,"manage_users":true,"manage_reconciliations":true,"manage_revenues":true,"manage_expenses":true},"is_active":true,"totp_enabled":false,"must_change_password":false,"created_at":"2026-04-26T09:53:04.675344Z","updated_at":"2026-04-30T09:14:30.247718Z"},"requires_2fa":false,"requires_2fa_setup":true,"temp_token":null,"message":"تم تسجيل الدخول بنجاح"}
