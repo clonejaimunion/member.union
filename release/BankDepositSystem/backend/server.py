@@ -502,6 +502,19 @@ class FixedAssetCategory(BaseModel):
     items: List[str]
 
 
+class FixedAssetCatalogItem(BaseModel):
+    id: str
+    category_code: str
+    name: str
+    is_default: bool = False
+    is_custom: bool = False
+
+
+class FixedAssetCatalogItemCreate(BaseModel):
+    category_code: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=160)
+
+
 class FixedAssetBase(BaseModel):
     category_code: str = Field(..., min_length=1)
     asset_name: str = Field(..., min_length=1, max_length=160)
@@ -529,6 +542,7 @@ class FixedAssetResponse(FixedAssetBase):
     monthly_depreciation: float
     accumulated_depreciation: float
     net_book_value: float
+    disposal_date: Optional[date] = None
     last_depreciation_period: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -599,6 +613,33 @@ class MembershipCurrentSizeResponse(BaseModel):
 class MembershipImportSkippedRow(BaseModel):
     row_number: int
     reason: str
+
+
+class MembershipImportAcceptedRow(BaseModel):
+    row_number: int
+    governorate: str
+    union_committee: str
+    membership_number: str
+    name: str
+    national_id: str
+    birth_date: date
+    address: str
+    death_beneficiary: str
+    retirement_age: int
+    retirement_date: date
+
+
+class MembershipImportPreviewResponse(BaseModel):
+    preview_id: str
+    accepted_count: int
+    skipped_count: int
+    total_rows_detected: int
+    accepted_rows: List[MembershipImportAcceptedRow]
+    skipped_rows: List[MembershipImportSkippedRow]
+
+
+class MembershipImportCommitRequest(BaseModel):
+    preview_id: str
 
 
 class MembershipImportResponse(BaseModel):
@@ -1353,6 +1394,14 @@ def month_end_date(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
 
+def add_months_safe(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
 def months_between_inclusive(start_date: date, end_date: date) -> int:
     if end_date < date(start_date.year, start_date.month, 1):
         return 0
@@ -1361,6 +1410,44 @@ def months_between_inclusive(start_date: date, end_date: date) -> int:
 
 def fixed_asset_monthly_depreciation(purchase_cost: float, annual_rate: float) -> float:
     return round(float(purchase_cost or 0) * float(annual_rate or 0) / 100 / 12, 2)
+
+
+def fixed_asset_disposal_date(purchase_date: date, purchase_cost: float, annual_rate: float) -> Optional[date]:
+    monthly_amount = fixed_asset_monthly_depreciation(purchase_cost, annual_rate)
+    if monthly_amount <= 0:
+        return None
+    months_needed = max(math.ceil(float(purchase_cost or 0) / monthly_amount), 1)
+    final_month_date = add_months_safe(purchase_date, months_needed - 1)
+    return month_end_date(final_month_date.year, final_month_date.month)
+
+
+def fixed_asset_catalog_default_id(category_code: str, name: str) -> str:
+    digest = hashlib.sha1(f"{category_code}:{name}".encode("utf-8")).hexdigest()[:12]
+    return f"default-{category_code}-{digest}"
+
+
+async def list_fixed_asset_catalog_items_for_category(category_code: str, organization_id: Optional[str] = None) -> List[dict]:
+    category = fixed_asset_category(category_code)
+    org_id = organization_id or organization_id_or_default()
+    hidden_documents = await db.fixed_asset_catalog_hidden.find(with_organization({"category_code": category["code"]}, org_id), {"_id": 0, "name": 1}).to_list(1000)
+    hidden_names = {item.get("name") for item in hidden_documents}
+    items = []
+    for name in category["items"]:
+        if name in hidden_names:
+            continue
+        items.append({"id": fixed_asset_catalog_default_id(category["code"], name), "category_code": category["code"], "name": name, "is_default": True, "is_custom": False})
+    custom_documents = await db.fixed_asset_catalog_items.find(with_organization({"category_code": category["code"]}, org_id), {"_id": 0}).sort("name", 1).to_list(1000)
+    for document in custom_documents:
+        items.append({"id": document["id"], "category_code": category["code"], "name": document["name"], "is_default": False, "is_custom": True})
+    return items
+
+
+async def list_fixed_asset_categories_with_catalog(organization_id: Optional[str] = None) -> List[dict]:
+    result = []
+    for category in FIXED_ASSET_CATEGORIES:
+        catalog_items = await list_fixed_asset_catalog_items_for_category(category["code"], organization_id)
+        result.append({**category, "items": [item["name"] for item in catalog_items]})
+    return result
 
 
 def retirement_age_for_birth_date(birth_date: date) -> int:
@@ -1645,6 +1732,86 @@ def normalize_import_membership_payload(payload: dict, governorate: str, union_c
     return required_payload
 
 
+async def build_membership_import_preview_document(governorate: str, union_committee: str, filename: str, content: bytes) -> dict:
+    clean_governorate = normalize_member_text(governorate)
+    clean_committee = normalize_member_text(union_committee)
+    if not clean_governorate or not clean_committee:
+        raise HTTPException(status_code=400, detail="اختر المحافظة واسم اللجنة قبل الاستيراد")
+    if not content:
+        raise HTTPException(status_code=400, detail="الملف فارغ")
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الملف كبير جداً. الحد الأقصى 15 ميجا")
+    rows = extract_membership_import_rows(filename or "", content)
+    if not rows:
+        raise HTTPException(status_code=400, detail="لم يتم العثور على صفوف قابلة للاستيراد داخل الملف. إذا كان PDF مصوراً برجاء تحويله إلى Excel/Word أو استخدام PDF نصي واضح")
+    header_index, mapping = build_header_mapping(rows)
+    accepted_rows = []
+    accepted_payloads = []
+    skipped_rows = []
+    total_detected = 0
+    seen_membership_numbers = set()
+    seen_national_ids = set()
+    for index, row in enumerate(rows, start=1):
+        if header_index is not None and index - 1 <= header_index:
+            continue
+        if not any(normalize_member_text(cell) for cell in row):
+            continue
+        total_detected += 1
+        raw_payload = row_to_membership_payload(row, mapping) if mapping else infer_membership_payload(row)
+        normalized_payload = normalize_import_membership_payload(raw_payload, clean_governorate, clean_committee)
+        if not normalized_payload:
+            skipped_rows.append({"row_number": index, "reason": "لم يتم العثور على كل البيانات المطلوبة في الصف"})
+            continue
+        if normalized_payload["membership_number"] in seen_membership_numbers or normalized_payload["national_id"] in seen_national_ids:
+            skipped_rows.append({"row_number": index, "reason": "صف مكرر داخل الملف"})
+            continue
+        seen_membership_numbers.add(normalized_payload["membership_number"])
+        seen_national_ids.add(normalized_payload["national_id"])
+        try:
+            payload = MembershipCreate(**normalized_payload)
+            await membership_document_from_payload(payload)
+        except HTTPException as exc:
+            skipped_rows.append({"row_number": index, "reason": str(exc.detail)})
+            continue
+        except Exception:
+            skipped_rows.append({"row_number": index, "reason": "بيانات الصف غير صالحة"})
+            continue
+        retirement = membership_retirement_fields(payload.birth_date)
+        accepted_rows.append({
+            "row_number": index,
+            **normalized_payload,
+            "birth_date": serialize_date(payload.birth_date),
+            "retirement_age": retirement["retirement_age"],
+            "retirement_date": retirement["retirement_date"],
+        })
+        accepted_payloads.append({"row_number": index, **normalized_payload, "birth_date": serialize_date(payload.birth_date)})
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    return {
+        "id": str(uuid.uuid4()),
+        "organization_id": organization_id_or_default(),
+        "governorate": clean_governorate,
+        "union_committee": clean_committee,
+        "filename": filename,
+        "total_rows_detected": total_detected,
+        "accepted_rows": accepted_rows,
+        "accepted_payloads": accepted_payloads,
+        "skipped_rows": skipped_rows,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+
+
+def membership_import_preview_response(document: dict) -> MembershipImportPreviewResponse:
+    return MembershipImportPreviewResponse(
+        preview_id=document["id"],
+        accepted_count=len(document.get("accepted_rows") or []),
+        skipped_count=len(document.get("skipped_rows") or []),
+        total_rows_detected=int(document.get("total_rows_detected") or 0),
+        accepted_rows=[MembershipImportAcceptedRow(**row) for row in document.get("accepted_rows", [])[:200]],
+        skipped_rows=[MembershipImportSkippedRow(**row) for row in document.get("skipped_rows", [])[:200]],
+    )
+
+
 async def depreciation_total_for_asset(asset_id: str) -> float:
     documents = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "amount": 1}).to_list(1000)
     return round(sum(float(item.get("amount") or 0) for item in documents), 2)
@@ -1661,6 +1828,7 @@ async def enrich_fixed_asset(document: dict) -> dict:
     clean["category_name"] = category["name"]
     clean["annual_depreciation_rate"] = float(category["annual_depreciation_rate"])
     clean["monthly_depreciation"] = fixed_asset_monthly_depreciation(clean.get("purchase_cost"), clean["annual_depreciation_rate"])
+    clean["disposal_date"] = fixed_asset_disposal_date(clean["purchase_date"], clean.get("purchase_cost"), clean["annual_depreciation_rate"])
     clean["accumulated_depreciation"] = await depreciation_total_for_asset(clean["id"])
     clean["net_book_value"] = round(max(float(clean.get("purchase_cost") or 0) - clean["accumulated_depreciation"], 0), 2)
     last_depreciation = await db.fixed_asset_depreciations.find_one(with_organization({"asset_id": clean["id"]}), {"_id": 0}, sort=[("year", -1), ("month", -1)])
@@ -2349,6 +2517,7 @@ async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id:
     if asset_id:
         current = await db.fixed_assets.find_one(with_organization({"id": asset_id}, organization_id), {"_id": 0, "asset_code": 1})
         asset_code = current.get("asset_code") if current else asset_code
+    disposal_value = fixed_asset_disposal_date(payload.purchase_date, payload.purchase_cost, category["annual_depreciation_rate"])
     return {
         "organization_id": organization_id,
         "asset_code": asset_code,
@@ -2357,6 +2526,7 @@ async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id:
         "annual_depreciation_rate": float(category["annual_depreciation_rate"]),
         "asset_name": normalized_name,
         "purchase_date": serialize_date(payload.purchase_date),
+        "disposal_date": serialize_date(disposal_value) if disposal_value else None,
         "purchase_cost": round(float(payload.purchase_cost), 2),
         "bank_id": payload.bank_id,
         "bank_name": bank["name"],
@@ -2867,7 +3037,7 @@ async def ensure_organization_seed_data():
         modules = normalize_modules(organization["id"], existing.get("modules") if existing else None)
         await db.organizations.update_one({"id": organization["id"]}, {"$set": {"modules": modules}})
         await db.users.update_many({"organization_id": organization["id"]}, {"$set": {"organization_modules": modules}})
-    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "memberships", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
     for organization_id in ORGANIZATIONS:
@@ -2889,9 +3059,12 @@ async def startup_tasks():
     await db.expenses.create_index("transfer_number")
     await db.fixed_assets.create_index([("organization_id", 1), ("category_code", 1), ("asset_name", 1)])
     await db.fixed_asset_depreciations.create_index([("organization_id", 1), ("asset_id", 1), ("year", 1), ("month", 1)], unique=True)
+    await db.fixed_asset_catalog_items.create_index([("organization_id", 1), ("category_code", 1), ("name", 1)], unique=True)
+    await db.fixed_asset_catalog_hidden.create_index([("organization_id", 1), ("category_code", 1), ("name", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("membership_number", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("national_id", 1)], unique=True)
     await db.memberships.create_index([("organization_id", 1), ("retirement_year", 1), ("retirement_month", 1)])
+    await db.membership_import_previews.create_index([("organization_id", 1), ("id", 1)], unique=True)
     await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
@@ -3942,7 +4115,47 @@ async def save_banking_manual_charges(
 
 @api_router.get("/fixed-assets/categories", response_model=List[FixedAssetCategory])
 async def list_fixed_asset_categories(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
-    return [FixedAssetCategory(**category) for category in FIXED_ASSET_CATEGORIES]
+    categories = await list_fixed_asset_categories_with_catalog()
+    return [FixedAssetCategory(**category) for category in categories]
+
+
+@api_router.get("/fixed-assets/catalog-items", response_model=List[FixedAssetCatalogItem])
+async def list_fixed_asset_catalog_items(
+    category_code: str = Query(...),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    return [FixedAssetCatalogItem(**item) for item in await list_fixed_asset_catalog_items_for_category(category_code)]
+
+
+@api_router.post("/fixed-assets/catalog-items", response_model=FixedAssetCatalogItem)
+async def create_fixed_asset_catalog_item(payload: FixedAssetCatalogItemCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    category = fixed_asset_category(payload.category_code)
+    name = normalize_member_text(payload.name)
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم الأصل الجديد مطلوب")
+    current_items = await list_fixed_asset_catalog_items_for_category(category["code"])
+    if any(item["name"] == name for item in current_items):
+        raise HTTPException(status_code=400, detail="هذا الأصل موجود بالفعل في القائمة")
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {"id": str(uuid.uuid4()), "organization_id": organization_id_or_default(), "category_code": category["code"], "name": name, "created_at": now_iso, "updated_at": now_iso}
+    await db.fixed_asset_catalog_items.insert_one(document.copy())
+    return FixedAssetCatalogItem(id=document["id"], category_code=category["code"], name=name, is_default=False, is_custom=True)
+
+
+@api_router.delete("/fixed-assets/catalog-items/{item_id}")
+async def delete_fixed_asset_catalog_item(item_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    custom = await db.fixed_asset_catalog_items.find_one(with_organization({"id": item_id}), {"_id": 0})
+    if custom:
+        await db.fixed_asset_catalog_items.delete_one(with_organization({"id": item_id}))
+        return {"message": "تم حذف الأصل من القائمة", "deleted_item_id": item_id}
+    for category in FIXED_ASSET_CATEGORIES:
+        for name in category["items"]:
+            if fixed_asset_catalog_default_id(category["code"], name) == item_id:
+                now_iso = serialize_datetime(datetime.now(timezone.utc))
+                document = {"id": item_id, "organization_id": organization_id_or_default(), "category_code": category["code"], "name": name, "created_at": now_iso, "updated_at": now_iso}
+                await db.fixed_asset_catalog_hidden.update_one(with_organization({"id": item_id}), {"$set": document}, upsert=True)
+                return {"message": "تم إخفاء الأصل من القائمة", "deleted_item_id": item_id}
+    raise HTTPException(status_code=404, detail="الأصل غير موجود في القائمة")
 
 
 @api_router.get("/fixed-assets", response_model=List[FixedAssetResponse])
@@ -4089,48 +4302,17 @@ async def import_memberships(
     current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
 ):
     require_social_solidarity_membership(current_user)
-    clean_governorate = normalize_member_text(governorate)
-    clean_committee = normalize_member_text(union_committee)
-    if not clean_governorate or not clean_committee:
-        raise HTTPException(status_code=400, detail="اختر المحافظة واسم اللجنة قبل الاستيراد")
     content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="الملف فارغ")
-    if len(content) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="حجم الملف كبير جداً. الحد الأقصى 15 ميجا")
-    rows = extract_membership_import_rows(file.filename or "", content)
-    if not rows:
-        raise HTTPException(status_code=400, detail="لم يتم العثور على صفوف قابلة للاستيراد داخل الملف. إذا كان PDF مصوراً برجاء تحويله إلى Excel/Word أو استخدام PDF نصي واضح")
-    header_index, mapping = build_header_mapping(rows)
+    preview = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", content)
     imported_documents = []
-    skipped_rows = []
-    total_detected = 0
-    seen_membership_numbers = set()
-    seen_national_ids = set()
-    for index, row in enumerate(rows, start=1):
-        if header_index is not None and index - 1 <= header_index:
-            continue
-        if not any(normalize_member_text(cell) for cell in row):
-            continue
-        total_detected += 1
-        raw_payload = row_to_membership_payload(row, mapping) if mapping else infer_membership_payload(row)
-        normalized_payload = normalize_import_membership_payload(raw_payload, clean_governorate, clean_committee)
-        if not normalized_payload:
-            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="لم يتم العثور على كل البيانات المطلوبة في الصف"))
-            continue
-        if normalized_payload["membership_number"] in seen_membership_numbers or normalized_payload["national_id"] in seen_national_ids:
-            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="صف مكرر داخل الملف"))
-            continue
-        seen_membership_numbers.add(normalized_payload["membership_number"])
-        seen_national_ids.add(normalized_payload["national_id"])
+    skipped_rows = [MembershipImportSkippedRow(**row) for row in preview.get("skipped_rows", [])]
+    for item in preview.get("accepted_payloads", []):
         try:
-            payload = MembershipCreate(**normalized_payload)
+            payload_data = {key: value for key, value in item.items() if key != "row_number"}
+            payload = MembershipCreate(**payload_data)
             document = await membership_document_from_payload(payload)
         except HTTPException as exc:
-            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason=str(exc.detail)))
-            continue
-        except Exception:
-            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="بيانات الصف غير صالحة"))
+            skipped_rows.append(MembershipImportSkippedRow(row_number=item.get("row_number", 0), reason=str(exc.detail)))
             continue
         now_iso = serialize_datetime(datetime.now(timezone.utc))
         document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
@@ -4139,10 +4321,47 @@ async def import_memberships(
     return MembershipImportResponse(
         imported_count=len(imported_documents),
         skipped_count=len(skipped_rows),
-        total_rows_detected=total_detected,
+        total_rows_detected=preview["total_rows_detected"],
         imported_members=[MembershipResponse(**hydrate_membership(document)) for document in imported_documents],
         skipped_rows=skipped_rows[:100],
     )
+
+
+@api_router.post("/memberships/import/preview", response_model=MembershipImportPreviewResponse)
+async def preview_membership_import(
+    governorate: str = Form(...),
+    union_committee: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
+):
+    require_social_solidarity_membership(current_user)
+    document = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", await file.read())
+    await db.membership_import_previews.insert_one(document.copy())
+    return membership_import_preview_response(document)
+
+
+@api_router.post("/memberships/import/commit", response_model=MembershipImportResponse)
+async def commit_membership_import(payload: MembershipImportCommitRequest, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    preview = await db.membership_import_previews.find_one(with_organization({"id": payload.preview_id}), {"_id": 0})
+    if not preview:
+        raise HTTPException(status_code=404, detail="معاينة الاستيراد غير موجودة أو انتهت")
+    imported_documents = []
+    skipped_rows = [MembershipImportSkippedRow(**row) for row in preview.get("skipped_rows", [])]
+    for item in preview.get("accepted_payloads", []):
+        try:
+            payload_data = {key: value for key, value in item.items() if key != "row_number"}
+            document = await membership_document_from_payload(MembershipCreate(**payload_data))
+            now_iso = serialize_datetime(datetime.now(timezone.utc))
+            document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
+            await db.memberships.insert_one(document.copy())
+            imported_documents.append(document)
+        except HTTPException as exc:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=item.get("row_number", 0), reason=str(exc.detail)))
+        except Exception:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=item.get("row_number", 0), reason="تعذر حفظ الصف أثناء الاعتماد"))
+    await db.membership_import_previews.delete_one(with_organization({"id": payload.preview_id}))
+    return MembershipImportResponse(imported_count=len(imported_documents), skipped_count=len(skipped_rows), total_rows_detected=preview.get("total_rows_detected", 0), imported_members=[MembershipResponse(**hydrate_membership(document)) for document in imported_documents], skipped_rows=skipped_rows[:100])
 
 
 @api_router.get("/memberships", response_model=List[MembershipResponse])
@@ -4685,7 +4904,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "memberships", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])

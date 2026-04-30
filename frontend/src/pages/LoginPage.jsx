@@ -21,11 +21,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     api.get("/organizations/public").then((response) => {
+      if (!isMounted) return;
       setOrganizations(response.data);
-      if (!selectedOrganizationId && response.data[0]?.id) setSelectedOrganizationId(response.data[0].id);
+      setSelectedOrganizationId((current) => current || window.localStorage.getItem("bank_selected_organization") || response.data[0]?.id || "");
     }).catch(() => toast.error("تعذر تحميل الجهات"));
-  }, [selectedOrganizationId]);
+    return () => { isMounted = false; };
+  }, []);
 
   const selectedOrganization = organizations.find((item) => item.id === selectedOrganizationId);
 
