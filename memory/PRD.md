@@ -84,6 +84,7 @@
 - Testing agent iteration_32: صلاحيات السوبر أدمن نجحت API وواجهة، مع ملاحظة CORS العامة المعروفة فقط.
 - إصلاح متابعة: `/api/organizations/public` يعمل 200، وتم إرجاع حساب `admin` بدون 2FA وإصلاح رد بروفايل السوبر أدمن للجهة المختارة.
 - Iteration 33: اختبار localhost/offline ناجح 100%؛ `http://localhost:8001` يعرض واجهة React، و`/api/organizations/public` يعيد الجهتين محلياً، وrelease build لا يحتوي رابط preview ويحتوي `localhost:8001`، ومجلد wheels موجود، و`setup.exe` موجود وغير فارغ.
+- إصلاح متابعة للأوفلاين: تمت إضافة wheel الخاصة بـ `colorama` المطلوبة على Windows بواسطة `qrcode`، وأعيد بناء `setup.exe` بحجم 16,512,032 bytes، واختبار regression المحلي نجح 5/5.
 
 ## ملاحظات معروفة
 - public OPTIONS CORS على نطاق preview يعيد headers من Cloudflare/ingress قبل backend؛ داخلياً `localhost:8001` يعيد origin صريح وcredentials، وتدفق الواجهة يعمل.

@@ -67,6 +67,8 @@ def test_release_backend_wheels_exist_for_offline_install():
 
     wheels = list(wheel_dir.glob("*.whl"))
     assert len(wheels) > 0
+    wheel_names = {wheel.name.lower() for wheel in wheels}
+    assert any(name.startswith("colorama-") for name in wheel_names)
 
 
 def test_setup_exe_exists_and_is_not_empty():
