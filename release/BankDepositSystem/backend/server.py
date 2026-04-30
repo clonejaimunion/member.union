@@ -28,8 +28,6 @@ import xml.etree.ElementTree as ET
 
 import bcrypt
 import jwt
-import pyotp
-import qrcode
 from PIL import Image
 from pypdf import PdfReader
 from cryptography.fernet import Fernet, InvalidToken
@@ -3101,6 +3099,21 @@ async def get_login_user(username: str, organization_id: str) -> Optional[dict]:
     return await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
 
 
+async def disable_two_factor_for_all_users():
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    await db.users.update_many(
+        {},
+        {
+            "$set": {
+                "totp_enabled": False,
+                "totp_secret": None,
+                "totp_pending_secret": None,
+                "updated_at": now_iso,
+            }
+        },
+    )
+
+
 async def get_current_user(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="يجب تسجيل الدخول أولاً")
@@ -3487,9 +3500,9 @@ async def ensure_default_admin():
             "is_super_admin": role == "super_admin",
             "permissions": admin_permissions,
             "is_active": True,
-            "totp_enabled": existing.get("totp_enabled", False) if existing else False,
-            "totp_secret": existing.get("totp_secret") if existing else None,
-            "totp_pending_secret": existing.get("totp_pending_secret") if existing else None,
+            "totp_enabled": False,
+            "totp_secret": None,
+            "totp_pending_secret": None,
             "must_change_password": existing.get("must_change_password", True) if existing else True,
             "updated_at": serialize_datetime(now),
         }
@@ -3501,6 +3514,7 @@ async def ensure_default_admin():
             continue
         document.update({"id": str(uuid.uuid4()), "password_hash": hash_password(ADMIN_INITIAL_PASSWORD), "created_at": serialize_datetime(now)})
         await db.users.insert_one(document)
+    await disable_two_factor_for_all_users()
     await db.login_attempts.delete_many({"identifier": {"$in": [login_attempt_identifier(ADMIN_USERNAME, org_id) for org_id in ORGANIZATIONS]}})
 
 
@@ -3587,18 +3601,6 @@ async def login(payload: LoginRequest, response: Response):
         token_user["organization_name"] = organization["name"]
         token_user["organization_modules"] = normalize_modules(organization_id, organization.get("modules"))
 
-    if user.get("role") in ["admin", "super_admin"] and user.get("totp_enabled"):
-        if not payload.otp_code:
-            return AuthResponse(
-                requires_2fa=True,
-                temp_token=create_access_token(token_user, purpose="2fa", minutes=5),
-                message="أدخل كود Google Authenticator لإكمال الدخول",
-            )
-        totp = pyotp.TOTP(user.get("totp_secret"))
-        if not totp.verify(payload.otp_code, valid_window=1):
-            await record_failed_login(payload.username, organization_id)
-            raise HTTPException(status_code=401, detail="كود المصادقة الثنائية غير صحيح")
-
     token = create_access_token(token_user)
     await clear_failed_login(payload.username, organization_id)
     response.set_cookie(
@@ -3613,7 +3615,7 @@ async def login(payload: LoginRequest, response: Response):
     return AuthResponse(
         token=token,
         user=public_user(token_user),
-        requires_2fa_setup=user.get("role") in ["admin", "super_admin"] and not user.get("totp_enabled", False),
+        requires_2fa_setup=False,
         message="تم تسجيل الدخول بنجاح",
     )
 
@@ -3740,42 +3742,12 @@ async def change_admin_password(payload: ChangePasswordRequest, admin_user: dict
 
 @api_router.post("/admin/2fa/setup", response_model=TwoFactorSetupResponse)
 async def setup_admin_2fa(admin_user: dict = Depends(require_admin)):
-    secret = pyotp.random_base32()
-    otpauth_uri = pyotp.TOTP(secret).provisioning_uri(
-        name=admin_user["username"],
-        issuer_name="Bank Deposit Interest System",
-    )
-    image = qrcode.make(otpauth_uri)
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    qr_data_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
-    await db.users.update_one(
-        {"id": admin_user["id"]},
-        {"$set": {"totp_pending_secret": secret, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
-    )
-    return TwoFactorSetupResponse(otpauth_uri=otpauth_uri, qr_data_url=qr_data_url, manual_secret=secret)
+    raise HTTPException(status_code=410, detail="تم إلغاء المصادقة الثنائية نهائياً من النظام")
 
 
 @api_router.post("/admin/2fa/verify", response_model=UserPublic)
 async def verify_admin_2fa(payload: TwoFactorVerifyRequest, admin_user: dict = Depends(require_admin)):
-    secret = admin_user.get("totp_pending_secret") or admin_user.get("totp_secret")
-    if not secret:
-        raise HTTPException(status_code=400, detail="ابدأ إعداد المصادقة الثنائية أولاً")
-    if not pyotp.TOTP(secret).verify(payload.otp_code, valid_window=1):
-        raise HTTPException(status_code=400, detail="كود التحقق غير صحيح")
-    await db.users.update_one(
-        {"id": admin_user["id"]},
-        {
-            "$set": {
-                "totp_secret": secret,
-                "totp_enabled": True,
-                "totp_pending_secret": None,
-                "updated_at": serialize_datetime(datetime.now(timezone.utc)),
-            }
-        },
-    )
-    updated = await db.users.find_one({"id": admin_user["id"]}, {"_id": 0})
-    return public_user(updated)
+    raise HTTPException(status_code=410, detail="تم إلغاء المصادقة الثنائية نهائياً من النظام")
 
 
 @api_router.get("/banks", response_model=List[Bank])
@@ -5590,7 +5562,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
         ("/api/admin/users", "إدارة المستخدمين"),
         ("/api/admin/profile", "بيانات الأدمن"),
         ("/api/admin/change-password", "كلمة مرور الأدمن"),
-        ("/api/admin/2fa", "Google Authenticator"),
+        ("/api/admin/2fa", "المصادقة الثنائية الملغاة"),
         ("/api/admin/security/periods", "إقفال وفتح الفترات"),
         ("/api/admin/security/report-approvals", "اعتماد التقارير"),
         ("/api/admin/security/backups", "النسخ الاحتياطي"),

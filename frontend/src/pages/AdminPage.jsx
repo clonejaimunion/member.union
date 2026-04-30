@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, QrCode, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,7 +57,7 @@ const adminSections = [
   { id: "fixed-asset-rates", title: "نسب إهلاك الأصول", subtitle: "تعديل نسب التصنيفات الثابتة", icon: SlidersHorizontal },
   { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
   { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
-  { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
+  { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "إدارة كلمة المرور فقط", icon: LockKeyhole },
   { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
   { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
   { id: "security-review", title: "المراجعة الأمنية", subtitle: "ضوابط الاقتراب من الاعتماد", icon: ShieldCheck },
@@ -75,8 +75,6 @@ export default function AdminPage() {
   const [adminFullName, setAdminFullName] = useState(user?.full_name || "");
   const [resetPasswords, setResetPasswords] = useState({});
   const [fullNameEdits, setFullNameEdits] = useState({});
-  const [twoFactor, setTwoFactor] = useState(null);
-  const [otpCode, setOtpCode] = useState("");
   const [bankForm, setBankForm] = useState({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a" });
   const [banks, setBanks] = useState([]);
   const [openingBalances, setOpeningBalances] = useState({});
@@ -268,28 +266,6 @@ export default function AdminPage() {
       loadUsers();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حفظ الاسم بالكامل");
-    }
-  };
-
-  const setup2FA = async () => {
-    try {
-      const response = await api.post("/admin/2fa/setup");
-      setTwoFactor(response.data);
-      toast.success("امسح QR Code من تطبيق Google Authenticator");
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || "تعذر بدء إعداد المصادقة الثنائية");
-    }
-  };
-
-  const verify2FA = async () => {
-    try {
-      await api.post("/admin/2fa/verify", { otp_code: otpCode });
-      toast.success("تم تفعيل المصادقة الثنائية للأدمن");
-      setOtpCode("");
-      setTwoFactor(null);
-      await refreshMe();
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || "كود التحقق غير صحيح");
     }
   };
 
@@ -763,25 +739,6 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 w-full rounded-lg bg-slate-950 text-white" data-testid="admin-change-password-button"><Save className="h-4 w-4" /> حفظ كلمة المرور</Button>
             </form>
-          </section>}
-
-          {activeAdminSection === "admin-password" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-2fa-section">
-            <div className="mb-5 flex items-center gap-3" data-testid="admin-2fa-heading">
-              <QrCode className="h-6 w-6 text-emerald-700" />
-              <h2 className="text-2xl font-extrabold" data-testid="admin-2fa-title">Google Authenticator</h2>
-            </div>
-            <Badge className={user?.totp_enabled ? "mb-4 bg-emerald-50 text-emerald-700 hover:bg-emerald-50" : "mb-4 bg-amber-50 text-amber-700 hover:bg-amber-50"} data-testid="admin-2fa-status">
-              {user?.totp_enabled ? "المصادقة الثنائية مفعلة" : "المصادقة الثنائية غير مفعلة"}
-            </Badge>
-            <Button type="button" onClick={setup2FA} variant="outline" className="h-12 w-full rounded-lg bg-white" data-testid="admin-2fa-setup-button">إظهار QR Code / إعادة الضبط</Button>
-            {twoFactor && (
-              <div className="mt-5 space-y-4" data-testid="admin-2fa-setup-panel">
-                <img src={twoFactor.qr_data_url} alt="QR Code Google Authenticator" className="mx-auto h-48 w-48 rounded-xl border border-slate-200 bg-white p-2" data-testid="admin-2fa-qr-image" />
-                <p className="break-all rounded-lg bg-slate-50 p-3 text-center text-sm font-bold text-slate-600" data-testid="admin-2fa-manual-secret">{twoFactor.manual_secret}</p>
-                <Input value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder="أدخل كود التطبيق" className="h-12 rounded-lg bg-emerald-50 text-center text-lg font-extrabold tracking-widest" data-testid="admin-2fa-code-input" />
-                <Button type="button" onClick={verify2FA} className="h-12 w-full rounded-lg bg-emerald-700 text-white hover:bg-emerald-800" data-testid="admin-2fa-verify-button"><ShieldCheck className="h-4 w-4" /> تفعيل المصادقة الثنائية</Button>
-              </div>
-            )}
           </section>}
         </aside>
       </section>
