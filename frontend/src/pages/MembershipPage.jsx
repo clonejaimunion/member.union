@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Printer, Search, UserRoundPlus, UsersRound, X } from "lucide-react";
+import { ArrowRight, BarChart3, FileUp, Home, LogOut, Printer, Search, UserRoundPlus, UsersRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ export default function MembershipPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [form, setForm] = useState(initialForm);
+  const [importForm, setImportForm] = useState({ governorate: "", union_committee: "", file: null });
+  const [importResult, setImportResult] = useState(null);
   const [members, setMembers] = useState([]);
   const [searchName, setSearchName] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -29,6 +31,8 @@ export default function MembershipPage() {
   const [filters, setFilters] = useState({ governorate: "", union_committee: "", year: String(currentYear), month: String(currentMonth) });
   const [retirementRows, setRetirementRows] = useState([]);
   const [currentSize, setCurrentSize] = useState(null);
+  const [annualYear, setAnnualYear] = useState(String(currentYear));
+  const [annualReport, setAnnualReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const canCreate = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_users;
@@ -55,6 +59,7 @@ export default function MembershipPage() {
   const committees = useMemo(() => [...new Set(members.filter((item) => !filters.governorate || item.governorate === filters.governorate).map((item) => item.union_committee).filter(Boolean))].sort(), [members, filters.governorate]);
 
   const updateForm = (field, value) => setForm((current) => ({ ...current, [field]: field === "national_id" || field === "membership_number" ? value.replace(/[^0-9٠-٩]/g, "") : value }));
+  const updateImportForm = (field, value) => setImportForm((current) => ({ ...current, [field]: value }));
 
   const createMember = async (event) => {
     event.preventDefault();
@@ -66,6 +71,27 @@ export default function MembershipPage() {
       await loadData();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر تسجيل العضوية");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const importMembers = async (event) => {
+    event.preventDefault();
+    if (!importForm.file) return toast.error("اختر ملف PDF أو Word أو Excel");
+    setSaving(true);
+    try {
+      const payload = new FormData();
+      payload.append("governorate", importForm.governorate);
+      payload.append("union_committee", importForm.union_committee);
+      payload.append("file", importForm.file);
+      const response = await api.post("/memberships/import", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      setImportResult(response.data);
+      toast.success(`تم استيراد ${response.data.imported_count} عضوية وتجاهل ${response.data.skipped_count} صف`);
+      setImportForm((current) => ({ ...current, file: null }));
+      await loadData();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر استيراد بيانات العضوية");
     } finally {
       setSaving(false);
     }
@@ -95,6 +121,16 @@ export default function MembershipPage() {
     }
   };
 
+  const loadAnnualReport = async () => {
+    try {
+      const response = await api.get(`/memberships/annual-report?year=${annualYear}`);
+      setAnnualReport(response.data);
+      if (!response.data.rows.length) toast.info("لا توجد بيانات في التقرير السنوي");
+    } catch (error) {
+      toast.error("تعذر تحميل التقرير السنوي");
+    }
+  };
+
   const printSelected = () => window.print();
   const printRetirement = () => window.print();
 
@@ -121,10 +157,24 @@ export default function MembershipPage() {
             <div className="md:col-span-2" data-testid="member-death-beneficiary-wrapper"><Label data-testid="member-death-beneficiary-label">في حالة الوفاة يتم تسليم قيمة مبلغ الإعانة إلى</Label><Input value={form.death_beneficiary} onChange={(event) => updateForm("death_beneficiary", event.target.value)} required className="mt-2 h-11 bg-slate-50 text-right" data-testid="member-death-beneficiary-input" /></div>
             <Button type="submit" disabled={saving} className="h-11 bg-slate-950 text-white md:col-span-2" data-testid="save-membership-button"><UserRoundPlus className="h-4 w-4" /> حفظ العضوية</Button>
           </form>
+          <div className="my-6 h-px bg-slate-200" data-testid="membership-import-divider" />
+          <form onSubmit={importMembers} className="space-y-4" data-testid="membership-import-form">
+            <div className="flex items-center gap-3" data-testid="membership-import-heading"><FileUp className="h-5 w-5 text-emerald-700" /><h3 className="text-xl font-extrabold" data-testid="membership-import-title">استيراد بيانات خارجية</h3></div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="membership-import-location-grid">
+              <div data-testid="membership-import-governorate-wrapper"><Label data-testid="membership-import-governorate-label">المحافظة التي سيتم الاستيراد فيها</Label><Input value={importForm.governorate} onChange={(event) => updateImportForm("governorate", event.target.value)} required className="mt-2 h-11 bg-slate-50 text-right" data-testid="membership-import-governorate-input" /></div>
+              <div data-testid="membership-import-committee-wrapper"><Label data-testid="membership-import-committee-label">اسم اللجنة التي سيتم الاستيراد فيها</Label><Input value={importForm.union_committee} onChange={(event) => updateImportForm("union_committee", event.target.value)} required className="mt-2 h-11 bg-slate-50 text-right" data-testid="membership-import-committee-input" /></div>
+            </div>
+            <div data-testid="membership-import-file-wrapper"><Label data-testid="membership-import-file-label">ملف PDF / Word / Excel</Label><Input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv" onChange={(event) => updateImportForm("file", event.target.files?.[0] || null)} required className="mt-2 h-11 bg-slate-50" data-testid="membership-import-file-input" /></div>
+            <div className="rounded-lg bg-emerald-50 p-3 text-sm font-extrabold text-emerald-800" data-testid="membership-import-auto-note">سيتم تنزيل البيانات المطلوبة فقط في أماكنها تلقائياً: رقم العضوية، الاسم، الرقم القومي، تاريخ الميلاد، العنوان، ومستلم إعانة الوفاة. أي بيانات إضافية في الملف سيتم تجاهلها.</div>
+            <Button type="submit" disabled={saving} variant="outline" className="h-11 w-full bg-white" data-testid="membership-import-button"><FileUp className="h-4 w-4" /> استيراد البيانات</Button>
+            {importResult && <div className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="membership-import-result"><p className="font-extrabold" data-testid="membership-import-result-summary">تم استيراد {importResult.imported_count} عضوية — تم تجاهل {importResult.skipped_count} صف من إجمالي {importResult.total_rows_detected}</p>{importResult.skipped_rows?.length > 0 && <p className="mt-2 text-sm font-bold text-slate-600" data-testid="membership-import-result-skipped">أول سبب للتجاهل: صف {importResult.skipped_rows[0].row_number} — {importResult.skipped_rows[0].reason}</p>}</div>}
+          </form>
         </section>}
 
         <section className="space-y-6" data-testid="membership-tools-column">
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="membership-current-size-section"><h2 className="mb-5 text-2xl font-extrabold" data-testid="membership-current-size-title">حجم العضوية الحالي</h2><div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="membership-current-size-grid"><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="membership-total-card"><p className="text-xs font-bold text-slate-300" data-testid="membership-total-label">إجمالي المسجل</p><p className="text-xl font-extrabold" data-testid="membership-total-value">{currentSize?.total_members || 0}</p></div><div className="rounded-xl bg-amber-50 p-4" data-testid="membership-retired-card"><p className="text-xs font-bold text-amber-700" data-testid="membership-retired-label">خروج معاش حتى الآن</p><p className="text-xl font-extrabold" data-testid="membership-retired-value">{currentSize?.retired_members || 0}</p></div><div className="rounded-xl bg-emerald-50 p-4" data-testid="membership-current-card"><p className="text-xs font-bold text-emerald-700" data-testid="membership-current-label">حجم العضوية الحالي</p><p className="text-xl font-extrabold" data-testid="membership-current-value">{currentSize?.current_membership_size || 0}</p></div></div></section>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="membership-annual-report-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="membership-annual-report-heading"><div className="flex items-center gap-3" data-testid="membership-annual-report-title-block"><BarChart3 className="h-6 w-6 text-emerald-700" /><h2 className="text-2xl font-extrabold" data-testid="membership-annual-report-title">التقرير السنوي للعضوية</h2></div><Button type="button" onClick={() => window.print()} variant="outline" className="h-10 bg-white print:hidden" data-testid="print-annual-membership-report-button"><Printer className="h-4 w-4" /> طباعة</Button></div><div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto] print:hidden" data-testid="membership-annual-report-controls"><select value={annualYear} onChange={(event) => setAnnualYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="membership-annual-report-year-select">{yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><Button type="button" onClick={loadAnnualReport} className="h-11 bg-slate-950 text-white" data-testid="load-annual-membership-report-button">عرض التقرير</Button></div><div className="mt-5 overflow-x-auto rounded-xl border border-slate-200" data-testid="membership-annual-report-table-wrapper"><Table data-testid="membership-annual-report-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950"><TableHead className="text-right text-white">المحافظة</TableHead><TableHead className="text-right text-white">اللجنة</TableHead><TableHead className="text-right text-white">إجمالي المسجل</TableHead><TableHead className="text-right text-white">الداخلين الجدد</TableHead><TableHead className="text-right text-white">الخارجين معاش</TableHead><TableHead className="text-right text-white">صافي العضوية</TableHead></TableRow></TableHeader><TableBody>{!annualReport && <TableRow data-testid="membership-annual-report-empty-row"><TableCell colSpan={6} className="py-6 text-center font-bold text-slate-500">اختر السنة ثم اضغط عرض التقرير</TableCell></TableRow>}{annualReport?.rows?.map((row) => <TableRow key={`${row.governorate}-${row.union_committee}`} data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}`}><TableCell className="font-extrabold" data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-governorate`}>{row.governorate}</TableCell><TableCell data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-committee`}>{row.union_committee}</TableCell><TableCell data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-total`}>{row.total_registered}</TableCell><TableCell data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-new`}>{row.new_members}</TableCell><TableCell data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-retired`}>{row.retired_members}</TableCell><TableCell className="font-extrabold" data-testid={`membership-annual-report-row-${row.governorate}-${row.union_committee}-current`}>{row.current_membership_size}</TableCell></TableRow>)}{annualReport && <TableRow className="bg-emerald-50 font-extrabold" data-testid="membership-annual-report-total-row"><TableCell data-testid="membership-annual-report-total-governorate">الإجمالي</TableCell><TableCell data-testid="membership-annual-report-total-committee">كل اللجان</TableCell><TableCell data-testid="membership-annual-report-total-registered">{annualReport.totals.total_registered}</TableCell><TableCell data-testid="membership-annual-report-total-new">{annualReport.totals.new_members}</TableCell><TableCell data-testid="membership-annual-report-total-retired">{annualReport.totals.retired_members}</TableCell><TableCell data-testid="membership-annual-report-total-current">{annualReport.totals.current_membership_size}</TableCell></TableRow>}</TableBody></Table></div></section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="membership-search-section"><h2 className="mb-5 text-2xl font-extrabold" data-testid="membership-search-title">بحث بالاسم</h2><div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]" data-testid="membership-search-controls"><Input value={searchName} onChange={(event) => setSearchName(event.target.value)} className="h-11 bg-slate-50 text-right" data-testid="membership-search-name-input" /><Button type="button" onClick={searchMembers} className="h-11 bg-slate-950 text-white" data-testid="membership-search-button"><Search className="h-4 w-4" /> بحث</Button></div><div className="mt-4 overflow-x-auto rounded-xl border border-slate-200" data-testid="membership-search-results-wrapper"><Table data-testid="membership-search-results-table"><TableHeader className="bg-slate-950"><TableRow className="hover:bg-slate-950"><TableHead className="text-right text-white">الاسم</TableHead><TableHead className="text-right text-white">رقم العضوية</TableHead><TableHead className="text-right text-white">المحافظة</TableHead><TableHead className="text-right text-white">إجراء</TableHead></TableRow></TableHeader><TableBody>{searchResults.length === 0 && <TableRow data-testid="membership-search-empty-row"><TableCell colSpan={4} className="py-6 text-center font-bold text-slate-500">لا توجد نتائج بحث</TableCell></TableRow>}{searchResults.map((member) => <TableRow key={member.id} data-testid={`membership-search-row-${member.id}`}><TableCell className="font-extrabold" data-testid={`membership-search-row-${member.id}-name`}>{member.name}</TableCell><TableCell data-testid={`membership-search-row-${member.id}-number`}>{member.membership_number}</TableCell><TableCell data-testid={`membership-search-row-${member.id}-governorate`}>{member.governorate}</TableCell><TableCell><Button type="button" onClick={() => setSelectedMember(member)} variant="outline" className="h-9 bg-white" data-testid={`membership-search-row-${member.id}-view-button`}>عرض</Button></TableCell></TableRow>)}</TableBody></Table></div></section>
 

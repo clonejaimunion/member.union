@@ -1,0 +1,59 @@
+{
+  "summary": "Completed backend + frontend validation for membership external import and annual report enhancements using public URL. Core XLSX/DOCX import, annual report, search visibility, and organization isolation passed. Two issues remain: auth preflight CORS mismatch and unclear PDF import behavior when text extraction yields no rows.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Public preflight still returns access-control-allow-origin='*' instead of explicit origin, despite credentialed auth flow expectations.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/memberships/import",
+        "issue": "For some text-PDF payloads where parser extracts zero rows, API responds 200 with imported_count=0 and skipped_count=0 (no explicit rejection reason), which conflicts with clear-rejection expectation."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Membership create form",
+        "issues": [
+          "Birth date still uses browser native date input picker instead of app-consistent calendar component."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration26_membership_import_and_report.py",
+    "/app/test_reports/pytest/pytest_results_iter26_backend.xml"
+  ],
+  "action_items": [
+    "Fix edge/ingress CORS for auth preflight to return explicit allowed origin with Access-Control-Allow-Credentials=true.",
+    "In /api/memberships/import, when extracted rows are zero for provided PDF, return clear actionable rejection detail instead of silent 0/0 success.",
+    "Optionally standardize membership birth-date input with project-wide calendar component."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is a large monolith (~4900 LOC), increasing regression risk; split membership/import/auth concerns into focused modules.",
+    "Seed-admin logic appears idempotent in code path: existing admin password hash is re-generated when ADMIN_INITIAL_PASSWORD changes (lines around ensure_default_admin).",
+    "bcrypt hashing is actively used via hash_password/verify_password code paths.",
+    "Electronic invoice tax authority flow remains MOCKED/internal from prior scope and was not part of this membership test run."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration26_membership_import_and_report.py",
+    "/app/test_reports/iteration_26.json"
+  ],
+  "success_rate": {
+    "backend": "80%",
+    "frontend": "95%"
+  },
+  "test_credentials": "Read /app/memory/test_credentials.md. Used social-solidarity: admin_takaful/Admin@123 (fallback admin/Admin@123), and general-union: admin_union/Admin@123.",
+  "seed_data_creation": "Created temporary membership rows with TEST_IT26_/IT26_ prefixes (auto-cleanup in pytest teardown where DB env available). UI flow also inserted UI_IT26_MEMBER_* via import and remains because no membership delete endpoint is exposed.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests: 10 total, 8 passed, 2 failed (CORS preflight + PDF clear-rejection behavior). UI automation passed social import/search/report and general-union membership blocking checks end-to-end.",
+  "rca of the issue": "RCA-1 (CORS): Backend has explicit CORS/preflight middleware for credentialed origins, but public OPTIONS still returns wildcard '*', indicating edge/proxy header override before browser receives response. RCA-2 (PDF): Import pipeline depends on text extraction rows. If extraction returns no lines, endpoint currently returns success with zero detected/skipped rows, giving no explicit user-facing reason. Mitigation: treat empty extraction as explicit validation failure or populate skipped_rows with reason."
+}
