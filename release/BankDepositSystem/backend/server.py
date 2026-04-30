@@ -290,6 +290,8 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3)
     full_name: str = Field(..., min_length=3, max_length=120)
     password: str = Field(..., min_length=8)
+    role: Literal["user", "admin"] = "user"
+    organization_id: Optional[str] = None
     permissions: UserPermissions = Field(default_factory=UserPermissions)
     is_active: bool = True
 
@@ -3011,7 +3013,7 @@ def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
 
 def hydrate_user(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key not in {"_id", "password_hash", "totp_secret", "totp_pending_secret"}}
-    clean["full_name"] = clean.get("full_name") or default_admin_full_name(clean.get("username", ""), clean.get("organization_id", DEFAULT_ORGANIZATION_ID)) if clean.get("role") == "admin" else clean.get("full_name") or "مستخدم النظام"
+    clean["full_name"] = clean.get("full_name") or default_admin_full_name(clean.get("username", ""), clean.get("organization_id", DEFAULT_ORGANIZATION_ID)) if clean.get("role") in ["admin", "super_admin"] else clean.get("full_name") or "مستخدم النظام"
     clean["organization_id"] = clean.get("organization_id") or DEFAULT_ORGANIZATION_ID
     clean["organization_name"] = clean.get("organization_name") or ORGANIZATIONS.get(clean["organization_id"], ORGANIZATIONS[DEFAULT_ORGANIZATION_ID])["name"]
     clean["organization_modules"] = normalize_modules(clean["organization_id"], clean.get("organization_modules"))
@@ -3019,6 +3021,19 @@ def hydrate_user(document: dict) -> dict:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     return clean
+
+
+def is_super_admin(user: dict) -> bool:
+    return user.get("role") == "super_admin" or (user.get("username") == ADMIN_USERNAME and user.get("is_super_admin"))
+
+
+async def user_query_for_admin(admin_user: dict, base_query: Optional[dict] = None) -> dict:
+    query = dict(base_query or {})
+    if is_super_admin(admin_user):
+        query["role"] = {"$ne": "super_admin"}
+        return query
+    query.update(with_organization({"role": {"$ne": "super_admin"}}, admin_user.get("organization_id")))
+    return query
 
 
 def hash_password(password: str) -> str:
@@ -3091,13 +3106,20 @@ async def get_current_user(authorization: Optional[str] = Header(default=None, a
     user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
     if not user or not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="المستخدم غير نشط أو غير موجود")
-    user["organization_id"] = user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    if is_super_admin(user):
+        selected_organization_id = payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
+        organization = await get_organization_document(selected_organization_id)
+        user["organization_id"] = selected_organization_id
+        user["organization_name"] = organization["name"]
+        user["organization_modules"] = normalize_modules(selected_organization_id, organization.get("modules"))
+    else:
+        user["organization_id"] = user.get("organization_id") or DEFAULT_ORGANIZATION_ID
     CURRENT_ORGANIZATION_ID.set(user["organization_id"])
     return user
 
 
 async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="هذه الصفحة للأدمن فقط")
     return current_user
 
@@ -3222,7 +3244,7 @@ async def update_admin_app_icon(icon_file: UploadFile = File(...), _: dict = Dep
 
 def require_permission(permission_name: str):
     async def checker(current_user: dict = Depends(get_current_user)) -> dict:
-        if current_user.get("role") == "admin":
+        if current_user.get("role") in ["admin", "super_admin"]:
             return current_user
         permissions = current_user.get("permissions", {})
         if not permissions.get(permission_name, False):
@@ -3258,7 +3280,7 @@ def require_einvoice_permission(permission_names: List[str]):
 
 def require_any_permission(permission_names: List[str]):
     async def checker(current_user: dict = Depends(get_current_user)) -> dict:
-        if current_user.get("role") == "admin":
+        if current_user.get("role") in ["admin", "super_admin"]:
             return current_user
         permissions = current_user.get("permissions", {})
         if not any(permissions.get(permission_name, False) for permission_name in permission_names):
@@ -3437,11 +3459,11 @@ async def ensure_default_admin():
         manage_expenses=True,
     ).model_dump()
     admin_accounts = [
-        (ADMIN_USERNAME, DEFAULT_ORGANIZATION_ID),
-        ("admin_takaful", "social-solidarity"),
-        ("admin_union", "general-union"),
+        (ADMIN_USERNAME, DEFAULT_ORGANIZATION_ID, "super_admin"),
+        ("admin_takaful", "social-solidarity", "admin"),
+        ("admin_union", "general-union", "admin"),
     ]
-    for username, organization_id in admin_accounts:
+    for username, organization_id, role in admin_accounts:
         organization = await get_organization_document(organization_id)
         existing = await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
         document = {
@@ -3450,7 +3472,8 @@ async def ensure_default_admin():
             "organization_id": organization_id,
             "organization_name": organization["name"],
             "organization_modules": normalize_modules(organization_id, organization.get("modules")),
-            "role": "admin",
+            "role": role,
+            "is_super_admin": role == "super_admin",
             "permissions": admin_permissions,
             "is_active": True,
             "totp_enabled": existing.get("totp_enabled", False) if existing else False,
@@ -3537,18 +3560,28 @@ async def login(payload: LoginRequest, response: Response):
     if organization_id not in ORGANIZATIONS:
         raise HTTPException(status_code=400, detail="اختر جهة صحيحة قبل تسجيل الدخول")
     await ensure_login_not_locked(payload.username, organization_id)
-    user = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
+    username = payload.username.strip()
+    user = await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
+    if not user and username == ADMIN_USERNAME:
+        user = await db.users.find_one({"username": ADMIN_USERNAME, "role": "super_admin"}, {"_id": 0})
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
         await record_failed_login(payload.username, organization_id)
         raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
     if not user.get("is_active", False):
         raise HTTPException(status_code=403, detail="هذا المستخدم غير نشط")
 
-    if user.get("role") == "admin" and user.get("totp_enabled"):
+    token_user = user.copy()
+    if is_super_admin(token_user):
+        organization = await get_organization_document(organization_id)
+        token_user["organization_id"] = organization_id
+        token_user["organization_name"] = organization["name"]
+        token_user["organization_modules"] = normalize_modules(organization_id, organization.get("modules"))
+
+    if user.get("role") in ["admin", "super_admin"] and user.get("totp_enabled"):
         if not payload.otp_code:
             return AuthResponse(
                 requires_2fa=True,
-                temp_token=create_access_token(user, purpose="2fa", minutes=5),
+                temp_token=create_access_token(token_user, purpose="2fa", minutes=5),
                 message="أدخل كود Google Authenticator لإكمال الدخول",
             )
         totp = pyotp.TOTP(user.get("totp_secret"))
@@ -3556,7 +3589,7 @@ async def login(payload: LoginRequest, response: Response):
             await record_failed_login(payload.username, organization_id)
             raise HTTPException(status_code=401, detail="كود المصادقة الثنائية غير صحيح")
 
-    token = create_access_token(user)
+    token = create_access_token(token_user)
     await clear_failed_login(payload.username, organization_id)
     response.set_cookie(
         key="access_token",
@@ -3569,8 +3602,8 @@ async def login(payload: LoginRequest, response: Response):
     )
     return AuthResponse(
         token=token,
-        user=public_user(user),
-        requires_2fa_setup=user.get("role") == "admin" and not user.get("totp_enabled", False),
+        user=public_user(token_user),
+        requires_2fa_setup=user.get("role") in ["admin", "super_admin"] and not user.get("totp_enabled", False),
         message="تم تسجيل الدخول بنجاح",
     )
 
@@ -3582,13 +3615,18 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @api_router.get("/admin/users", response_model=List[UserPublic])
 async def list_users(admin_user: dict = Depends(require_admin)):
-    users = await db.users.find(with_organization({}, admin_user.get("organization_id")), {"_id": 0}).sort("created_at", -1).to_list(500)
+    users = await db.users.find(await user_query_for_admin(admin_user), {"_id": 0}).sort("organization_id", 1).sort("created_at", -1).to_list(1000)
     return [public_user(user) for user in users]
 
 
 @api_router.post("/admin/users", response_model=UserPublic)
 async def create_user(payload: UserCreate, admin_user: dict = Depends(require_admin)):
-    organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    organization_id = payload.organization_id if is_super_admin(admin_user) and payload.organization_id else admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    if organization_id not in ORGANIZATIONS:
+        raise HTTPException(status_code=400, detail="الجهة غير صحيحة")
+    role = payload.role if is_super_admin(admin_user) else "user"
+    if role == "admin" and not is_super_admin(admin_user):
+        raise HTTPException(status_code=403, detail="إضافة أدمن متاحة للسوبر أدمن فقط")
     organization = await get_organization_document(organization_id)
     existing = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
     if existing:
@@ -3602,7 +3640,7 @@ async def create_user(payload: UserCreate, admin_user: dict = Depends(require_ad
         "organization_name": organization["name"],
         "organization_modules": normalize_modules(organization_id, organization.get("modules")),
         "password_hash": hash_password(payload.password),
-        "role": "user",
+        "role": role,
         "permissions": payload.permissions.model_dump(),
         "is_active": payload.is_active,
         "totp_enabled": False,
@@ -3618,11 +3656,15 @@ async def create_user(payload: UserCreate, admin_user: dict = Depends(require_ad
 
 @api_router.put("/admin/users/{user_id}", response_model=UserPublic)
 async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depends(require_admin)):
-    user = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
+    query = {"id": user_id} if is_super_admin(admin_user) else with_organization({"id": user_id}, admin_user.get("organization_id"))
+    user = await db.users.find_one(query, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    if is_super_admin(user):
+        raise HTTPException(status_code=403, detail="لا يمكن تعديل حساب السوبر أدمن من هنا")
     if user.get("role") == "admin" and user.get("id") != admin_user.get("id"):
-        raise HTTPException(status_code=403, detail="لا يمكن تعديل أدمن آخر")
+        if not is_super_admin(admin_user):
+            raise HTTPException(status_code=403, detail="لا يمكن تعديل أدمن آخر")
 
     updates = {"updated_at": serialize_datetime(datetime.now(timezone.utc))}
     if payload.full_name is not None:
@@ -3630,13 +3672,13 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
     if payload.password:
         updates["password_hash"] = hash_password(payload.password)
         updates["must_change_password"] = False
-    if payload.permissions is not None and user.get("role") != "admin":
+    if payload.permissions is not None and (user.get("role") != "admin" or is_super_admin(admin_user)):
         updates["permissions"] = payload.permissions.model_dump()
-    if payload.is_active is not None and user.get("role") != "admin":
+    if payload.is_active is not None and (user.get("role") != "admin" or is_super_admin(admin_user)):
         updates["is_active"] = payload.is_active
 
-    await db.users.update_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"$set": updates})
-    updated = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
+    await db.users.update_one(query, {"$set": updates})
+    updated = await db.users.find_one(query, {"_id": 0})
     return public_user(updated)
 
 
@@ -3650,12 +3692,15 @@ async def update_admin_profile(payload: AdminProfileUpdate, admin_user: dict = D
 
 @api_router.delete("/admin/users/{user_id}")
 async def delete_user(user_id: str, admin_user: dict = Depends(require_admin)):
-    user = await db.users.find_one(with_organization({"id": user_id}, admin_user.get("organization_id")), {"_id": 0})
+    query = {"id": user_id} if is_super_admin(admin_user) else with_organization({"id": user_id}, admin_user.get("organization_id"))
+    user = await db.users.find_one(query, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
-    if user.get("role") == "admin" or user.get("id") == admin_user.get("id"):
-        raise HTTPException(status_code=403, detail="لا يمكن حذف حساب الأدمن")
-    result = await db.users.delete_one(with_organization({"id": user_id}, admin_user.get("organization_id")))
+    if is_super_admin(user) or user.get("id") == admin_user.get("id"):
+        raise HTTPException(status_code=403, detail="لا يمكن حذف حساب السوبر أدمن")
+    if user.get("role") == "admin" and not is_super_admin(admin_user):
+        raise HTTPException(status_code=403, detail="حذف الأدمن متاح للسوبر أدمن فقط")
+    result = await db.users.delete_one(query)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     return {"message": "تم حذف المستخدم", "deleted_user_id": user_id}
