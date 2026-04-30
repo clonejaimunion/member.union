@@ -86,6 +86,8 @@
 - Iteration 33: اختبار localhost/offline ناجح 100%؛ `http://localhost:8001` يعرض واجهة React، و`/api/organizations/public` يعيد الجهتين محلياً، وrelease build لا يحتوي رابط preview ويحتوي `localhost:8001`، ومجلد wheels موجود، و`setup.exe` موجود وغير فارغ.
 - إصلاح متابعة للأوفلاين: تمت إضافة wheel الخاصة بـ `colorama` المطلوبة على Windows بواسطة `qrcode`، وأعيد بناء `setup.exe` بحجم 16,512,032 bytes، واختبار regression المحلي نجح 5/5.
 - إصلاح تسجيل دخول السوبر أدمن: أصبح اسم المستخدم `admin` يبحث عن حساب `super_admin` أولاً على الجهتين قبل أي حساب قديم بنفس الاسم داخل جهة محددة، مع مسح محاولات الدخول الفاشلة الخاصة به عند بدء التشغيل، وتم إنشاء `setup.exe` جديد بحجم 16,512,122 bytes.
+- أداة استعادة 2FA محلية: تمت إضافة `reset_super_admin_2fa.bat` و`backend/reset_super_admin_2fa.py` لتعطيل Google Authenticator لحساب السوبر أدمن فقط عند فقدان أو خطأ الكود، بدون حذف أي بيانات محاسبية، مع اختصار في Start Menu وإصدار `setup.exe` جديد بحجم 16,514,270 bytes.
+- اختبار Iteration 35: أداة استعادة 2FA نجحت 2/2؛ تم تعطيل 2FA مؤقتاً، وتسجيل الدخول بـ `admin/Admin@123` نجح بدون OTP، ثم تمت استعادة حالة الاختبار.
 
 ## ملاحظات معروفة
 - public OPTIONS CORS على نطاق preview يعيد headers من Cloudflare/ingress قبل backend؛ داخلياً `localhost:8001` يعيد origin صريح وcredentials، وتدفق الواجهة يعمل.

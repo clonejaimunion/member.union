@@ -15,6 +15,7 @@ Section "Install"
 
   CreateDirectory "$SMPROGRAMS\Bank Deposit Interest System"
   CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
+  CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Reset Super Admin 2FA.lnk" "$INSTDIR\reset_super_admin_2fa.bat" "" "$INSTDIR\accounting_app.ico" 0
   CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -23,6 +24,7 @@ SectionEnd
 Section "Uninstall"
   Delete "$DESKTOP\Bank Deposit System.lnk"
   Delete "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk"
+  Delete "$SMPROGRAMS\Bank Deposit Interest System\Reset Super Admin 2FA.lnk"
   RMDir "$SMPROGRAMS\Bank Deposit Interest System"
   RMDir /r "$INSTDIR"
 SectionEnd
