@@ -3577,6 +3577,7 @@ async def download_setup_file():
         setup_path,
         media_type="application/vnd.microsoft.portable-executable",
         filename="BankDepositSystemSetup.exe",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"},
     )
 
 
@@ -5533,6 +5534,16 @@ if FRONTEND_BUILD_DIR.exists():
         if full_path and requested_file.exists() and requested_file.is_file():
             return FileResponse(requested_file)
         return FileResponse(FRONTEND_BUILD_DIR / "index.html")
+
+
+@app.middleware("http")
+async def no_cache_frontend_assets_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 app.add_middleware(
     CORSMiddleware,

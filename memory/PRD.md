@@ -90,6 +90,7 @@
 - اختبار Iteration 35: أداة استعادة 2FA نجحت 2/2؛ تم تعطيل 2FA مؤقتاً، وتسجيل الدخول بـ `admin/Admin@123` نجح بدون OTP، ثم تمت استعادة حالة الاختبار.
 - إلغاء المصادقة الثنائية نهائياً: بناءً على طلب المستخدم، تم حذف طلب OTP من تسجيل الدخول لكل الحسابات، ومسح `totp_enabled/totp_secret/totp_pending_secret` من كل المستخدمين عند بدء التشغيل، وتعطيل `/api/admin/2fa/setup` و`/api/admin/2fa/verify` برد 410، وإزالة عناصر Google Authenticator من شاشة الدخول ولوحة الأدمن.
 - إصدار Windows المحدث بعد إلغاء 2FA: `/app/dist/BankDepositSystemSetup.exe` بحجم 16,509,054 bytes، وملفات release لا تحتوي أداة `reset_super_admin_2fa` لأن 2FA لم تعد موجودة.
+- إصلاح متابعة بعد ظهور شاشة OTP قديمة لدى المستخدم: تم منع كاش الواجهة وملف التحميل بإضافة `Cache-Control: no-store`، وتعديل NSIS ليحذف `frontend\build` القديم قبل نسخ build الجديد، وإصدار `setup.exe` محدث بحجم 16,509,275 bytes. تحقق محلياً أن شاشة الدخول لا تحتوي Google Authenticator أو تأكيد الكود.
 
 ## ملاحظات معروفة
 - public OPTIONS CORS على نطاق preview يعيد headers من Cloudflare/ingress قبل backend؛ داخلياً `localhost:8001` يعيد origin صريح وcredentials، وتدفق الواجهة يعمل.

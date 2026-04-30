@@ -10,6 +10,9 @@ Page directory
 Page instfiles
 
 Section "Install"
+  RMDir /r "$INSTDIR\frontend\build"
+  Delete "$INSTDIR\reset_super_admin_2fa.bat"
+  Delete "$INSTDIR\backend\reset_super_admin_2fa.py"
   SetOutPath "$INSTDIR"
   File /r "..\release\BankDepositSystem\*"
 
