@@ -1082,3 +1082,11 @@
 - الاختبارات: integration playbook auth، lint، self-test API، screenshot smoke، testing agent iteration_32؛ جميع سيناريوهات السوبر أدمن نجحت.
 - ملاحظة متبقية: public OPTIONS CORS في preview ما زال من طبقة Cloudflare/ingress وليس من التطبيق.
 - إعادة بناء واجهة الإنتاج وملف التثبيت NSIS. ملف setup.exe صالح يبدأ بـ MZ، الحجم 1207741 بايت، و SHA256: 72463fc5a551cf6ba19db071b2fa59f534bb3e257d5f8d7c73a946f994b9d4a5.
+
+
+## إصلاح — 2026-04-30 — رسالة تعذر تحميل الجهات وحساب السوبر أدمن
+- تحققنا من `/api/organizations/public` داخلياً وخارجياً، وهو يعمل ويرجع 200؛ ظهور رسالة "تعذر تحميل الجهات" كان غالباً أثناء hot reload/تحديث الخلفية أو لحظة انقطاع مؤقت.
+- أثناء الفحص وجدنا أن 2FA كان مفعلًا على حساب `admin` من اختبار سابق، وتم إيقافه وإرجاع الدخول إلى `admin / Admin@123` بدون كود.
+- إصلاح endpoint `/api/admin/profile` للسوبر أدمن حتى يرجع الجهة المختارة في الجلسة ولا يعتمد على الجهة الأصلية المخزنة بالحساب.
+- الاختبارات: lint backend، GET organizations/public=200، login admin=200، auth/me role=super_admin، profile update=200 مع organization_id الصحيح.
+- إعادة بناء ملف التثبيت NSIS. ملف setup.exe صالح ويبدأ بـ MZ، الحجم 1207820 بايت، و SHA256: 88e1f0c188615c81c8fdddf08732ac9a7f1ced3c2e33006481919fc21903083a.

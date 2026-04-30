@@ -3685,8 +3685,16 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
 @api_router.put("/admin/profile", response_model=UserPublic)
 async def update_admin_profile(payload: AdminProfileUpdate, admin_user: dict = Depends(require_admin)):
     updates = {"full_name": validate_arabic_full_name(payload.full_name), "updated_at": serialize_datetime(datetime.now(timezone.utc))}
-    await db.users.update_one(with_organization({"id": admin_user["id"]}, admin_user.get("organization_id")), {"$set": updates})
-    updated = await db.users.find_one(with_organization({"id": admin_user["id"]}, admin_user.get("organization_id")), {"_id": 0})
+    query = {"id": admin_user["id"]} if is_super_admin(admin_user) else with_organization({"id": admin_user["id"]}, admin_user.get("organization_id"))
+    await db.users.update_one(query, {"$set": updates})
+    updated = await db.users.find_one(query, {"_id": 0})
+    if not updated:
+        raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    if is_super_admin(updated):
+        selected_organization = await get_organization_document(admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID)
+        updated["organization_id"] = selected_organization["id"]
+        updated["organization_name"] = selected_organization["name"]
+        updated["organization_modules"] = normalize_modules(selected_organization["id"], selected_organization.get("modules"))
     return public_user(updated)
 
 
