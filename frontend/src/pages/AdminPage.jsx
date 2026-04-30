@@ -52,6 +52,7 @@ const defaultApprovalForm = { report_type: "عام", report_name: "", report_ref
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
   { id: "feature-settings", title: "إعدادات الخواص", subtitle: "تفعيل وتعطيل وحدات الجهة", icon: SlidersHorizontal },
+  { id: "fixed-asset-rates", title: "نسب إهلاك الأصول", subtitle: "تعديل نسب التصنيفات الثابتة", icon: SlidersHorizontal },
   { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
   { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
   { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "كلمة المرور و Google Authenticator", icon: LockKeyhole },
@@ -91,6 +92,8 @@ export default function AdminPage() {
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
+  const [fixedAssetRates, setFixedAssetRates] = useState([]);
+  const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [moduleSettingsLoading, setModuleSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -156,13 +159,24 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadFixedAssetRates = useCallback(async () => {
+    try {
+      const response = await api.get("/admin/fixed-assets/categories");
+      setFixedAssetRates(response.data);
+      setFixedAssetRateEdits(response.data.reduce((acc, item) => ({ ...acc, [item.code]: String(item.annual_depreciation_rate) }), {}));
+    } catch (error) {
+      toast.error("تعذر تحميل نسب إهلاك الأصول");
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadBanks();
     loadSecurityReview();
     loadAppSettings();
     loadModuleSettings();
-  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings]);
+    loadFixedAssetRates();
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates]);
 
   useEffect(() => {
     setAdminFullName(user?.full_name || "");
@@ -430,6 +444,17 @@ export default function AdminPage() {
     }
   };
 
+  const saveFixedAssetRate = async (category) => {
+    try {
+      const rate = Number(fixedAssetRateEdits[category.code] || 0);
+      await api.put(`/admin/fixed-assets/categories/${category.code}`, { annual_depreciation_rate: rate });
+      toast.success("تم حفظ نسبة الإهلاك");
+      await loadFixedAssetRates();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ نسبة الإهلاك");
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="admin-page">
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="admin-header">
@@ -672,6 +697,25 @@ export default function AdminPage() {
               })}
             </div>
             <Button type="button" onClick={saveModuleSettings} disabled={moduleSettingsLoading} className="mt-5 h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-feature-settings-button"><Save className="h-4 w-4" /> حفظ إعدادات الخواص</Button>
+          </section>}
+
+          {activeAdminSection === "fixed-asset-rates" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="fixed-asset-rates-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="fixed-asset-rates-heading">
+              <SlidersHorizontal className="h-6 w-6 text-emerald-700" />
+              <div>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="fixed-asset-rates-eyebrow">الأصول الثابتة</p>
+                <h2 className="text-2xl font-extrabold" data-testid="fixed-asset-rates-title">تعديل نسب إهلاك التصنيفات</h2>
+              </div>
+            </div>
+            <div className="space-y-3" data-testid="fixed-asset-rates-list">
+              {fixedAssetRates.map((category) => (
+                <div key={category.code} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_160px_auto] md:items-end" data-testid={`fixed-asset-rate-row-${category.code}`}>
+                  <div data-testid={`fixed-asset-rate-row-${category.code}-info`}><p className="font-extrabold" data-testid={`fixed-asset-rate-row-${category.code}-name`}>{category.code} - {category.name}</p><p className="text-xs font-bold text-slate-500" data-testid={`fixed-asset-rate-row-${category.code}-items`}>{category.items?.length || 0} أصل داخل التصنيف</p></div>
+                  <div data-testid={`fixed-asset-rate-row-${category.code}-input-wrapper`}><Label data-testid={`fixed-asset-rate-row-${category.code}-label`}>النسبة %</Label><Input value={fixedAssetRateEdits[category.code] || ""} onChange={(event) => setFixedAssetRateEdits((current) => ({ ...current, [category.code]: event.target.value.replace(/[^0-9.]/g, "") }))} className="mt-2 h-11 bg-white text-right" data-testid={`fixed-asset-rate-row-${category.code}-input`} /></div>
+                  <Button type="button" onClick={() => saveFixedAssetRate(category)} className="h-11 bg-slate-950 text-white" data-testid={`save-fixed-asset-rate-${category.code}-button`}><Save className="h-4 w-4" /> حفظ</Button>
+                </div>
+              ))}
+            </div>
           </section>}
 
           {activeAdminSection === "admin-password" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="admin-password-section">

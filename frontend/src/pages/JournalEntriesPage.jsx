@@ -14,7 +14,7 @@ import { formatCurrency, sanitizeDecimalInput } from "@/lib/format";
 
 const today = new Date().toISOString().slice(0, 10);
 const createLine = (account_name = "", debit = "", credit = "") => ({ id: `${Date.now()}-${Math.random()}`, account_name, debit, credit });
-const sourceLabels = { manual: "يدوي", revenue: "إيراد", expense: "مصروف", banking_expense: "مصروف بنكي", deposit_interest: "عائد وديعة", reconciliation: "تسوية بنكية", fixed_asset: "أصل ثابت", asset_depreciation: "إهلاك أصل" };
+const sourceLabels = { manual: "يدوي", revenue: "إيراد", expense: "مصروف", banking_expense: "مصروف بنكي", deposit_interest: "عائد وديعة", reconciliation: "تسوية بنكية", fixed_asset: "أصل ثابت", asset_depreciation: "إهلاك أصل", custody_advance: "عهدة/سلفة", custody_advance_settlement: "تسوية عهدة/سلفة" };
 
 export default function JournalEntriesPage() {
   const navigate = useNavigate();

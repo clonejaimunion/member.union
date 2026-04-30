@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, HandCoins, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -24,6 +24,7 @@ export default function ModuleSelection({ accountingOnly = false }) {
   const canUseLedger = isModuleEnabled(user, "ledger") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
   const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseCustodyAdvances = isModuleEnabled(user, "custody_advances") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseMembership = isModuleEnabled(user, "membership") && user?.organization_id === "social-solidarity" && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_users);
   const showSocialHub = user?.organization_id === "social-solidarity" && !accountingOnly;
 
@@ -51,6 +52,13 @@ export default function ModuleSelection({ accountingOnly = false }) {
       path: "/fixed-assets",
       icon: PackageCheck,
       testId: "module-fixed-assets-card",
+    },
+    canUseCustodyAdvances && {
+      title: "العهد والسلف",
+      description: "صرف عهد وسلف وتسويتها بقيود يومية تلقائية.",
+      path: "/custody-advances",
+      icon: HandCoins,
+      testId: "module-custody-advances-card",
     },
     canUseChartAccounts && {
       title: "شجرة الحسابات",

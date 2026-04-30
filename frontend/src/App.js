@@ -24,6 +24,7 @@ import JournalEntriesPage from "@/pages/JournalEntriesPage";
 import ChartAccountsPage from "@/pages/ChartAccountsPage";
 import TrialBalancePage from "@/pages/TrialBalancePage";
 import FixedAssetsPage from "@/pages/FixedAssetsPage";
+import CustodyAdvancesPage from "@/pages/CustodyAdvancesPage";
 import MembershipPage from "@/pages/MembershipPage";
 import ElectronicInvoicePage from "@/pages/ElectronicInvoicePage";
 import { isModuleEnabled } from "@/lib/modules";
@@ -35,6 +36,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/login", title: appTitle },
   { test: (path) => path === "/accounting", title: `الحسابات - ${appTitle}` },
   { test: (path) => path === "/membership", title: `العضوية - ${appTitle}` },
+  { test: (path) => path === "/custody-advances", title: `العهد والسلف - ${appTitle}` },
   { test: (path) => path === "/deposits", title: `فوائد الودائع - ${appTitle}` },
   { test: (path) => path === "/reconciliations", title: `التسويات البنكية - ${appTitle}` },
   { test: (path) => path === "/revenues", title: `الإيرادات - ${appTitle}` },
@@ -107,6 +109,7 @@ function App() {
               <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute><ModuleSelection accountingOnly /></ProtectedRoute>} />
               <Route path="/membership" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_users"]}><ModuleRoute moduleKey="membership"><MembershipPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/custody-advances" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="custody_advances"><CustodyAdvancesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/deposits" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports"]}><ModuleRoute moduleKey="deposits"><BankSelection mode="deposits" /></ModuleRoute></ProtectedRoute>} />
               <Route path="/reconciliations" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_reconciliations"]}><ModuleRoute moduleKey="reconciliations"><BankSelection mode="reconciliations" /></ModuleRoute></ProtectedRoute>} />
               <Route path="/revenues" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ModuleRoute moduleKey="revenues"><RevenuesPage /></ModuleRoute></ProtectedRoute>} />
