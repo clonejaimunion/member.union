@@ -3,14 +3,14 @@
 ## Required Login Flow
 1. Open `/login`.
 2. Login with the official admin account from `/app/memory/test_credentials.md`.
-3. Admin should be routed to `/secure-admin-control-panel` if 2FA setup is not enabled.
+3. Admin should be routed directly to `/secure-admin-control-panel` without any OTP or 2FA step.
 
 ## Admin Permissions
 - Admin can access `/secure-admin-control-panel`.
 - Admin can create users with scoped permissions.
 - Admin can update mandatory Arabic `full_name` from the admin password/profile section.
 - Admin can change the admin password only after providing the current password.
-- Admin can start Google Authenticator setup and receive QR/manual secret.
+- Two-factor authentication is permanently disabled; admins cannot start Google Authenticator setup.
 
 ## User Permissions
 - `enter_deposits`: allows creating deposits.
@@ -31,9 +31,10 @@
 - Data-entry users with `enter_deposits` or `manage_expenses` can create, edit, delete, search, view, and print expenses.
 - View-only users with `view_reports` can view/search/print expense reports but cannot create, edit, or delete.
 
-## 2FA Testing Safety
-- Test `/api/admin/2fa/setup` for QR/manual secret.
-- Avoid calling `/api/admin/2fa/verify` in automated tests unless the generated TOTP secret is recorded and a recovery plan exists.
+## 2FA Disabled Regression
+- `/api/admin/2fa/setup` must return HTTP 410.
+- `/api/admin/2fa/verify` must return HTTP 410.
+- No account should have `totp_enabled=true`, `totp_secret`, or `totp_pending_secret` in MongoDB.
 
 ## Organization Login Isolation
 - Login must include `organization_id` selected by the user before entering credentials.
@@ -72,5 +73,5 @@ curl -X POST http://localhost:8001/api/auth/login \
 
 Expected:
 - Username `admin` must authenticate the hidden `super_admin` for both organizations.
-- If 2FA is enabled, the response should request OTP; it must not say username/password is wrong.
+- The response must include a token and must not request OTP.
 - Any older tenant-scoped `admin` record must not shadow the hidden `super_admin` account.

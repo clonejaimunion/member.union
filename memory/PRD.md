@@ -88,12 +88,15 @@
 - إصلاح تسجيل دخول السوبر أدمن: أصبح اسم المستخدم `admin` يبحث عن حساب `super_admin` أولاً على الجهتين قبل أي حساب قديم بنفس الاسم داخل جهة محددة، مع مسح محاولات الدخول الفاشلة الخاصة به عند بدء التشغيل، وتم إنشاء `setup.exe` جديد بحجم 16,512,122 bytes.
 - أداة استعادة 2FA محلية: تمت إضافة `reset_super_admin_2fa.bat` و`backend/reset_super_admin_2fa.py` لتعطيل Google Authenticator لحساب السوبر أدمن فقط عند فقدان أو خطأ الكود، بدون حذف أي بيانات محاسبية، مع اختصار في Start Menu وإصدار `setup.exe` جديد بحجم 16,514,270 bytes.
 - اختبار Iteration 35: أداة استعادة 2FA نجحت 2/2؛ تم تعطيل 2FA مؤقتاً، وتسجيل الدخول بـ `admin/Admin@123` نجح بدون OTP، ثم تمت استعادة حالة الاختبار.
+- إلغاء المصادقة الثنائية نهائياً: بناءً على طلب المستخدم، تم حذف طلب OTP من تسجيل الدخول لكل الحسابات، ومسح `totp_enabled/totp_secret/totp_pending_secret` من كل المستخدمين عند بدء التشغيل، وتعطيل `/api/admin/2fa/setup` و`/api/admin/2fa/verify` برد 410، وإزالة عناصر Google Authenticator من شاشة الدخول ولوحة الأدمن.
+- إصدار Windows المحدث بعد إلغاء 2FA: `/app/dist/BankDepositSystemSetup.exe` بحجم 16,509,054 bytes، وملفات release لا تحتوي أداة `reset_super_admin_2fa` لأن 2FA لم تعد موجودة.
 
 ## ملاحظات معروفة
 - public OPTIONS CORS على نطاق preview يعيد headers من Cloudflare/ingress قبل backend؛ داخلياً `localhost:8001` يعيد origin صريح وcredentials، وتدفق الواجهة يعمل.
 - تكامل مصلحة الضرائب الخارجي للفواتير الإلكترونية ليس Live integration حالياً؛ الموجود داخلي/ MOCKED بالنسبة للإرسال الخارجي.
 - في بيئة الاختبار الحالية فقط، حساب `admin` قد يطلب 2FA إذا كان مفعلاً سابقاً في قاعدة البيانات المحلية، بينما قواعد البيانات الجديدة تنشئه بدون 2FA؛ يمكن اختبار الدخول العادي حالياً بحسابي `admin_union` و`admin_takaful`.
 - CORS المحلي على `localhost:8001` يعيد Origin صريح وCredentials بشكل صحيح؛ فشل OPTIONS على رابط preview العام ما زال من طبقة Cloudflare/ingress وليس من نسخة localhost/offline.
+- Iteration 35/37: اختبار إلغاء 2FA نجح وظيفياً؛ تسجيل الدخول بالسوبر أدمن على الجهتين يتم مباشرة بدون OTP، وواجهة الدخول لا تعرض أي نصوص 2FA. الملاحظة الوحيدة المتبقية من الاختبار المستقل هي CORS على رابط preview العام فقط؛ `localhost:8001` صحيح ولا يعتمد عليه تشغيل Windows المحلي.
 
 ## مراجع تفصيلية
 - السجل التفصيلي الطويل: `/app/memory/CHANGELOG.md`.
