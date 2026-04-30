@@ -68,6 +68,7 @@ ORGANIZATIONS = {
 }
 
 MODULE_DEFINITIONS = {
+    "fixed_assets": "الأصول الثابتة",
     "chart_accounts": "شجرة الحسابات",
     "trial_balance": "ميزان المراجعة",
     "deposits": "فوائد الودائع",
@@ -80,6 +81,13 @@ MODULE_DEFINITIONS = {
     "ledger": "دفتر الأستاذ",
     "electronic_invoice": "الفاتورة الإلكترونية",
 }
+
+FIXED_ASSET_CATEGORIES = [
+    {"code": "5", "name": "الأثاث", "annual_depreciation_rate": 10.0, "items": ["موكيت ارضية", "ستائر", "مكتب خشب ووحدة ادارج", "ترابيزة كمبيوتر عدد 2", "ترابيزة زجاج 2 دوور", "ارفف معدنية - 7 وحدات"]},
+    {"code": "101", "name": "آلات مكتبية", "annual_depreciation_rate": 20.0, "items": ["عدد 4 جهاز حاسب الي", "عدد 2 ماكينة تصوير مستندات", "طابعة كمبيوتر"]},
+    {"code": "151", "name": "الخزائن", "annual_depreciation_rate": 5.0, "items": ["خزينة حديد اوجيدا 44سم"]},
+    {"code": "155", "name": "الأجهزة الكهربائية", "annual_depreciation_rate": 20.0, "items": ["مروحة فريش حلزوني", "جهاز تكييف توشيبا 4حصان"]},
+]
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -484,6 +492,70 @@ class TrialBalanceReport(BaseModel):
     is_balanced: bool
 
 
+class FixedAssetCategory(BaseModel):
+    code: str
+    name: str
+    annual_depreciation_rate: float
+    items: List[str]
+
+
+class FixedAssetBase(BaseModel):
+    category_code: str = Field(..., min_length=1)
+    asset_name: str = Field(..., min_length=1, max_length=160)
+    purchase_date: date
+    purchase_cost: float = Field(..., gt=0)
+    bank_id: str
+    invoice_number: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: bool = True
+
+
+class FixedAssetCreate(FixedAssetBase):
+    pass
+
+
+class FixedAssetResponse(FixedAssetBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    asset_code: str
+    category_name: str
+    annual_depreciation_rate: float
+    bank_name: str
+    monthly_depreciation: float
+    accumulated_depreciation: float
+    net_book_value: float
+    last_depreciation_period: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FixedAssetDepreciationRun(BaseModel):
+    year: int = Field(..., ge=1900, le=2200)
+    month: int = Field(..., ge=1, le=12)
+
+
+class FixedAssetDepreciationResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    asset_id: str
+    asset_code: str
+    asset_name: str
+    category_code: str
+    category_name: str
+    year: int
+    month: int
+    depreciation_date: date
+    amount: float
+    accumulated_after: float
+    net_book_value_after: float
+    created_at: datetime
+    updated_at: datetime
+
+
 class JournalEntryCreate(BaseModel):
     entry_date: date
     description: str = Field(..., min_length=2)
@@ -498,7 +570,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -1200,12 +1272,68 @@ def hydrate_chart_account(document: dict) -> dict:
     return clean
 
 
+def fixed_asset_category(category_code: str) -> dict:
+    category = next((item for item in FIXED_ASSET_CATEGORIES if item["code"] == str(category_code)), None)
+    if not category:
+        raise HTTPException(status_code=400, detail="تصنيف الأصل الثابت غير صحيح")
+    return category
+
+
+def month_end_date(year: int, month: int) -> date:
+    return date(year, month, calendar.monthrange(year, month)[1])
+
+
+def months_between_inclusive(start_date: date, end_date: date) -> int:
+    if end_date < date(start_date.year, start_date.month, 1):
+        return 0
+    return (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) + 1
+
+
+def fixed_asset_monthly_depreciation(purchase_cost: float, annual_rate: float) -> float:
+    return round(float(purchase_cost or 0) * float(annual_rate or 0) / 100 / 12, 2)
+
+
+async def depreciation_total_for_asset(asset_id: str) -> float:
+    documents = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "amount": 1}).to_list(1000)
+    return round(sum(float(item.get("amount") or 0) for item in documents), 2)
+
+
+async def enrich_fixed_asset(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    if isinstance(clean.get("purchase_date"), str):
+        clean["purchase_date"] = date.fromisoformat(clean["purchase_date"])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    category = fixed_asset_category(clean.get("category_code"))
+    clean["category_name"] = category["name"]
+    clean["annual_depreciation_rate"] = float(category["annual_depreciation_rate"])
+    clean["monthly_depreciation"] = fixed_asset_monthly_depreciation(clean.get("purchase_cost"), clean["annual_depreciation_rate"])
+    clean["accumulated_depreciation"] = await depreciation_total_for_asset(clean["id"])
+    clean["net_book_value"] = round(max(float(clean.get("purchase_cost") or 0) - clean["accumulated_depreciation"], 0), 2)
+    last_depreciation = await db.fixed_asset_depreciations.find_one(with_organization({"asset_id": clean["id"]}), {"_id": 0}, sort=[("year", -1), ("month", -1)])
+    clean["last_depreciation_period"] = f"{last_depreciation.get('month')}/{last_depreciation.get('year')}" if last_depreciation else None
+    return clean
+
+
+def hydrate_fixed_asset_depreciation(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    if isinstance(clean.get("depreciation_date"), str):
+        clean["depreciation_date"] = date.fromisoformat(clean["depreciation_date"])
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
 def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
     base_accounts = [
         {"code": "1000", "name": "الأصول", "account_type": "asset", "nature": "debit", "is_postable": False, "system_key": "assets"},
         {"code": "1100", "name": "البنوك", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "banks"},
         {"code": "1200", "name": "شيكات تحت التحصيل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "checks_under_collection"},
         {"code": "1300", "name": "عوائد ودائع مستحقة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "accrued_deposit_interest"},
+        {"code": "1400", "name": "الأصول الثابتة", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "fixed_assets_parent"},
+        {"code": "1490", "name": "مجمع إهلاك الأصول الثابتة", "account_type": "asset", "nature": "credit", "is_postable": False, "parent_code": "1000", "system_key": "accumulated_depreciation_parent"},
         {"code": "2000", "name": "الالتزامات", "account_type": "liability", "nature": "credit", "is_postable": False, "system_key": "liabilities"},
         {"code": "2100", "name": "شيكات صادرة", "account_type": "liability", "nature": "credit", "is_postable": True, "parent_code": "2000", "system_key": "issued_checks"},
         {"code": "3000", "name": "حقوق الملكية / الفائض", "account_type": "equity", "nature": "credit", "is_postable": False, "system_key": "equity"},
@@ -1215,7 +1343,12 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
+        {"code": "5200", "name": "إهلاك الأصول الثابتة", "account_type": "expense", "nature": "debit", "is_postable": False, "parent_code": "5000", "system_key": "depreciation_expense_parent"},
     ]
+    for category in FIXED_ASSET_CATEGORIES:
+        base_accounts.append({"code": category["code"], "name": category["name"], "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1400", "system_key": f"fixed_asset:{category['code']}"})
+        base_accounts.append({"code": f"{category['code']}-م", "name": f"مجمع إهلاك {category['name']}", "account_type": "asset", "nature": "credit", "is_postable": True, "parent_code": "1490", "system_key": f"accumulated_depreciation:{category['code']}"})
+        base_accounts.append({"code": f"52{category['code']}", "name": f"إهلاك {category['name']}", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5200", "system_key": f"depreciation_expense:{category['code']}"})
     for index, bank in enumerate(banks, start=1):
         base_accounts.append({"code": f"11{index:02d}", "name": bank["name"], "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1100", "system_key": f"bank:{bank['id']}", "bank_id": bank["id"]})
     return base_accounts
@@ -1445,6 +1578,50 @@ async def journal_for_reconciliation(document: dict, current_user: Optional[dict
         is_auto=True,
         current_user=current_user,
         lines=lines,
+    )
+
+
+async def journal_for_fixed_asset(asset: dict, current_user: Optional[dict] = None):
+    amount = round(float(asset.get("purchase_cost") or 0), 2)
+    if amount <= 0:
+        return
+    category = fixed_asset_category(asset.get("category_code"))
+    purchase_value = asset.get("purchase_date")
+    entry_date = purchase_value if isinstance(purchase_value, date) else date.fromisoformat(str(purchase_value))
+    await save_journal_entry_document(
+        entry_date=entry_date,
+        description=f"قيد تلقائي لإثبات أصل ثابت: {asset.get('asset_name')}",
+        reference=asset.get("asset_code") or asset.get("invoice_number"),
+        source_type="fixed_asset",
+        source_id=asset.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[
+            {"account_name": category["name"], "system_key": f"fixed_asset:{category['code']}", "debit": amount, "credit": 0},
+            {"account_name": "البنك", "bank_id": asset.get("bank_id"), "debit": 0, "credit": amount},
+        ],
+    )
+
+
+async def journal_for_asset_depreciation(depreciation: dict, current_user: Optional[dict] = None):
+    amount = round(float(depreciation.get("amount") or 0), 2)
+    if amount <= 0:
+        return
+    category = fixed_asset_category(depreciation.get("category_code"))
+    depreciation_date_value = depreciation.get("depreciation_date")
+    entry_date = depreciation_date_value if isinstance(depreciation_date_value, date) else date.fromisoformat(str(depreciation_date_value))
+    await save_journal_entry_document(
+        entry_date=entry_date,
+        description=f"قيد تلقائي لإهلاك {depreciation.get('asset_name')} عن {depreciation.get('month')}/{depreciation.get('year')}",
+        reference=depreciation.get("asset_code"),
+        source_type="asset_depreciation",
+        source_id=depreciation.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[
+            {"account_name": f"إهلاك {category['name']}", "system_key": f"depreciation_expense:{category['code']}", "debit": amount, "credit": 0},
+            {"account_name": f"مجمع إهلاك {category['name']}", "system_key": f"accumulated_depreciation:{category['code']}", "debit": 0, "credit": amount},
+        ],
     )
 
 
@@ -1788,6 +1965,41 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
         "bank_payment_status": payload.bank_payment_status if payload.payment_method in ["cash", "check", "bank_transfer"] else None,
+    }
+
+
+async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id: Optional[str] = None) -> dict:
+    bank = await ensure_bank_async(payload.bank_id)
+    category = fixed_asset_category(payload.category_code)
+    await ensure_period_is_open(payload.purchase_date)
+    organization_id = organization_id_or_default()
+    normalized_name = payload.asset_name.strip()
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="اسم الأصل الثابت مطلوب")
+    existing_query = with_organization({"category_code": category["code"], "asset_name": normalized_name}, organization_id)
+    if asset_id:
+        existing_query["id"] = {"$ne": asset_id}
+    if await db.fixed_assets.find_one(existing_query, {"_id": 0, "id": 1}):
+        raise HTTPException(status_code=400, detail="هذا الأصل مسجل بالفعل داخل نفس التصنيف")
+    serial = await db.fixed_assets.count_documents(with_organization({"category_code": category["code"]}, organization_id)) + 1
+    asset_code = f"{category['code']}-{serial:03d}"
+    if asset_id:
+        current = await db.fixed_assets.find_one(with_organization({"id": asset_id}, organization_id), {"_id": 0, "asset_code": 1})
+        asset_code = current.get("asset_code") if current else asset_code
+    return {
+        "organization_id": organization_id,
+        "asset_code": asset_code,
+        "category_code": category["code"],
+        "category_name": category["name"],
+        "annual_depreciation_rate": float(category["annual_depreciation_rate"]),
+        "asset_name": normalized_name,
+        "purchase_date": serialize_date(payload.purchase_date),
+        "purchase_cost": round(float(payload.purchase_cost), 2),
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "invoice_number": normalize_digit_text(payload.invoice_number) if payload.invoice_number else None,
+        "notes": payload.notes.strip() if payload.notes else None,
+        "is_active": bool(payload.is_active),
     }
 
 
@@ -2263,7 +2475,7 @@ async def ensure_organization_seed_data():
         modules = normalize_modules(organization["id"], existing.get("modules") if existing else None)
         await db.organizations.update_one({"id": organization["id"]}, {"$set": {"modules": modules}})
         await db.users.update_many({"organization_id": organization["id"]}, {"$set": {"organization_modules": modules}})
-    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+    tenant_collections = ["banks", "bank_settings", "deleted_banks", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
     for collection_name in tenant_collections:
         await db[collection_name].update_many({"organization_id": {"$exists": False}}, {"$set": {"organization_id": DEFAULT_ORGANIZATION_ID}})
     for organization_id in ORGANIZATIONS:
@@ -2283,6 +2495,8 @@ async def startup_tasks():
     await db.expenses.create_index("expense_number")
     await db.expenses.create_index("check_number")
     await db.expenses.create_index("transfer_number")
+    await db.fixed_assets.create_index([("organization_id", 1), ("category_code", 1), ("asset_name", 1)])
+    await db.fixed_asset_depreciations.create_index([("organization_id", 1), ("asset_id", 1), ("year", 1), ("month", 1)], unique=True)
     await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
@@ -3331,6 +3545,137 @@ async def save_banking_manual_charges(
     return BankingManualChargesResponse(**hydrate_banking_manual_charges(document))
 
 
+@api_router.get("/fixed-assets/categories", response_model=List[FixedAssetCategory])
+async def list_fixed_asset_categories(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    return [FixedAssetCategory(**category) for category in FIXED_ASSET_CATEGORIES]
+
+
+@api_router.get("/fixed-assets", response_model=List[FixedAssetResponse])
+async def list_fixed_assets(
+    category_code: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if category_code:
+        query["category_code"] = fixed_asset_category(category_code)["code"]
+    documents = await db.fixed_assets.find(query, {"_id": 0}).sort("purchase_date", -1).sort("created_at", -1).to_list(2000)
+    return [FixedAssetResponse(**(await enrich_fixed_asset(document))) for document in documents]
+
+
+@api_router.post("/fixed-assets", response_model=FixedAssetResponse)
+async def create_fixed_asset(payload: FixedAssetCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = await fixed_asset_document_from_payload(payload)
+    document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
+    await db.fixed_assets.insert_one(document.copy())
+    await journal_for_fixed_asset(document, current_user)
+    return FixedAssetResponse(**(await enrich_fixed_asset(document)))
+
+
+@api_router.put("/fixed-assets/{asset_id}", response_model=FixedAssetResponse)
+async def update_fixed_asset(asset_id: str, payload: FixedAssetCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    existing = await db.fixed_assets.find_one(with_organization({"id": asset_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الأصل الثابت غير موجود")
+    await ensure_period_is_open(date.fromisoformat(existing["purchase_date"]))
+    updates = await fixed_asset_document_from_payload(payload, asset_id)
+    updates["updated_at"] = serialize_datetime(datetime.now(timezone.utc))
+    await db.fixed_assets.update_one(with_organization({"id": asset_id}), {"$set": updates})
+    depreciation_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "id": 1}).to_list(1000)
+    for record in depreciation_records:
+        await delete_journal_for_source("asset_depreciation", record["id"])
+    await db.fixed_asset_depreciations.delete_many(with_organization({"asset_id": asset_id}))
+    updated = await db.fixed_assets.find_one(with_organization({"id": asset_id}), {"_id": 0})
+    await journal_for_fixed_asset(updated, current_user)
+    return FixedAssetResponse(**(await enrich_fixed_asset(updated)))
+
+
+@api_router.delete("/fixed-assets/{asset_id}")
+async def delete_fixed_asset(asset_id: str, _: dict = Depends(require_admin)):
+    existing = await db.fixed_assets.find_one(with_organization({"id": asset_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الأصل الثابت غير موجود")
+    await ensure_period_is_open(date.fromisoformat(existing["purchase_date"]))
+    depreciation_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "id": 1}).to_list(1000)
+    for record in depreciation_records:
+        await delete_journal_for_source("asset_depreciation", record["id"])
+    await db.fixed_asset_depreciations.delete_many(with_organization({"asset_id": asset_id}))
+    await db.fixed_assets.delete_one(with_organization({"id": asset_id}))
+    await delete_journal_for_source("fixed_asset", asset_id)
+    return {"message": "تم حذف الأصل الثابت وقيوده التلقائية", "deleted_asset_id": asset_id}
+
+
+async def build_depreciation_record(asset: dict, year: int, month: int, current_user: dict) -> Optional[dict]:
+    purchase_date_value = asset.get("purchase_date") if isinstance(asset.get("purchase_date"), date) else date.fromisoformat(str(asset.get("purchase_date")))
+    depreciation_date = month_end_date(year, month)
+    if depreciation_date < purchase_date_value:
+        return None
+    category = fixed_asset_category(asset.get("category_code"))
+    monthly_amount = fixed_asset_monthly_depreciation(asset.get("purchase_cost"), category["annual_depreciation_rate"])
+    if monthly_amount <= 0:
+        return None
+    record_id = f"{asset['id']}-{year}-{str(month).zfill(2)}"
+    previous_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset["id"], "id": {"$ne": record_id}}), {"_id": 0, "amount": 1}).to_list(1000)
+    accumulated_before = round(sum(float(item.get("amount") or 0) for item in previous_records), 2)
+    remaining = round(float(asset.get("purchase_cost") or 0) - accumulated_before, 2)
+    amount = round(min(monthly_amount, remaining), 2)
+    if amount <= 0:
+        await db.fixed_asset_depreciations.delete_one(with_organization({"id": record_id}))
+        await delete_journal_for_source("asset_depreciation", record_id)
+        return None
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    existing = await db.fixed_asset_depreciations.find_one(with_organization({"id": record_id}), {"_id": 0})
+    document = {
+        "id": record_id,
+        "organization_id": organization_id_or_default(),
+        "asset_id": asset["id"],
+        "asset_code": asset.get("asset_code"),
+        "asset_name": asset.get("asset_name"),
+        "category_code": category["code"],
+        "category_name": category["name"],
+        "year": year,
+        "month": month,
+        "depreciation_date": serialize_date(depreciation_date),
+        "amount": amount,
+        "accumulated_after": round(accumulated_before + amount, 2),
+        "net_book_value_after": round(max(float(asset.get("purchase_cost") or 0) - accumulated_before - amount, 0), 2),
+        "created_at": existing.get("created_at") if existing else now_iso,
+        "updated_at": now_iso,
+    }
+    await db.fixed_asset_depreciations.update_one(with_organization({"id": record_id}), {"$set": document}, upsert=True)
+    await journal_for_asset_depreciation(document, current_user)
+    return document
+
+
+@api_router.post("/fixed-assets/depreciation/run", response_model=List[FixedAssetDepreciationResponse])
+async def run_fixed_asset_depreciation(payload: FixedAssetDepreciationRun, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    await ensure_period_is_open(month_end_date(payload.year, payload.month))
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    assets = await db.fixed_assets.find(with_organization({"is_active": True}), {"_id": 0}).sort("asset_code", 1).to_list(5000)
+    generated = []
+    for asset in assets:
+        document = await build_depreciation_record(asset, payload.year, payload.month, current_user)
+        if document:
+            generated.append(document)
+    return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in generated]
+
+
+@api_router.get("/fixed-assets/depreciations", response_model=List[FixedAssetDepreciationResponse])
+async def list_fixed_asset_depreciations(
+    year: Optional[int] = Query(default=None, ge=1900, le=2200),
+    month: Optional[int] = Query(default=None, ge=1, le=12),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if year:
+        query["year"] = year
+    if month:
+        query["month"] = month
+    documents = await db.fixed_asset_depreciations.find(query, {"_id": 0}).sort("year", -1).sort("month", -1).sort("asset_code", 1).to_list(5000)
+    return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in documents]
+
+
 @api_router.get("/journal-entries", response_model=List[JournalEntryResponse])
 async def list_journal_entries(
     from_date: Optional[date] = Query(default=None),
@@ -3777,7 +4122,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
@@ -3889,6 +4234,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
         ("/api/admin/organization/modules", "إعدادات الخواص"),
         ("/api/admin/app-settings", "الإعدادات العامة"),
         ("/api/admin/banks", "إدارة البنوك"),
+        ("/api/fixed-assets", "الأصول الثابتة"),
         ("/api/banking-expenses", "المصروفات البنكية"),
         ("/api/electronic-invoice", "الفاتورة الإلكترونية"),
         ("/api/electronic-invoices", "الفاتورة الإلكترونية"),
@@ -3904,7 +4250,7 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
     actor = actor_name or "مستخدم غير معروف"
     details = []
     if isinstance(body, dict):
-        for key in ["username", "full_name", "system_name", "organization_name", "bank_id", "year", "month", "report_name", "status", "action"]:
+        for key in ["username", "full_name", "system_name", "organization_name", "bank_id", "category_code", "asset_name", "year", "month", "report_name", "status", "action"]:
             value = body.get(key)
             if value not in (None, ""):
                 details.append(f"{key}: {value}")

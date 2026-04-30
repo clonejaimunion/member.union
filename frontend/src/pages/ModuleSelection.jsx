@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, ReceiptText, Scale, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, GitFork, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -23,8 +23,16 @@ export default function ModuleSelection() {
   const canUseBankingExpenses = isModuleEnabled(user, "banking_expenses") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseLedger = isModuleEnabled(user, "ledger") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseElectronicInvoice = isModuleEnabled(user, "electronic_invoice") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
+  const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
 
   const modules = [
+    canUseFixedAssets && {
+      title: "الأصول الثابتة",
+      description: "تسجيل الأصول، حساب الإهلاك تلقائياً، وربطه بالقيود اليومية.",
+      path: "/fixed-assets",
+      icon: PackageCheck,
+      testId: "module-fixed-assets-card",
+    },
     canUseChartAccounts && {
       title: "شجرة الحسابات",
       description: "حسابات تلقائية لكل جهة وربط مباشر مع القيود اليومية.",

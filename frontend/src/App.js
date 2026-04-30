@@ -23,6 +23,7 @@ import LedgerPage from "@/pages/LedgerPage";
 import JournalEntriesPage from "@/pages/JournalEntriesPage";
 import ChartAccountsPage from "@/pages/ChartAccountsPage";
 import TrialBalancePage from "@/pages/TrialBalancePage";
+import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import ElectronicInvoicePage from "@/pages/ElectronicInvoicePage";
 import { isModuleEnabled } from "@/lib/modules";
 
@@ -38,6 +39,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/expenses-analysis", title: `تحليل المصروفات - ${appTitle}` },
   { test: (path) => path === "/banking-expenses", title: `المصروفات البنكية - ${appTitle}` },
   { test: (path) => path === "/ledger", title: `دفتر الأستاذ - ${appTitle}` },
+  { test: (path) => path === "/fixed-assets", title: `الأصول الثابتة - ${appTitle}` },
   { test: (path) => path === "/chart-accounts", title: `شجرة الحسابات - ${appTitle}` },
   { test: (path) => path === "/trial-balance", title: `ميزان المراجعة - ${appTitle}` },
   { test: (path) => path === "/journal-entries", title: `القيود اليومية - ${appTitle}` },
@@ -107,6 +109,7 @@ function App() {
               <Route path="/expenses-analysis" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses"]}><ModuleRoute moduleKey="expenses_analysis"><ExpensesAnalysisPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/banking-expenses" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="banking_expenses"><BankingExpensesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/ledger" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="ledger"><LedgerPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/fixed-assets" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="fixed_assets"><FixedAssetsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/chart-accounts" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="chart_accounts"><ChartAccountsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/trial-balance" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="trial_balance"><TrialBalancePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/journal-entries" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="journal_entries"><JournalEntriesPage /></ModuleRoute></ProtectedRoute>} />
