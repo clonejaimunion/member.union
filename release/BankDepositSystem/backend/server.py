@@ -2039,6 +2039,11 @@ async def account_for_system_key(system_key: str, fallback_name: str) -> dict:
 async def resolve_journal_account(line: dict) -> dict:
     account_name = str(line.get("account_name") or "").strip()
     bank_id = line.get("bank_id")
+    if account_name == "البنك" and not bank_id:
+        active_banks = await get_all_banks()
+        bank_id = active_banks[0].get("id") if active_banks else None
+        if bank_id:
+            line["bank_id"] = bank_id
     system_key_map = {
         "البنك": f"bank:{bank_id}" if bank_id else "banks",
         "الإيرادات": "revenue_general",
@@ -2057,6 +2062,30 @@ async def resolve_journal_account(line: dict) -> dict:
         line["account_name"] = account.get("name") or account_name
         line["account_type"] = account.get("account_type")
     return line
+
+
+async def repair_journal_account_links_for_organization(organization_id: str) -> int:
+    entries = await db.journal_entries.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
+    repaired_count = 0
+    token = CURRENT_ORGANIZATION_ID.set(organization_id)
+    try:
+        for entry in entries:
+            changed = False
+            repaired_lines = []
+            for line in entry.get("lines", []):
+                if line.get("account_id") and line.get("account_code") and line.get("account_type"):
+                    repaired_lines.append(line)
+                    continue
+                repaired_line = await resolve_journal_account(line.copy())
+                if repaired_line != line:
+                    changed = True
+                repaired_lines.append(repaired_line)
+            if changed:
+                await db.journal_entries.update_one(with_organization({"id": entry["id"]}, organization_id), {"$set": {"lines": repaired_lines, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+                repaired_count += 1
+    finally:
+        CURRENT_ORGANIZATION_ID.reset(token)
+    return repaired_count
 
 
 async def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float, float]:
@@ -2443,6 +2472,7 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
 
 
 async def calculate_financial_statements_report(organization_id: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> FinancialStatementsReport:
+    await repair_journal_account_links_for_organization(organization_id)
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
