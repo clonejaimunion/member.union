@@ -1,0 +1,36 @@
+{
+  "summary": "تم اختبار إصلاح ربط سطور القيد القديم رقم 5 (social-solidarity) على backend، والتحقق من شاشة القوائم المالية. اختبارات API أكدت اختفاء أخطاء القيد رقم 5 وربط السطور بالحسابات الصحيحة، مع استمرار عمل general-union.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration31_financial_statements_entry5_repair.py",
+    "/app/test_reports/pytest/pytest_results_iter31_backend.xml"
+  ],
+  "action_items": [
+    "إعادة تشغيل Playwright UI smoke لاحقاً فقط لتغطية general-union UI بالكامل بعد تحسين ثبات سيناريو التنقل (hub/accounting)."
+  ],
+  "critical_code_review_comments": [
+    "server.py ما زال ملفاً ضخماً جداً (أكثر من 5000 سطر) ويحتاج تقسيم modular لتقليل مخاطر الانحدار مستقبلاً."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration31_financial_statements_entry5_repair.py",
+    "/app/test_reports/iteration_31.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "75%"
+  },
+  "test_credentials": "تمت قراءة /app/memory/test_credentials.md واستخدام admin_takaful/admin_union مع Admin@123 حسب الجهة.",
+  "seed_data_creation": "لم يتم إنشاء بيانات دائمة.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "pytest iter31: 4/4 passed. تم التحقق من /api/financial-statements (2026) و /api/journal-entries (2026) للتكافل + regression للنقابة العامة. Playwright وصل فعلياً إلى صفحة /financial-statements للتكافل وأظهر حالة سليمة وأخطاء 0 من الصورة، لكن سكربت الواجهة فشل في نهاية السيناريو بسبب تحقق نصّي/تنقّل غير ثابت قبل استكمال مسار general-union بالكامل.",
+  "rca of the issue": "RCA (UI automation only): فشل Playwright كان في ثبات سيناريو التنقل (social hub -> accounting modules) مع تحقق نصّي حساس لصياغة الأرقام العربية، وليس فشل API. أدلة backend تؤكد الإصلاح: القيد #5 أصبح مرتبطاً بالحسابات (1101 asset لبنك التنمية الصناعية، و4101 revenue للإيرادات)، وaccounting_errors للسنة 2026 أصبحت بلا أخطاء حرجة/بدون أخطاء القيد #5.\n\nMOCKED: تكامل إرسال الفاتورة الإلكترونية الخارجي لمصلحة الضرائب المصرية ما زال MOCKED (خارج نطاق هذا الإصلاح)."
+}
