@@ -58,3 +58,19 @@ curl -X POST "$REACT_APP_BACKEND_URL/api/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"username":"admin_union","password":"Admin@123","organization_id":"general-union"}'
 ```
+
+## Super Admin Shadowing Regression
+```bash
+curl -X POST http://localhost:8001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin@123","organization_id":"general-union"}'
+
+curl -X POST http://localhost:8001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin@123","organization_id":"social-solidarity"}'
+```
+
+Expected:
+- Username `admin` must authenticate the hidden `super_admin` for both organizations.
+- If 2FA is enabled, the response should request OTP; it must not say username/password is wrong.
+- Any older tenant-scoped `admin` record must not shadow the hidden `super_admin` account.

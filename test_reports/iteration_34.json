@@ -1,0 +1,58 @@
+{
+  "summary": "تم تنفيذ اختبار backend فقط لسيناريو تسجيل دخول السوبر أدمن admin/Admin@123 على الجهتين + regression لحالة shadow admin + فحوصات auth playbook الأساسية + التحقق من ملف Setup.exe. تسجيل الدخول نجح على الجهتين بنتيجة 200 مع requires_2fa=true (مقبول حسب الطلب)، واختبار shadow admin نجح بدون 401.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "CORS preflight على الـ public URL يرجع Access-Control-Allow-Origin=* وبدون Access-Control-Allow-Credentials=true، مخالف playbook وقد يكسر credentialed auth في المتصفح.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/app/memory/test_credentials.md",
+        "issue": "الملف يذكر أن 2FA غير مفعل لحساب admin، بينما البيئة الحالية تُرجع requires_2fa=true فعليًا."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration34_super_admin_login_shadow_regression.py",
+    "/app/test_reports/pytest/pytest_results_iter34_backend.xml",
+    "/app/test_reports/iter34_login_general_body.json",
+    "/app/test_reports/iter34_login_social_body.json",
+    "/app/test_reports/iter34_login_general_headers.txt",
+    "/app/test_reports/iter34_cors_options_headers.txt"
+  ],
+  "action_items": [
+    "إصلاح CORS على طبقة النشر العامة (edge/ingress) لإرجاع Origin صريح + Access-Control-Allow-Credentials=true بدلاً من *.",
+    "تحديث /app/memory/test_credentials.md ليعكس حالة 2FA الفعلية في البيئة الحالية (مفعّل/غير مفعّل)."
+  ],
+  "critical_code_review_comments": [
+    "server.py حجمه كبير جدًا (>5000 سطر) ويحتاج تقسيم Modules لتقليل مخاطر الانحدار.",
+    "سلوك seed_admin لتحديث كلمة مرور الأدمن عند اختلاف ADMIN_INITIAL_PASSWORD موجود بالكود (ensure_default_admin) وتمت مراجعته كوديًا، لكن لم يتم تغيير env فعليًا في هذا الاختبار."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration34_super_admin_login_shadow_regression.py",
+    "/app/test_reports/iteration_34.json",
+    "/app/test_reports/iter34_login_general_headers.txt",
+    "/app/test_reports/iter34_login_general_body.json",
+    "/app/test_reports/iter34_login_social_headers.txt",
+    "/app/test_reports/iter34_login_social_body.json",
+    "/app/test_reports/iter34_cors_options_headers.txt",
+    "/app/test_reports/iter34_cors_options_body.txt"
+  ],
+  "success_rate": {
+    "backend": "88%",
+    "frontend": "N/A (not requested)"
+  },
+  "seed_data_creation": "تم إنشاء مستخدم مؤقت TEST_SHADOW_ADMIN مباشرة في Mongo لاختبار shadowing ثم حذفه بنفس الاختبار. وتم تنظيف login_attempts الخاصة باختبار lockout.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ملف الاختبار الجديد iteration34 يغطي المطلوب مباشرة: login admin على الجهتين، shadow admin regression، lockout، bcrypt prefix، CORS، وsetup exe/release sync. نتيجة pytest: 7 passed, 1 failed (CORS فقط).",
+  "rca of the issue": "RCA مختصر: مشكلة CORS ليست من منطق Endpoint نفسه (الكود الخلفي يضبط CORSMiddleware allow_credentials=True وallow_origins صريحة)، لكن الاستجابة الفعلية من الـ public endpoint تحتوي wildcard وبدون allow-credentials، ما يشير إلى override على طبقة Cloudflare/edge.\n\nReproduction: OPTIONS على /api/auth/login مع Origin صريح يعيد 204 مع Access-Control-Allow-Origin=* وبدون Access-Control-Allow-Credentials.\n\nMitigation: ضبط سياسات CORS على ingress/edge لتمرير origin الصريح والسماح بالـ credentials.\n\nMOCKED: تكامل إرسال الفاتورة الإلكترونية الخارجي إلى مصلحة الضرائب ما زال MOCKED (خارج نطاق هذا الاختبار)."
+}

@@ -3090,6 +3090,17 @@ async def clear_failed_login(username: str, organization_id: str):
     await db.login_attempts.delete_one({"identifier": login_attempt_identifier(username, organization_id)})
 
 
+async def get_login_user(username: str, organization_id: str) -> Optional[dict]:
+    if username == ADMIN_USERNAME:
+        super_admin = await db.users.find_one(
+            {"username": ADMIN_USERNAME, "$or": [{"role": "super_admin"}, {"is_super_admin": True}]},
+            {"_id": 0},
+        )
+        if super_admin:
+            return super_admin
+    return await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
+
+
 async def get_current_user(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="يجب تسجيل الدخول أولاً")
@@ -3490,6 +3501,7 @@ async def ensure_default_admin():
             continue
         document.update({"id": str(uuid.uuid4()), "password_hash": hash_password(ADMIN_INITIAL_PASSWORD), "created_at": serialize_datetime(now)})
         await db.users.insert_one(document)
+    await db.login_attempts.delete_many({"identifier": {"$in": [login_attempt_identifier(ADMIN_USERNAME, org_id) for org_id in ORGANIZATIONS]}})
 
 
 async def ensure_organization_seed_data():
@@ -3561,9 +3573,7 @@ async def login(payload: LoginRequest, response: Response):
         raise HTTPException(status_code=400, detail="اختر جهة صحيحة قبل تسجيل الدخول")
     await ensure_login_not_locked(payload.username, organization_id)
     username = payload.username.strip()
-    user = await db.users.find_one({"username": username, "organization_id": organization_id}, {"_id": 0})
-    if not user and username == ADMIN_USERNAME:
-        user = await db.users.find_one({"username": ADMIN_USERNAME, "role": "super_admin"}, {"_id": 0})
+    user = await get_login_user(username, organization_id)
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
         await record_failed_login(payload.username, organization_id)
         raise HTTPException(status_code=401, detail="اسم المستخدم أو كلمة المرور غير صحيحة")
