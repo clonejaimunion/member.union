@@ -4099,6 +4099,8 @@ async def import_memberships(
     if len(content) > 15 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="حجم الملف كبير جداً. الحد الأقصى 15 ميجا")
     rows = extract_membership_import_rows(file.filename or "", content)
+    if not rows:
+        raise HTTPException(status_code=400, detail="لم يتم العثور على صفوف قابلة للاستيراد داخل الملف. إذا كان PDF مصوراً برجاء تحويله إلى Excel/Word أو استخدام PDF نصي واضح")
     header_index, mapping = build_header_mapping(rows)
     imported_documents = []
     skipped_rows = []

@@ -23,6 +23,8 @@ import hashlib
 import secrets
 import subprocess
 from contextvars import ContextVar
+import zipfile
+import xml.etree.ElementTree as ET
 
 import bcrypt
 import jwt
@@ -592,6 +594,34 @@ class MembershipCurrentSizeResponse(BaseModel):
     total_members: int
     retired_members: int
     current_membership_size: int
+
+
+class MembershipImportSkippedRow(BaseModel):
+    row_number: int
+    reason: str
+
+
+class MembershipImportResponse(BaseModel):
+    imported_count: int
+    skipped_count: int
+    total_rows_detected: int
+    imported_members: List[MembershipResponse]
+    skipped_rows: List[MembershipImportSkippedRow]
+
+
+class MembershipAnnualReportRow(BaseModel):
+    governorate: str
+    union_committee: str
+    total_registered: int
+    new_members: int
+    retired_members: int
+    current_membership_size: int
+
+
+class MembershipAnnualReportResponse(BaseModel):
+    year: int
+    rows: List[MembershipAnnualReportRow]
+    totals: MembershipAnnualReportRow
 
 
 class JournalEntryCreate(BaseModel):
@@ -1367,6 +1397,252 @@ def normalize_member_text(value: str) -> str:
 def require_social_solidarity_membership(current_user: dict):
     if (current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID) != "social-solidarity":
         raise HTTPException(status_code=404, detail="صفحة العضوية متاحة لمشروع التكافل الاجتماعي فقط")
+
+
+IMPORT_FIELD_LABELS = {
+    "membership_number": ["رقم العضوية", "رقم العضويه", "رقم العضو", "عضوية", "العضوية", "member no", "membership no"],
+    "name": ["الاسم", "اسم العضو", "اسم المشترك", "اسم", "name", "member name"],
+    "national_id": ["الرقم القومي", "رقم قومي", "القومي", "الرقم القومى", "national id", "nid"],
+    "birth_date": ["تاريخ الميلاد", "الميلاد", "تاريخ ميلاد", "date of birth", "birth date", "dob"],
+    "address": ["العنوان", "عنوان", "محل الاقامة", "محل الإقامة", "address"],
+    "death_beneficiary": ["في حالة الوفاة", "مستلم الاعانة", "مستلم الإعانة", "المستفيد", "مستفيد", "يصرف الى", "يصرف إلى", "beneficiary"],
+}
+
+
+def normalize_import_key(value: str) -> str:
+    text = normalize_member_text(str(value or "")).lower()
+    replacements = {"أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه", "ى": "ي", "ؤ": "و", "ئ": "ي"}
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return re.sub(r"[^\w\u0600-\u06FF]+", "", text)
+
+
+def import_header_field(value: str) -> Optional[str]:
+    normalized = normalize_import_key(value)
+    if not normalized:
+        return None
+    for field_name, labels in IMPORT_FIELD_LABELS.items():
+        for label in labels:
+            label_key = normalize_import_key(label)
+            if label_key and (label_key == normalized or label_key in normalized or normalized in label_key):
+                return field_name
+    return None
+
+
+def parse_import_date(value: str) -> Optional[date]:
+    text = normalize_digit_text(str(value or "")).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d+(\.0)?", text):
+        serial = int(float(text))
+        if 20000 <= serial <= 80000:
+            return date(1899, 12, 30) + timedelta(days=serial)
+    for pattern in ["%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d.%m.%Y"]:
+        try:
+            return datetime.strptime(text, pattern).date()
+        except ValueError:
+            continue
+    match = re.search(r"(\d{1,2})[\-/\.](\d{1,2})[\-/\.](\d{4})", text)
+    if match:
+        day, month, year = [int(item) for item in match.groups()]
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+    return None
+
+
+def extract_xlsx_rows(content: bytes) -> List[List[str]]:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            shared_strings = []
+            if "xl/sharedStrings.xml" in archive.namelist():
+                shared_root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                for item in shared_root.iter():
+                    if item.tag.endswith("}si"):
+                        texts = [node.text or "" for node in item.iter() if node.tag.endswith("}t")]
+                        shared_strings.append("".join(texts))
+            worksheet_names = sorted([name for name in archive.namelist() if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")])
+            rows = []
+            for worksheet_name in worksheet_names[:3]:
+                root = ET.fromstring(archive.read(worksheet_name))
+                for row in root.iter():
+                    if not row.tag.endswith("}row"):
+                        continue
+                    values = []
+                    for cell in list(row):
+                        if not cell.tag.endswith("}c"):
+                            continue
+                        cell_type = cell.attrib.get("t")
+                        value_node = next((child for child in list(cell) if child.tag.endswith("}v")), None)
+                        inline_text = "".join(node.text or "" for node in cell.iter() if node.tag.endswith("}t"))
+                        value = value_node.text if value_node is not None else inline_text
+                        if cell_type == "s" and value is not None:
+                            try:
+                                value = shared_strings[int(value)]
+                            except (ValueError, IndexError):
+                                value = ""
+                        values.append(str(value or "").strip())
+                    if any(values):
+                        rows.append(values)
+            return rows
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ملف Excel غير صالح")
+
+
+def extract_docx_rows(content: bytes) -> List[List[str]]:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            if "word/document.xml" not in archive.namelist():
+                raise HTTPException(status_code=400, detail="ملف Word غير صالح")
+            root = ET.fromstring(archive.read("word/document.xml"))
+            rows = []
+            for table_row in root.iter():
+                if not table_row.tag.endswith("}tr"):
+                    continue
+                cells = []
+                for cell in list(table_row):
+                    if cell.tag.endswith("}tc"):
+                        text = " ".join(node.text or "" for node in cell.iter() if node.tag.endswith("}t"))
+                        cells.append(normalize_member_text(text))
+                if any(cells):
+                    rows.append(cells)
+            if rows:
+                return rows
+            paragraphs = []
+            for paragraph in root.iter():
+                if paragraph.tag.endswith("}p"):
+                    text = " ".join(node.text or "" for node in paragraph.iter() if node.tag.endswith("}t"))
+                    text = normalize_member_text(text)
+                    if text:
+                        paragraphs.append(split_import_line(text))
+            return [row for row in paragraphs if row]
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="ملف Word غير صالح")
+
+
+def split_import_line(line: str) -> List[str]:
+    text = normalize_member_text(line)
+    if not text:
+        return []
+    separators = ["\t", "|", ";", ","]
+    for separator in separators:
+        if separator in text:
+            return [part.strip() for part in text.split(separator) if part.strip()]
+    return [part.strip() for part in re.split(r"\s{2,}", text) if part.strip()]
+
+
+def extract_pdf_rows(content: bytes) -> List[List[str]]:
+    reader = PdfReader(BytesIO(content))
+    rows = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        for line in text.splitlines():
+            row = split_import_line(line)
+            if row:
+                rows.append(row)
+    return rows
+
+
+def extract_membership_import_rows(filename: str, content: bytes) -> List[List[str]]:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix == ".pdf":
+        return extract_pdf_rows(content)
+    if suffix == ".docx":
+        return extract_docx_rows(content)
+    if suffix == ".xlsx":
+        return extract_xlsx_rows(content)
+    if suffix == ".csv":
+        text = content.decode("utf-8-sig")
+        return [split_import_line(line) for line in text.splitlines() if split_import_line(line)]
+    if suffix in [".doc", ".xls"]:
+        raise HTTPException(status_code=400, detail="برجاء حفظ ملف Word بصيغة DOCX أو ملف Excel بصيغة XLSX ثم إعادة الاستيراد")
+    raise HTTPException(status_code=400, detail="صيغة الملف غير مدعومة. استخدم PDF أو DOCX أو XLSX")
+
+
+def build_header_mapping(rows: List[List[str]]) -> tuple[Optional[int], dict]:
+    best_index = None
+    best_mapping = {}
+    for index, row in enumerate(rows[:10]):
+        mapping = {}
+        for column_index, value in enumerate(row):
+            field_name = import_header_field(value)
+            if field_name and field_name not in mapping.values():
+                mapping[column_index] = field_name
+        if len(mapping) > len(best_mapping):
+            best_index = index
+            best_mapping = mapping
+    if len(best_mapping) >= 3:
+        return best_index, best_mapping
+    return None, {}
+
+
+def row_to_membership_payload(row: List[str], mapping: dict) -> dict:
+    payload = {}
+    for index, field_name in mapping.items():
+        if index < len(row):
+            payload[field_name] = normalize_member_text(row[index])
+    return payload
+
+
+def infer_membership_payload(row: List[str]) -> dict:
+    cells = [normalize_member_text(cell) for cell in row if normalize_member_text(cell)]
+    payload = {}
+    used = set()
+    for index, cell in enumerate(cells):
+        digits = normalize_digit_text(cell)
+        if "national_id" not in payload and re.fullmatch(r"\d{14}", digits):
+            payload["national_id"] = digits
+            used.add(index)
+            continue
+        parsed_date = parse_import_date(cell)
+        if "birth_date" not in payload and parsed_date:
+            payload["birth_date"] = serialize_date(parsed_date)
+            used.add(index)
+            continue
+    for index, cell in enumerate(cells):
+        digits = normalize_digit_text(cell)
+        if index not in used and "membership_number" not in payload and re.fullmatch(r"\d{1,12}", digits):
+            payload["membership_number"] = digits
+            used.add(index)
+            break
+    remaining = [(index, cell) for index, cell in enumerate(cells) if index not in used]
+    name_candidates = [(index, cell) for index, cell in remaining if len(cell) >= 5 and not re.search(r"شارع|طريق|محافظة|مركز|قسم|حي|منزل|عمارة", cell)]
+    if name_candidates:
+        index, cell = name_candidates[0]
+        payload["name"] = cell
+        used.add(index)
+    remaining = [(index, cell) for index, cell in enumerate(cells) if index not in used]
+    if remaining:
+        address_index, address = max(remaining, key=lambda item: len(item[1]))
+        payload["address"] = address
+        used.add(address_index)
+    remaining = [(index, cell) for index, cell in enumerate(cells) if index not in used]
+    if remaining:
+        payload["death_beneficiary"] = remaining[0][1]
+    return payload
+
+
+def normalize_import_membership_payload(payload: dict, governorate: str, union_committee: str) -> Optional[dict]:
+    birth_value = payload.get("birth_date")
+    birth_date_value = parse_import_date(birth_value) if not isinstance(birth_value, date) else birth_value
+    national_id = normalize_digit_text(payload.get("national_id") or "")
+    membership_number = normalize_digit_text(payload.get("membership_number") or "")
+    required_payload = {
+        "governorate": governorate,
+        "union_committee": union_committee,
+        "membership_number": membership_number,
+        "name": normalize_member_text(payload.get("name") or ""),
+        "national_id": national_id,
+        "birth_date": birth_date_value,
+        "address": normalize_member_text(payload.get("address") or ""),
+        "death_beneficiary": normalize_member_text(payload.get("death_beneficiary") or ""),
+    }
+    if not all([required_payload["membership_number"], required_payload["name"], required_payload["national_id"], required_payload["birth_date"], required_payload["address"], required_payload["death_beneficiary"]]):
+        return None
+    if not required_payload["national_id"].isdigit() or len(required_payload["national_id"]) != 14:
+        return None
+    return required_payload
 
 
 async def depreciation_total_for_asset(asset_id: str) -> float:
@@ -3805,6 +4081,70 @@ async def create_membership(payload: MembershipCreate, current_user: dict = Depe
     return MembershipResponse(**hydrate_membership(document))
 
 
+@api_router.post("/memberships/import", response_model=MembershipImportResponse)
+async def import_memberships(
+    governorate: str = Form(...),
+    union_committee: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
+):
+    require_social_solidarity_membership(current_user)
+    clean_governorate = normalize_member_text(governorate)
+    clean_committee = normalize_member_text(union_committee)
+    if not clean_governorate or not clean_committee:
+        raise HTTPException(status_code=400, detail="اختر المحافظة واسم اللجنة قبل الاستيراد")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="الملف فارغ")
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الملف كبير جداً. الحد الأقصى 15 ميجا")
+    rows = extract_membership_import_rows(file.filename or "", content)
+    if not rows:
+        raise HTTPException(status_code=400, detail="لم يتم العثور على صفوف قابلة للاستيراد داخل الملف. إذا كان PDF مصوراً برجاء تحويله إلى Excel/Word أو استخدام PDF نصي واضح")
+    header_index, mapping = build_header_mapping(rows)
+    imported_documents = []
+    skipped_rows = []
+    total_detected = 0
+    seen_membership_numbers = set()
+    seen_national_ids = set()
+    for index, row in enumerate(rows, start=1):
+        if header_index is not None and index - 1 <= header_index:
+            continue
+        if not any(normalize_member_text(cell) for cell in row):
+            continue
+        total_detected += 1
+        raw_payload = row_to_membership_payload(row, mapping) if mapping else infer_membership_payload(row)
+        normalized_payload = normalize_import_membership_payload(raw_payload, clean_governorate, clean_committee)
+        if not normalized_payload:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="لم يتم العثور على كل البيانات المطلوبة في الصف"))
+            continue
+        if normalized_payload["membership_number"] in seen_membership_numbers or normalized_payload["national_id"] in seen_national_ids:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="صف مكرر داخل الملف"))
+            continue
+        seen_membership_numbers.add(normalized_payload["membership_number"])
+        seen_national_ids.add(normalized_payload["national_id"])
+        try:
+            payload = MembershipCreate(**normalized_payload)
+            document = await membership_document_from_payload(payload)
+        except HTTPException as exc:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason=str(exc.detail)))
+            continue
+        except Exception:
+            skipped_rows.append(MembershipImportSkippedRow(row_number=index, reason="بيانات الصف غير صالحة"))
+            continue
+        now_iso = serialize_datetime(datetime.now(timezone.utc))
+        document.update({"id": str(uuid.uuid4()), "created_at": now_iso, "updated_at": now_iso})
+        await db.memberships.insert_one(document.copy())
+        imported_documents.append(document)
+    return MembershipImportResponse(
+        imported_count=len(imported_documents),
+        skipped_count=len(skipped_rows),
+        total_rows_detected=total_detected,
+        imported_members=[MembershipResponse(**hydrate_membership(document)) for document in imported_documents],
+        skipped_rows=skipped_rows[:100],
+    )
+
+
 @api_router.get("/memberships", response_model=List[MembershipResponse])
 async def list_memberships(
     governorate: Optional[str] = Query(default=None),
@@ -3860,6 +4200,43 @@ async def get_membership_current_size(
     total = await db.memberships.count_documents(with_organization({}))
     retired = await db.memberships.count_documents(with_organization({"$or": [{"retirement_year": {"$lt": year}}, {"retirement_year": year, "retirement_month": {"$lte": month}}]}))
     return MembershipCurrentSizeResponse(organization_id=organization_id_or_default(), as_of_year=year, as_of_month=month, total_members=total, retired_members=retired, current_membership_size=max(total - retired, 0))
+
+
+@api_router.get("/memberships/annual-report", response_model=MembershipAnnualReportResponse)
+async def get_membership_annual_report(year: int = Query(..., ge=1900, le=2200), _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"]))):
+    require_social_solidarity_membership(_)
+    documents = await db.memberships.find(with_organization({}), {"_id": 0}).to_list(10000)
+    groups: dict[tuple[str, str], dict] = {}
+    for document in documents:
+        governorate = document.get("governorate") or "غير محدد"
+        committee = document.get("union_committee") or "غير محدد"
+        key = (governorate, committee)
+        if key not in groups:
+            groups[key] = {"governorate": governorate, "union_committee": committee, "total_registered": 0, "new_members": 0, "retired_members": 0, "current_membership_size": 0}
+        groups[key]["total_registered"] += 1
+        created_at = document.get("created_at")
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except ValueError:
+                created_at = None
+        if isinstance(created_at, datetime) and created_at.year == year:
+            groups[key]["new_members"] += 1
+        if int(document.get("retirement_year") or 0) == year:
+            groups[key]["retired_members"] += 1
+        retired_before_or_during_year = int(document.get("retirement_year") or 9999) <= year
+        if not retired_before_or_during_year:
+            groups[key]["current_membership_size"] += 1
+    rows = [MembershipAnnualReportRow(**value) for value in sorted(groups.values(), key=lambda item: (item["governorate"], item["union_committee"]))]
+    totals = MembershipAnnualReportRow(
+        governorate="الإجمالي",
+        union_committee="كل اللجان",
+        total_registered=sum(row.total_registered for row in rows),
+        new_members=sum(row.new_members for row in rows),
+        retired_members=sum(row.retired_members for row in rows),
+        current_membership_size=sum(row.current_membership_size for row in rows),
+    )
+    return MembershipAnnualReportResponse(year=year, rows=rows, totals=totals)
 
 
 @api_router.get("/journal-entries", response_model=List[JournalEntryResponse])
