@@ -85,11 +85,13 @@
 - إصلاح متابعة: `/api/organizations/public` يعمل 200، وتم إرجاع حساب `admin` بدون 2FA وإصلاح رد بروفايل السوبر أدمن للجهة المختارة.
 - Iteration 33: اختبار localhost/offline ناجح 100%؛ `http://localhost:8001` يعرض واجهة React، و`/api/organizations/public` يعيد الجهتين محلياً، وrelease build لا يحتوي رابط preview ويحتوي `localhost:8001`، ومجلد wheels موجود، و`setup.exe` موجود وغير فارغ.
 - إصلاح متابعة للأوفلاين: تمت إضافة wheel الخاصة بـ `colorama` المطلوبة على Windows بواسطة `qrcode`، وأعيد بناء `setup.exe` بحجم 16,512,032 bytes، واختبار regression المحلي نجح 5/5.
+- إصلاح تسجيل دخول السوبر أدمن: أصبح اسم المستخدم `admin` يبحث عن حساب `super_admin` أولاً على الجهتين قبل أي حساب قديم بنفس الاسم داخل جهة محددة، مع مسح محاولات الدخول الفاشلة الخاصة به عند بدء التشغيل، وتم إنشاء `setup.exe` جديد بحجم 16,512,122 bytes.
 
 ## ملاحظات معروفة
 - public OPTIONS CORS على نطاق preview يعيد headers من Cloudflare/ingress قبل backend؛ داخلياً `localhost:8001` يعيد origin صريح وcredentials، وتدفق الواجهة يعمل.
 - تكامل مصلحة الضرائب الخارجي للفواتير الإلكترونية ليس Live integration حالياً؛ الموجود داخلي/ MOCKED بالنسبة للإرسال الخارجي.
 - في بيئة الاختبار الحالية فقط، حساب `admin` قد يطلب 2FA إذا كان مفعلاً سابقاً في قاعدة البيانات المحلية، بينما قواعد البيانات الجديدة تنشئه بدون 2FA؛ يمكن اختبار الدخول العادي حالياً بحسابي `admin_union` و`admin_takaful`.
+- CORS المحلي على `localhost:8001` يعيد Origin صريح وCredentials بشكل صحيح؛ فشل OPTIONS على رابط preview العام ما زال من طبقة Cloudflare/ingress وليس من نسخة localhost/offline.
 
 ## مراجع تفصيلية
 - السجل التفصيلي الطويل: `/app/memory/CHANGELOG.md`.
