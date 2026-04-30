@@ -297,6 +297,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(default=None, min_length=3, max_length=120)
     password: Optional[str] = Field(default=None, min_length=8)
+    role: Optional[Literal["user", "admin"]] = None
     permissions: Optional[UserPermissions] = None
     is_active: Optional[bool] = None
 
@@ -3148,6 +3149,12 @@ async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+async def require_super_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    if not is_super_admin(current_user):
+        raise HTTPException(status_code=403, detail="إدارة المستخدمين متاحة لحساب السوبر أدمن admin فقط")
+    return current_user
+
+
 @api_router.get("/app-settings/public", response_model=AppSettingsResponse)
 async def get_public_app_settings():
     document = await get_app_settings_document()
@@ -3627,13 +3634,13 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/admin/users", response_model=List[UserPublic])
-async def list_users(admin_user: dict = Depends(require_admin)):
+async def list_users(admin_user: dict = Depends(require_super_admin)):
     users = await db.users.find(await user_query_for_admin(admin_user), {"_id": 0}).sort("organization_id", 1).sort("created_at", -1).to_list(1000)
     return [public_user(user) for user in users]
 
 
 @api_router.post("/admin/users", response_model=UserPublic)
-async def create_user(payload: UserCreate, admin_user: dict = Depends(require_admin)):
+async def create_user(payload: UserCreate, admin_user: dict = Depends(require_super_admin)):
     organization_id = payload.organization_id if is_super_admin(admin_user) and payload.organization_id else admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
     if organization_id not in ORGANIZATIONS:
         raise HTTPException(status_code=400, detail="الجهة غير صحيحة")
@@ -3668,7 +3675,7 @@ async def create_user(payload: UserCreate, admin_user: dict = Depends(require_ad
 
 
 @api_router.put("/admin/users/{user_id}", response_model=UserPublic)
-async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depends(require_admin)):
+async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depends(require_super_admin)):
     query = {"id": user_id} if is_super_admin(admin_user) else with_organization({"id": user_id}, admin_user.get("organization_id"))
     user = await db.users.find_one(query, {"_id": 0})
     if not user:
@@ -3685,9 +3692,11 @@ async def update_user(user_id: str, payload: UserUpdate, admin_user: dict = Depe
     if payload.password:
         updates["password_hash"] = hash_password(payload.password)
         updates["must_change_password"] = False
-    if payload.permissions is not None and (user.get("role") != "admin" or is_super_admin(admin_user)):
+    if payload.role is not None:
+        updates["role"] = payload.role
+    if payload.permissions is not None:
         updates["permissions"] = payload.permissions.model_dump()
-    if payload.is_active is not None and (user.get("role") != "admin" or is_super_admin(admin_user)):
+    if payload.is_active is not None:
         updates["is_active"] = payload.is_active
 
     await db.users.update_one(query, {"$set": updates})
@@ -3712,7 +3721,7 @@ async def update_admin_profile(payload: AdminProfileUpdate, admin_user: dict = D
 
 
 @api_router.delete("/admin/users/{user_id}")
-async def delete_user(user_id: str, admin_user: dict = Depends(require_admin)):
+async def delete_user(user_id: str, admin_user: dict = Depends(require_super_admin)):
     query = {"id": user_id} if is_super_admin(admin_user) else with_organization({"id": user_id}, admin_user.get("organization_id"))
     user = await db.users.find_one(query, {"_id": 0})
     if not user:

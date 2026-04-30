@@ -64,6 +64,8 @@ const adminSections = [
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
+const superAdminOnlySectionIds = new Set(["add-user", "users"]);
+
 export default function AdminPage() {
   const navigate = useNavigate();
   const { user, logout, refreshMe } = useAuth();
@@ -102,12 +104,17 @@ export default function AdminPage() {
   const [auditFilter, setAuditFilter] = useState({ year: String(currentAdminDate.getFullYear()), month: "all", hour: "all" });
   const effectiveModuleSettings = Object.keys(moduleSettings).length ? moduleSettings : (user?.organization_modules || {});
   const isSuperAdmin = user?.role === "super_admin";
+  const visibleAdminSections = adminSections.filter((section) => isSuperAdmin || !superAdminOnlySectionIds.has(section.id));
   const visiblePermissionEntries = Object.entries(permissionLabels).filter(([key]) => key !== "manage_einvoice" || effectiveModuleSettings.electronic_invoice !== false);
   const visiblePermissionKeys = new Set(visiblePermissionEntries.map(([key]) => key));
 
   const loadUsers = useCallback(() => {
+    if (!isSuperAdmin) {
+      setUsers([]);
+      return;
+    }
     api.get("/admin/users").then((response) => setUsers(response.data)).catch(() => toast.error("تعذر تحميل المستخدمين"));
-  }, []);
+  }, [isSuperAdmin]);
 
   const loadBanks = useCallback(async () => {
     try {
@@ -192,6 +199,12 @@ export default function AdminPage() {
   }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations]);
 
   useEffect(() => {
+    if (!isSuperAdmin && superAdminOnlySectionIds.has(activeAdminSection)) {
+      setActiveAdminSection("general-settings");
+    }
+  }, [activeAdminSection, isSuperAdmin]);
+
+  useEffect(() => {
     setAdminFullName(user?.full_name || "");
   }, [user?.full_name]);
 
@@ -204,6 +217,10 @@ export default function AdminPage() {
 
   const createUser = async (event) => {
     event.preventDefault();
+    if (!isSuperAdmin) {
+      toast.error("إدارة المستخدمين متاحة لحساب السوبر أدمن admin فقط");
+      return;
+    }
     try {
       await api.post("/admin/users", newUser);
       toast.success("تم إنشاء المستخدم");
@@ -215,6 +232,10 @@ export default function AdminPage() {
   };
 
   const updateUser = async (targetUser, updates) => {
+    if (!isSuperAdmin) {
+      toast.error("إدارة المستخدمين متاحة لحساب السوبر أدمن admin فقط");
+      return;
+    }
     try {
       await api.put(`/admin/users/${targetUser.id}`, updates);
       toast.success("تم تحديث المستخدم");
@@ -234,6 +255,10 @@ export default function AdminPage() {
   };
 
   const deleteUser = async (targetUser) => {
+    if (!isSuperAdmin) {
+      toast.error("إدارة المستخدمين متاحة لحساب السوبر أدمن admin فقط");
+      return;
+    }
     const confirmed = window.confirm(`هل أنت متأكد من حذف المستخدم ${targetUser.username}؟`);
     if (!confirmed) return;
     try {
@@ -468,7 +493,7 @@ export default function AdminPage() {
 
       <section className="mx-auto max-w-7xl px-4 pt-8 sm:px-6 lg:px-8" data-testid="admin-section-menu">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="admin-section-menu-grid">
-          {adminSections.map((section) => {
+          {visibleAdminSections.map((section) => {
             const Icon = section.icon;
             const active = activeAdminSection === section.id;
             return (
@@ -484,7 +509,7 @@ export default function AdminPage() {
 
       <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="admin-content-grid">
         <div className="space-y-6" data-testid="admin-users-column">
-          {activeAdminSection === "add-user" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
+          {isSuperAdmin && activeAdminSection === "add-user" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="create-user-section">
             <div className="mb-5 flex items-center gap-3" data-testid="create-user-heading">
               <UsersRound className="h-6 w-6 text-emerald-700" />
               <h2 className="text-2xl font-extrabold" data-testid="create-user-title">إضافة مستخدم لإدخال البيانات</h2>
@@ -591,7 +616,7 @@ export default function AdminPage() {
             {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="rounded bg-slate-50 p-3 text-xs font-bold" data-testid={`audit-log-row-${item.id}`}><div className="grid grid-cols-1 gap-2 md:grid-cols-[110px_105px_180px_80px]" data-testid={`audit-log-row-${item.id}-summary`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-actor-full-name`}>{item.actor_full_name || item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div><p className="mt-2 leading-6 text-slate-700" data-testid={`audit-log-row-${item.id}-arabic-description`}>{item.arabic_description || item.action}</p></div>)}</div></div>}
           </section>}
 
-          {activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
+          {isSuperAdmin && activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
             <h2 className="mb-5 text-2xl font-extrabold" data-testid="users-list-title">المستخدمون المسجلون</h2>
             <div className="space-y-3" data-testid="users-list">
               {users.map((item) => (
@@ -600,7 +625,7 @@ export default function AdminPage() {
                     <div data-testid={`user-row-${item.id}-identity`}>
                       <p className="text-lg font-extrabold" data-testid={`user-row-${item.id}-username`}>{item.username}</p>
                       <p className="text-sm font-extrabold text-emerald-700" data-testid={`user-row-${item.id}-full-name`}>{item.full_name}</p>
-                      <p className="text-sm font-bold text-slate-500" data-testid={`user-row-${item.id}-role`}>{item.role === "admin" ? "أدمن" : "مستخدم إدخال"}</p>
+                      <p className="text-sm font-bold text-slate-500" data-testid={`user-row-${item.id}-role`}>{item.role === "admin" ? "أدمن عادي" : "مستخدم إدخال"}</p>
                       {isSuperAdmin && <p className="text-xs font-bold text-slate-500" data-testid={`user-row-${item.id}-organization`}>{item.organization_name}</p>}
                     </div>
                     <div className="flex flex-wrap gap-2" data-testid={`user-row-${item.id}-badges`}>
@@ -610,8 +635,19 @@ export default function AdminPage() {
                       ))}
                     </div>
                   </div>
-                  {item.role !== "admin" && (
                     <div className="mt-4 space-y-3" data-testid={`user-row-${item.id}-actions`}>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[220px_1fr]" data-testid={`user-row-${item.id}-role-editor`}>
+                        <div className="space-y-2" data-testid={`user-row-${item.id}-role-select-wrapper`}>
+                          <Label data-testid={`user-row-${item.id}-role-select-label`}>نوع الحساب</Label>
+                          <select value={item.role} onChange={(event) => updateUser(item, { role: event.target.value })} className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid={`user-row-${item.id}-role-select`}>
+                            <option value="user">مستخدم</option>
+                            <option value="admin">أدمن عادي</option>
+                          </select>
+                        </div>
+                        <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-emerald-800" data-testid={`user-row-${item.id}-super-admin-note`}>
+                          المسح والتعطيل والتفعيل والتعديل متاح هنا لحساب السوبر أدمن admin فقط.
+                        </div>
+                      </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid={`user-row-${item.id}-permissions-editor`}>
                         {visiblePermissionEntries.map(([key, label]) => (
                           <button key={key} type="button" onClick={() => toggleExistingPermission(item, key)} className={`flex items-center justify-between rounded-lg border p-3 text-sm font-extrabold transition-colors ${item.permissions?.[key] ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"}`} data-testid={`user-row-${item.id}-permission-${key}-toggle`}>
@@ -627,11 +663,10 @@ export default function AdminPage() {
                       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]" data-testid={`user-row-${item.id}-security-actions`}>
                       <Input type="password" placeholder="كلمة مرور جديدة" value={resetPasswords[item.id] || ""} onChange={(event) => setResetPasswords((current) => ({ ...current, [item.id]: event.target.value }))} className="h-11 rounded-lg bg-white text-right" data-testid={`user-row-${item.id}-reset-password-input`} />
                       <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { password: resetPasswords[item.id] })} data-testid={`user-row-${item.id}-reset-password-button`}>تغيير كلمة المرور</Button>
-                      <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { is_active: !item.is_active })} data-testid={`user-row-${item.id}-toggle-active-button`}>{item.is_active ? "إيقاف" : "تفعيل"}</Button>
-                      <Button type="button" variant="outline" className="h-11 rounded-lg border-red-200 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => deleteUser(item)} data-testid={`user-row-${item.id}-delete-button`}><Trash2 className="h-4 w-4" /> حذف المستخدم</Button>
+                      <Button type="button" variant="outline" className="h-11 rounded-lg bg-white" onClick={() => updateUser(item, { is_active: !item.is_active })} data-testid={`user-row-${item.id}-toggle-active-button`}>{item.is_active ? "تعطيل" : "تفعيل"}</Button>
+                      <Button type="button" variant="outline" className="h-11 rounded-lg border-red-200 bg-red-50 text-red-700 hover:bg-red-100" onClick={() => deleteUser(item)} data-testid={`user-row-${item.id}-delete-button`}><Trash2 className="h-4 w-4" /> مسح</Button>
                       </div>
                     </div>
-                  )}
                 </div>
               ))}
             </div>
