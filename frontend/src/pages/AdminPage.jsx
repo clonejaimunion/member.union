@@ -80,7 +80,7 @@ const adminSections = [
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["add-user", "users", "eta-integration"]);
+const superAdminOnlySectionIds = new Set(["general-settings", "add-user", "users", "eta-integration"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -108,6 +108,9 @@ export default function AdminPage() {
   const [appSettings, setAppSettings] = useState(null);
   const [systemName, setSystemName] = useState("نظام محاسبي متكامل");
   const [organizationName, setOrganizationName] = useState("");
+  const [organizationLoginLabel, setOrganizationLoginLabel] = useState("");
+  const [organizationEdits, setOrganizationEdits] = useState({});
+  const [organizationLabelEdits, setOrganizationLabelEdits] = useState({});
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
@@ -171,6 +174,10 @@ export default function AdminPage() {
       setAppSettings(response.data);
       setSystemName(response.data.system_name || "نظام محاسبي متكامل");
       setOrganizationName(response.data.organization_name || "");
+      setOrganizationLoginLabel(response.data.organization_login_label || "");
+      const orgs = response.data.organizations || {};
+      setOrganizationEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.name || ""])));
+      setOrganizationLabelEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.login_label || ""])));
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -235,7 +242,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!isSuperAdmin && superAdminOnlySectionIds.has(activeAdminSection)) {
-      setActiveAdminSection("general-settings");
+      setActiveAdminSection("fixed-asset-rates");
     }
   }, [activeAdminSection, isSuperAdmin]);
 
@@ -473,9 +480,20 @@ export default function AdminPage() {
     if (!systemName.trim()) return toast.error("أدخل اسم النظام");
     setSettingsLoading(true);
     try {
-      const response = await api.put("/admin/app-settings", { system_name: systemName.trim(), organization_name: organizationName.trim() });
+      const response = await api.put("/admin/app-settings", {
+        system_name: systemName.trim(),
+        organization_name: organizationName.trim(),
+        organization_login_label: organizationLoginLabel.trim(),
+        organization_names: organizationEdits,
+        organization_login_labels: organizationLabelEdits,
+      });
       setAppSettings(response.data);
+      setSystemName(response.data.system_name || systemName.trim());
       setOrganizationName(response.data.organization_name || organizationName.trim());
+      setOrganizationLoginLabel(response.data.organization_login_label || organizationLoginLabel.trim());
+      const orgs = response.data.organizations || {};
+      setOrganizationEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.name || ""])));
+      setOrganizationLabelEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.login_label || ""])));
       await refreshSettings();
       toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
@@ -746,14 +764,33 @@ export default function AdminPage() {
             </div>
             <form onSubmit={saveAppSystemName} className="space-y-3" data-testid="general-app-name-form">
               <div className="space-y-2" data-testid="app-system-name-wrapper">
-                <Label htmlFor="app_system_name" data-testid="app-system-name-label">اسم النظام</Label>
+                <Label htmlFor="app_system_name" data-testid="app-system-name-label">اسم البرنامج بالكامل</Label>
                 <Input id="app_system_name" value={systemName} onChange={(event) => setSystemName(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-system-name-input" />
               </div>
               <div className="space-y-2" data-testid="app-organization-name-wrapper">
                 <Label htmlFor="app_organization_name" data-testid="app-organization-name-label">اسم الجهة/النقابة</Label>
                 <Input id="app_organization_name" value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-organization-name-input" />
               </div>
-              <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ الاسم والجهة</Button>
+              <div className="space-y-2" data-testid="app-organization-login-label-wrapper">
+                <Label htmlFor="app_organization_login_label" data-testid="app-organization-login-label-label">اسم الجهة المختصر في شاشة الدخول</Label>
+                <Input id="app_organization_login_label" value={organizationLoginLabel} onChange={(event) => setOrganizationLoginLabel(event.target.value)} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="app-organization-login-label-input" />
+              </div>
+              <div className="space-y-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4" data-testid="all-organizations-names-editor">
+                <p className="text-sm font-extrabold text-emerald-800" data-testid="all-organizations-names-title">تعديل أسماء الجهات في كل البرنامج</p>
+                {Object.entries(appSettings?.organizations || {}).map(([orgId, organization]) => (
+                  <div key={orgId} className="grid grid-cols-1 gap-3 lg:grid-cols-2" data-testid={`organization-global-editor-${orgId}`}>
+                    <div className="space-y-2" data-testid={`organization-name-wrapper-${orgId}`}>
+                      <Label data-testid={`organization-name-label-${orgId}`}>الاسم الكامل - {organization.login_label}</Label>
+                      <Input value={organizationEdits[orgId] || ""} onChange={(event) => setOrganizationEdits((current) => ({ ...current, [orgId]: event.target.value }))} className="h-11 bg-white text-right" data-testid={`organization-name-input-${orgId}`} />
+                    </div>
+                    <div className="space-y-2" data-testid={`organization-login-label-wrapper-${orgId}`}>
+                      <Label data-testid={`organization-login-label-label-${orgId}`}>الاسم المختصر</Label>
+                      <Input value={organizationLabelEdits[orgId] || ""} onChange={(event) => setOrganizationLabelEdits((current) => ({ ...current, [orgId]: event.target.value }))} className="h-11 bg-white text-right" data-testid={`organization-login-label-input-${orgId}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ أسماء البرنامج والجهات</Button>
             </form>
             <div className="mt-5 space-y-3" data-testid="shortcut-icon-settings-panel">
               <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="shortcut-icon-preview-card">

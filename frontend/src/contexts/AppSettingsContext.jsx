@@ -5,6 +5,7 @@ const defaultSettings = {
   system_name: "نظام محاسبي متكامل",
   shortcut_icon_url: null,
   shortcut_update_status: null,
+  organizations: {},
   updated_at: null,
 };
 

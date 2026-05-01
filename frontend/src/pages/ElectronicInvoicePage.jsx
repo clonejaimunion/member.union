@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CreditLine } from "@/components/CreditLine";
 import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { formatCurrency, sanitizeDecimalInput } from "@/lib/format";
 
@@ -34,7 +35,8 @@ const defaultService = { code: "", name: "", tax_rate: "0", is_default: false };
 export default function ElectronicInvoicePage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const [settings, setSettings] = useState(defaultSettings);
+  const { settings: globalSettings } = useAppSettings();
+  const [settings, setSettings] = useState({ ...defaultSettings, organization_name: globalSettings.organizations?.["general-union"]?.name || defaultSettings.organization_name });
   const [customers, setCustomers] = useState([]);
   const [services, setServices] = useState([]);
   const [invoices, setInvoices] = useState([]);

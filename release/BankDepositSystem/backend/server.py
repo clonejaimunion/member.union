@@ -319,6 +319,7 @@ class AppSettingsResponse(BaseModel):
     organization_id: Optional[str] = None
     organization_name: Optional[str] = None
     organization_login_label: Optional[str] = None
+    organizations: Dict[str, dict] = Field(default_factory=dict)
     shortcut_icon_url: Optional[str] = None
     shortcut_icon_updated_at: Optional[str] = None
     shortcut_update_status: Optional[str] = None
@@ -328,6 +329,9 @@ class AppSettingsResponse(BaseModel):
 class AppSettingsUpdate(BaseModel):
     system_name: str = Field(..., min_length=2, max_length=120)
     organization_name: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    organization_login_label: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    organization_names: Optional[Dict[str, str]] = None
+    organization_login_labels: Optional[Dict[str, str]] = None
 
 
 class OrganizationResponse(BaseModel):
@@ -1445,15 +1449,17 @@ def build_organization_modules_response(organization: dict) -> OrganizationModul
     )
 
 
-def build_app_settings_response(document: dict) -> AppSettingsResponse:
+async def build_app_settings_response(document: dict) -> AppSettingsResponse:
     organization_id = organization_id_or_default()
     organization_name = document.get("organization_name")
     organization_login_label = document.get("organization_login_label")
+    organizations = {item["id"]: {"id": item["id"], "name": item["name"], "login_label": item["login_label"], "modules": item.get("modules", {})} for item in await list_organization_documents()}
     return AppSettingsResponse(
         system_name=document.get("system_name") or DEFAULT_SYSTEM_NAME,
         organization_id=organization_id,
         organization_name=organization_name,
         organization_login_label=organization_login_label,
+        organizations=organizations,
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
         shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
         shortcut_update_status=document.get("shortcut_update_status"),
@@ -3410,7 +3416,7 @@ async def require_super_admin(current_user: dict = Depends(get_current_user)) ->
 @api_router.get("/app-settings/public", response_model=AppSettingsResponse)
 async def get_public_app_settings():
     document = await get_app_settings_document()
-    return build_app_settings_response(document)
+    return await build_app_settings_response(document)
 
 
 @api_router.get("/organizations/public", response_model=List[OrganizationResponse])
@@ -3431,11 +3437,11 @@ async def get_admin_app_settings(admin_user: dict = Depends(require_admin)):
     organization = await get_organization_document(admin_user.get("organization_id"))
     document["organization_name"] = organization["name"]
     document["organization_login_label"] = organization["login_label"]
-    return build_app_settings_response(document)
+    return await build_app_settings_response(document)
 
 
 @api_router.put("/admin/app-settings", response_model=AppSettingsResponse)
-async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict = Depends(require_admin)):
+async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict = Depends(require_super_admin)):
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     system_name = payload.system_name.strip()
     if len(system_name) < 2:
@@ -3456,11 +3462,45 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
             upsert=True,
         )
         await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_name": organization_name, "updated_at": now_iso}})
+    if payload.organization_login_label is not None:
+        login_label = payload.organization_login_label.strip()
+        if len(login_label) < 2:
+            raise HTTPException(status_code=400, detail="اسم الجهة المختصر مطلوب")
+        await db.organizations.update_one(
+            {"id": organization_id},
+            {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "name": ORGANIZATIONS[organization_id]["name"], "created_at": now_iso}},
+            upsert=True,
+        )
+    if payload.organization_names:
+        for org_id, org_name_value in payload.organization_names.items():
+            if org_id not in ORGANIZATIONS:
+                continue
+            org_name = (org_name_value or "").strip()
+            if len(org_name) < 2:
+                raise HTTPException(status_code=400, detail="اسم الجهة مطلوب")
+            await db.organizations.update_one(
+                {"id": org_id},
+                {"$set": {"name": org_name, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "login_label": ORGANIZATIONS[org_id]["login_label"], "created_at": now_iso}},
+                upsert=True,
+            )
+            await db.users.update_many({"organization_id": org_id}, {"$set": {"organization_name": org_name, "updated_at": now_iso}})
+    if payload.organization_login_labels:
+        for org_id, label_value in payload.organization_login_labels.items():
+            if org_id not in ORGANIZATIONS:
+                continue
+            login_label = (label_value or "").strip()
+            if len(login_label) < 2:
+                raise HTTPException(status_code=400, detail="اسم الجهة المختصر مطلوب")
+            await db.organizations.update_one(
+                {"id": org_id},
+                {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "name": ORGANIZATIONS[org_id]["name"], "created_at": now_iso}},
+                upsert=True,
+            )
     document = await get_app_settings_document()
     organization = await get_organization_document(organization_id)
     document["organization_name"] = organization["name"]
     document["organization_login_label"] = organization["login_label"]
-    return build_app_settings_response(document)
+    return await build_app_settings_response(document)
 
 
 @api_router.get("/admin/organization/modules", response_model=OrganizationModulesResponse)
@@ -3522,7 +3562,7 @@ async def update_admin_app_icon(icon_file: UploadFile = File(...), _: dict = Dep
         upsert=True,
     )
     document = await get_app_settings_document()
-    return build_app_settings_response(document)
+    return await build_app_settings_response(document)
 
 
 def require_permission(permission_name: str):

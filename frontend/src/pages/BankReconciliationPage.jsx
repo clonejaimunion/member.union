@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { fallbackBanks } from "@/lib/banks";
 import { formatDateTime, sanitizeDayMonthInput, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { BankLogo } from "@/components/BankLogo";
 
 const currentDayMonth = () => {
@@ -27,9 +28,12 @@ export default function BankReconciliationPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { settings } = useAppSettings();
+  const unionFullName = settings.organizations?.["general-union"]?.name || "النقابة العامة للعاملين بالزراعة والري";
+  const socialName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
   const [banks, setBanks] = useState(fallbackBanks);
   const [periodLabel, setPeriodLabel] = useState("");
-  const [administration, setAdministration] = useState("النقابة العامة للعاملين بالزراعة والري");
+  const [administration, setAdministration] = useState(unionFullName);
   const [bookBalance, setBookBalance] = useState("");
   const [bankStatementBalance, setBankStatementBalance] = useState("");
   const [outstandingChecks, setOutstandingChecks] = useState([emptyCheck()]);
@@ -46,7 +50,7 @@ export default function BankReconciliationPage() {
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
-  const organizationPrintName = (value) => value === "مشروع التكافل الاجتماعي" ? "النقابة العامة للزراعة والري - مشروع التكافل االجتماعي" : "النقابة العامة للعاملين بالزراعة والري";
+  const organizationPrintName = (value) => value === socialName ? `${unionFullName} - ${socialName}` : unionFullName;
 
   const totals = useMemo(() => {
     const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
@@ -252,14 +256,14 @@ export default function BankReconciliationPage() {
     setEditingReconciliationId(item.id);
     setActiveReconciliation(item);
     setPeriodLabel(item.period_label || "");
-    setAdministration(item.administration || "النقابة العامة للعاملين بالزراعة والري");
+    setAdministration(item.administration || unionFullName);
     setBookBalance(String(item.book_balance ?? ""));
     setBankStatementBalance(String(item.bank_statement_balance ?? ""));
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: item.period_label || "",
-      administration: item.administration || "النقابة العامة للعاملين بالزراعة والري",
+      administration: item.administration || unionFullName,
       bookBalance: String(item.book_balance ?? ""),
       bankStatementBalance: String(item.bank_statement_balance ?? ""),
       outstandingChecks: nextOutstandingChecks,
@@ -273,14 +277,14 @@ export default function BankReconciliationPage() {
     const nextCollectionChecks = [emptyCheck()];
     setEditingReconciliationId(null);
     setPeriodLabel("");
-    setAdministration("النقابة العامة للعاملين بالزراعة والري");
+    setAdministration(unionFullName);
     setBookBalance("");
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: "",
-      administration: "النقابة العامة للعاملين بالزراعة والري",
+      administration: unionFullName,
       bookBalance: "",
       bankStatementBalance: "",
       outstandingChecks: nextOutstandingChecks,
@@ -454,8 +458,8 @@ export default function BankReconciliationPage() {
             <div className="space-y-2" data-testid="reconciliation-administration-wrapper">
               <Label data-testid="reconciliation-administration-label">الإدارة</Label>
               <select value={administration} onChange={(event) => setAdministration(event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="reconciliation-administration-select">
-                <option value="النقابة العامة للعاملين بالزراعة والري" data-testid="reconciliation-administration-option-union">النقابة العامة للعاملين بالزراعة والري</option>
-                <option value="مشروع التكافل الاجتماعي" data-testid="reconciliation-administration-option-social">مشروع التكافل الاجتماعي</option>
+                <option value={unionFullName} data-testid="reconciliation-administration-option-union">{unionFullName}</option>
+                <option value={socialName} data-testid="reconciliation-administration-option-social">{socialName}</option>
               </select>
             </div>
             <div className="space-y-2" data-testid="reconciliation-period-wrapper">

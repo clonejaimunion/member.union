@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { KeyRound, LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,14 @@ import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 import unionLogo from "@/assets/union-logo.jpg";
 
+const authorityLogo = (primary, secondary, accent, path) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="${primary}"/><stop offset="1" stop-color="${secondary}"/></linearGradient><filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#001b12" flood-opacity=".25"/></filter></defs><circle cx="60" cy="60" r="54" fill="white"/><circle cx="60" cy="60" r="48" fill="url(#g)" filter="url(#s)"/><circle cx="60" cy="60" r="38" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="3"/><path d="${path}" fill="${accent}"/><path d="M38 90h44" stroke="white" stroke-width="5" stroke-linecap="round" opacity=".82"/></svg>`)} `;
+
 const authorityLogos = [
-  { name: "مصلحة الضرائب المصرية", mark: "ض" },
-  { name: "مصلحة الخزانة العامة", mark: "خ" },
-  { name: "وزارة المالية", mark: "م" },
-  { name: "وزارة العمل المصرية", mark: "ع" },
-  { name: "وزارة الاتصالات وتكنولوجيا المعلومات", mark: "ت" },
+  { name: "مصلحة الضرائب المصرية", src: authorityLogo("#166534", "#0f766e", "#facc15", "M36 35h48v48H36z M45 45h30v6H45z M45 57h30v6H45z M45 69h18v6H45z M74 67l9 9-4 4-9-9z") },
+  { name: "مصلحة الخزانة العامة", src: authorityLogo("#0f766e", "#0f172a", "#f8fafc", "M60 30l32 18v8H28v-8z M35 62h10v25H35z M55 62h10v25H55z M75 62h10v25H75z M30 90h60v7H30z") },
+  { name: "وزارة المالية", src: authorityLogo("#1d4ed8", "#0f766e", "#fde68a", "M38 34h44v52H38z M46 45h28v6H46z M46 57h28v6H46z M46 69h12v6H46z M66 66c8 0 13 5 13 11s-5 11-13 11-13-5-13-11 5-11 13-11z") },
+  { name: "وزارة العمل المصرية", src: authorityLogo("#be123c", "#334155", "#ffffff", "M35 55h50v30H35z M45 45h30v10H45z M50 38h20v7H50z M42 63h36v6H42z M50 75h20v5H50z") },
+  { name: "وزارة الاتصالات وتكنولوجيا المعلومات", src: authorityLogo("#2563eb", "#7c3aed", "#ecfeff", "M60 32a28 28 0 100 56 28 28 0 000-56z M60 42c9 9 9 27 0 36-9-9-9-27 0-36z M35 60h50 M42 45c12 7 24 7 36 0 M42 75c12-7 24-7 36 0") },
 ];
 
 export default function LoginPage() {
@@ -117,9 +119,6 @@ export default function LoginPage() {
               <ShieldCheck className="h-4 w-4" /> {loading ? "جاري الدخول..." : "دخول البرنامج"}
             </Button>
           </form>
-          <Link to="/secure-admin-control-panel" className="mt-5 inline-flex text-sm font-extrabold text-emerald-700 hover:text-emerald-800" data-testid="admin-secure-link">
-            رابط لوحة الأدمن الخاص
-          </Link>
           <CreditLine className="mt-6 text-center text-xs font-bold text-slate-500" testId="login-creator-credit" />
         </section>
         <section className="order-1 space-y-6 lg:order-2" data-testid="login-hero-section">
@@ -140,9 +139,9 @@ export default function LoginPage() {
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="login-authority-logos-strip">
             {authorityLogos.map((authority) => (
-              <div key={authority.name} className="flex min-h-14 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 backdrop-blur-xl" data-testid={`login-authority-logo-${authority.mark}`}>
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-emerald-200/30 bg-emerald-300/15 text-sm font-black text-emerald-100 shadow-inner" data-testid={`login-authority-logo-${authority.mark}-mark`}>{authority.mark}</span>
-                <span className="text-sm font-extrabold leading-5 text-slate-100" data-testid={`login-authority-logo-${authority.mark}-name`}>{authority.name}</span>
+              <div key={authority.name} className="flex min-h-16 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 backdrop-blur-xl" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}`}>
+                <img src={authority.src} alt={`شعار ${authority.name}`} draggable={false} className="h-12 w-12 shrink-0 rounded-full object-contain drop-shadow-lg" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}-image`} />
+                <span className="text-sm font-extrabold leading-5 text-slate-100" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}-name`}>{authority.name}</span>
               </div>
             ))}
           </div>

@@ -1,0 +1,51 @@
+{
+  "summary": "Tested backend+frontend for branding logos, hidden admin-link phrase on login, super-admin global naming settings, admin_union restrictions, public settings/org endpoints propagation, ETA section visibility, auth playbook checks, and setup.exe presence. Core requested flows passed; only CORS preflight on public URL still fails explicit-origin requirement.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Public endpoint still returns Access-Control-Allow-Origin=* instead of explicit origin (credentialed CORS policy mismatch).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "MONGO_URL runtime for bcrypt DB verification",
+        "issue": "bcrypt DB-hash check was skipped because runtime MONGO_URL is not a valid mongodb:// URI in this shell context."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration40_eta_integration_config.py",
+    "/app/backend/tests/test_iteration41_branding_settings.py",
+    "/app/backend/tests/test_iteration42_branding_superadmin_and_auth_playbook.py",
+    "/app/test_reports/pytest/pytest_results_iter42_backend.xml"
+  ],
+  "action_items": [
+    "Fix CORS behavior at public edge/ingress so Access-Control-Allow-Origin returns explicit requesting origin with credentials.",
+    "Re-run auth credentialed-browser checks after CORS fix.",
+    "(Optional) Expose valid test-runtime Mongo URI to enable non-skipped bcrypt hash-format DB assertion."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains very large (>6000 lines); split into focused routers/services to reduce regression risk.",
+    "Seed-admin password refresh logic is present in code (ensure_default_admin) and was code-reviewed; runtime env-switch validation still not executed in this round."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration42_branding_superadmin_and_auth_playbook.py",
+    "/app/test_reports/iteration_37.json"
+  ],
+  "success_rate": {
+    "backend": "93%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "No persistent seed data created. Lockout used ephemeral random probe username only.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Validated requested features end-to-end using public URL + Playwright and pytest. Branding updates from super-admin propagated to /api/app-settings/public, /api/organizations/public, login organization cards, and expenses organization select (observed with Arabic-digit rendering UI٤٢). admin_union cannot view super-admin sections and PUT /api/admin/app-settings returns 403. ETA section remains super-admin only. setup.exe exists and non-empty (16,540,175 bytes). Remaining blocker is CORS wildcard on OPTIONS.",
+  "rca of the issue": "RCA: FastAPI code has explicit CORS+preflight logic for explicit origins with credentials, but live public endpoint still responds with wildcard origin on OPTIONS, indicating edge/proxy override outside application logic. Reproduction: OPTIONS {REACT_APP_BACKEND_URL}/api/auth/login with Origin header returns Access-Control-Allow-Origin=* instead of explicit origin. Mitigation: adjust ingress/edge CORS policy precedence."
+}

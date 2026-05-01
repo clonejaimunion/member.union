@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { formatCurrency, formatEgpLabel } from "@/lib/format";
 
@@ -87,6 +88,11 @@ const classifyExpense = (expense) => {
 export default function ExpensesAnalysisPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { settings } = useAppSettings();
+  const dynamicOrganizationLabels = useMemo(() => ({
+    general_union: settings.organizations?.["general-union"]?.login_label || organizationLabels.general_union,
+    social_solidarity_project: settings.organizations?.["social-solidarity"]?.login_label || organizationLabels.social_solidarity_project,
+  }), [settings.organizations]);
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ organization_scope: "social_solidarity_project", period_type: "monthly", year: "", month: "" });
@@ -144,7 +150,7 @@ export default function ExpensesAnalysisPage() {
   const hasCompletePeriod = filters.period_type === "yearly" ? Boolean(filters.year) : Boolean(filters.year && filters.month);
   const periodLabel = filters.period_type === "yearly" ? `سنة ${filters.year || "—"}` : `${monthLabels[filters.month] || "—"} / ${filters.year || "—"}`;
 
-  const exportFileBaseName = useMemo(() => makeSafeFileName(`تحليل-المصروفات-${organizationLabels[filters.organization_scope]}-${periodLabel}`), [filters.organization_scope, periodLabel]);
+  const exportFileBaseName = useMemo(() => makeSafeFileName(`تحليل-المصروفات-${dynamicOrganizationLabels[filters.organization_scope]}-${periodLabel}`), [dynamicOrganizationLabels, filters.organization_scope, periodLabel]);
 
   const buildExportTableHtml = useCallback((forExcel = false) => {
     const headers = ["التاريخ", "البيان بالكامل من المصروفات", ...analysisCategories.map((category) => category.label), "إجمالي الصف"];
@@ -181,14 +187,14 @@ export default function ExpensesAnalysisPage() {
 </head>
 <body>
   <h1>${escapeHtml(`تحليل المصروفات - ${periodLabel}`)}</h1>
-  <p>${escapeHtml(organizationLabels[filters.organization_scope])}</p>
+  <p>${escapeHtml(dynamicOrganizationLabels[filters.organization_scope])}</p>
   <table>
     <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
     <tbody>${tableBody}</tbody>
   </table>
 </body>
 </html>`;
-  }, [categoryTotals, filters.organization_scope, grandTotal, periodLabel, visibleAnalysisRows]);
+  }, [categoryTotals, dynamicOrganizationLabels, filters.organization_scope, grandTotal, periodLabel, visibleAnalysisRows]);
 
   const exportToPdf = () => window.print();
   const exportToExcel = () => triggerDownload(buildExportTableHtml(true), `${exportFileBaseName}.xls`, "application/vnd.ms-excel;charset=utf-8");
@@ -205,7 +211,7 @@ export default function ExpensesAnalysisPage() {
   const ReportBody = ({ preview = false }) => (
     <section className={`space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none sm:p-8 ${preview ? "max-h-[78vh] overflow-y-auto" : ""}`} data-testid={preview ? "expenses-analysis-preview-report-section" : "expenses-analysis-report-section"}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between" data-testid={preview ? "expenses-analysis-preview-report-heading" : "expenses-analysis-report-heading"}>
-        <div><p className="text-sm font-extrabold text-red-700" data-testid={preview ? "expenses-analysis-preview-report-eyebrow" : "expenses-analysis-report-eyebrow"}>{organizationLabels[filters.organization_scope]}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-report-title" : "expenses-analysis-report-title"}>تحليل المصروفات - {periodLabel}</h2></div>
+        <div><p className="text-sm font-extrabold text-red-700" data-testid={preview ? "expenses-analysis-preview-report-eyebrow" : "expenses-analysis-report-eyebrow"}>{dynamicOrganizationLabels[filters.organization_scope]}</p><h2 className="text-3xl font-extrabold text-slate-950" data-testid={preview ? "expenses-analysis-preview-report-title" : "expenses-analysis-report-title"}>تحليل المصروفات - {periodLabel}</h2></div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={preview ? "expenses-analysis-preview-report-kpis" : "expenses-analysis-report-kpis"}><div className="rounded-xl bg-slate-950 p-4 text-white" data-testid={preview ? "expenses-analysis-preview-count-card" : "expenses-analysis-count-card"}><p className="text-xs font-bold text-slate-300">عدد المصروفات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-count-value" : "expenses-analysis-count-value"}>{hasCompletePeriod ? visibleAnalysisRows.length : 0}</p></div><div className="rounded-xl bg-red-50 p-4 text-red-900" data-testid={preview ? "expenses-analysis-preview-grand-total-card" : "expenses-analysis-grand-total-card"}><p className="text-xs font-bold text-red-700">الإجمالي العام للخانات</p><p className="text-2xl font-extrabold" data-testid={preview ? "expenses-analysis-preview-grand-total-value" : "expenses-analysis-grand-total-value"}>{hasCompletePeriod ? formatEgpLabel(grandTotal) : formatEgpLabel(0)}</p></div></div>
       </div>
 
@@ -266,7 +272,7 @@ export default function ExpensesAnalysisPage() {
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="expenses-analysis-filters-grid">
-            <div data-testid="expenses-analysis-organization-wrapper"><Label data-testid="expenses-analysis-organization-label">الجهة</Label><select value={filters.organization_scope} onChange={(event) => updateFilter("organization_scope", event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-analysis-organization-select"><option value="general_union" data-testid="expenses-analysis-organization-general-option">النقابة العامة</option><option value="social_solidarity_project" data-testid="expenses-analysis-organization-social-option">مشروع التكافل الاجتماعي</option></select></div>
+            <div data-testid="expenses-analysis-organization-wrapper"><Label data-testid="expenses-analysis-organization-label">الجهة</Label><select value={filters.organization_scope} onChange={(event) => updateFilter("organization_scope", event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-analysis-organization-select"><option value="general_union" data-testid="expenses-analysis-organization-general-option">{dynamicOrganizationLabels.general_union}</option><option value="social_solidarity_project" data-testid="expenses-analysis-organization-social-option">{dynamicOrganizationLabels.social_solidarity_project}</option></select></div>
             <div data-testid="expenses-analysis-period-wrapper"><Label data-testid="expenses-analysis-period-label">نوع العرض</Label><select value={filters.period_type} onChange={(event) => updateFilter("period_type", event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-analysis-period-select"><option value="monthly" data-testid="expenses-analysis-period-monthly-option">شهري</option><option value="yearly" data-testid="expenses-analysis-period-yearly-option">سنوي</option></select></div>
             <div data-testid="expenses-analysis-year-wrapper"><Label data-testid="expenses-analysis-year-label">السنة</Label><select value={filters.year} onChange={(event) => updateFilter("year", event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="expenses-analysis-year-select"><option value="" data-testid="expenses-analysis-year-placeholder-option">اختر السنة</option>{years.map((year) => <option key={year} value={year} data-testid={`expenses-analysis-year-option-${year}`}>{year}</option>)}</select></div>
             <div data-testid="expenses-analysis-month-wrapper"><Label data-testid="expenses-analysis-month-label">الشهر</Label><select value={filters.month} onChange={(event) => updateFilter("month", event.target.value)} disabled={filters.period_type === "yearly" || !filters.year} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold disabled:opacity-50" data-testid="expenses-analysis-month-select"><option value="" data-testid="expenses-analysis-month-placeholder-option">اختر الشهر</option>{months.map((month) => <option key={month} value={month} data-testid={`expenses-analysis-month-option-${month}`}>{monthLabels[month] || month}</option>)}</select></div>
