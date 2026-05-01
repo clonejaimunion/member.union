@@ -34,6 +34,8 @@ import bcrypt
 import jwt
 import pyotp
 import qrcode
+import arabic_reshaper
+from bidi.algorithm import get_display
 from PIL import Image, ImageDraw, ImageFont, JpegImagePlugin
 from pypdf import PdfReader
 from cryptography.fernet import Fernet, InvalidToken
@@ -6010,72 +6012,199 @@ TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def training_font(size: int):
-    for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+    for path in [
+        str(ROOT_DIR / "assets" / "fonts" / "NotoNaskhArabic-Regular.ttf"),
+        str(ROOT_DIR / "assets" / "fonts" / "NotoNaskhArabic-Bold.ttf"),
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]:
         if Path(path).exists():
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
 
 
-def draw_training_page(title: str, lines: List[str], page_no: int, system_name: str) -> Image.Image:
-    image = Image.new("RGB", (1240, 1754), "white")
+def latin_training_font(size: int):
+    for path in [
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    ]:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def is_arabic_text(text: str) -> bool:
+    return any("\u0600" <= char <= "\u06ff" for char in text)
+
+
+def display_text(text: str) -> str:
+    if is_arabic_text(text):
+        return get_display(arabic_reshaper.reshape(text))
+    return text
+
+
+def wrap_words(text: str, width: int) -> List[str]:
+    words = text.split()
+    lines: List[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if len(candidate) > width and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def draw_rtl_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill: str, anchor: str = "ra"):
+    draw.text(xy, display_text(text), font=font, fill=fill, anchor=anchor)
+
+
+def draw_ltr_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill: str, anchor: str = "la"):
+    draw.text(xy, text, font=latin_training_font(getattr(font, "size", 24)), fill=fill, anchor=anchor)
+
+
+def draw_training_cover(system_name: str, organization_name: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "#f8fafc")
     draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, 1240, 170], fill="#0f172a")
-    draw.text((1160, 55), system_name, font=training_font(34), fill="white", anchor="ra")
-    draw.text((1160, 135), title, font=training_font(42), fill="#6ee7b7", anchor="ra")
-    y = 230
-    for line in lines:
-        for wrapped in textwrap.wrap(line, width=58):
-            draw.text((1120, y), wrapped, font=training_font(28), fill="#111827", anchor="ra")
-            y += 50
-        y += 16
-    draw.text((620, 1690), f"صفحة {page_no}", font=training_font(22), fill="#64748b", anchor="mm")
+    draw.rectangle([0, 0, 1240, 520], fill="#0f172a")
+    draw.rectangle([70, 430, 1170, 1620], fill="white", outline="#d1fae5", width=4)
+    draw_rtl_text(draw, (1120, 145), "كتيب إرشادات استخدام البرنامج", training_font(58), "#ffffff")
+    draw_ltr_text(draw, (120, 225), "User Guide & Training Manual", training_font(38), "#6ee7b7")
+    draw_rtl_text(draw, (1120, 620), system_name, training_font(54), "#0f172a")
+    draw_rtl_text(draw, (1120, 720), organization_name, training_font(34), "#047857")
+    cover_lines = [
+        "دليل تدريبي شامل يشرح جميع وظائف وخصائص وأقسام البرنامج خطوة بخطوة.",
+        "Comprehensive bilingual manual covering login, daily operations, security, reports, and financial statements.",
+        "تم إعداد هذا الدليل تلقائياً حسب اسم البرنامج والجهة المختارة داخل النظام.",
+    ]
+    y = 870
+    for line in cover_lines:
+        if is_arabic_text(line):
+            draw_rtl_text(draw, (1080, y), line, training_font(30), "#334155")
+        else:
+            draw_ltr_text(draw, (160, y), line, training_font(26), "#334155")
+        y += 82
+    draw_rtl_text(draw, (1080, 1505), "الإصدار التدريبي التفصيلي", training_font(30), "#064e3b")
+    draw_ltr_text(draw, (160, 1565), datetime.now(timezone.utc).date().isoformat(), training_font(24), "#64748b")
     return image
 
 
-async def training_pages() -> tuple[str, List[tuple[str, List[str]]]]:
+def draw_training_index(system_name: str, pages: List[dict]) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 170], fill="#0f172a")
+    draw_rtl_text(draw, (1120, 65), system_name, training_font(32), "white")
+    draw_rtl_text(draw, (1120, 132), "فهرس الاستخدام / Table of Contents", training_font(38), "#6ee7b7")
+    y = 245
+    for index, page in enumerate(pages, start=3):
+        if y > 1580:
+            break
+        draw_rtl_text(draw, (1080, y), f"{index - 2}. {page['title_ar']}", training_font(27), "#111827")
+        draw_ltr_text(draw, (160, y + 34), page["title_en"], training_font(20), "#475569")
+        draw_ltr_text(draw, (100, y), str(index), training_font(22), "#047857")
+        y += 78
+    draw_rtl_text(draw, (620, 1690), "صفحة 2", training_font(22), "#64748b", anchor="mm")
+    return image
+
+
+def draw_training_page(page: dict, page_no: int, system_name: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 170], fill="#0f172a")
+    draw_rtl_text(draw, (1160, 55), system_name, training_font(30), "white")
+    draw_rtl_text(draw, (1160, 125), page["title_ar"], training_font(38), "#6ee7b7")
+    draw_ltr_text(draw, (90, 125), page["title_en"], training_font(22), "#cbd5e1")
+    y = 225
+    draw_rtl_text(draw, (1120, y), "الشرح التفصيلي", training_font(31), "#064e3b")
+    y += 58
+    for line in page.get("arabic", []):
+        for wrapped in wrap_words(line, 68):
+            draw_rtl_text(draw, (1120, y), wrapped, training_font(25), "#111827")
+            y += 42
+        y += 12
+    y += 16
+    draw_ltr_text(draw, (90, y), "English Guidance", training_font(27), "#0f766e")
+    y += 52
+    for line in page.get("english", []):
+        for wrapped in wrap_words(line, 86):
+            draw_ltr_text(draw, (90, y), wrapped, training_font(21), "#334155")
+            y += 34
+        y += 10
+    draw_rtl_text(draw, (620, 1690), f"صفحة {page_no}", training_font(22), "#64748b", anchor="mm")
+    return image
+
+
+async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str, List[dict]]:
     settings = await get_app_settings_document()
     public = await build_app_settings_response(settings)
     system_name = public.system_name
+    organization_id = (current_user or {}).get("organization_id") or organization_id_or_default()
+    organization = await get_organization_document(organization_id)
+    organization_name = organization.get("name") or public.organization_name or "الجهة المستخدمة للبرنامج"
     pages = [
-        ("مقدمة تشغيل البرنامج", ["هذا الكتيب يشرح استخدام النظام خطوة بخطوة للمستخدمين والأدمن العاديين دون ذكر أي حسابات مخفية.", "ابدأ باختيار الجهة ثم تسجيل الدخول باسم المستخدم وكلمة المرور."]),
-        ("فوائد الودائع والبنوك", ["إضافة البنوك، إدخال الودائع، متابعة تواريخ الإنشاء والاستحقاق، واحتساب الفوائد سنوياً مع تقارير قابلة للطباعة."]),
-        ("الإيرادات والمصروفات", ["تسجيل الإيرادات والمصروفات، اعتمادها، ربطها بالقيود اليومية، وطباعة التقارير الدورية حسب الصلاحيات."]),
-        ("التسويات البنكية", ["إدخال رصيد الدفتر وكشف البنك، الشيكات القائمة وتحت التحصيل، ثم استخراج التسوية البنكية للطباعة."]),
-        ("العضوية والتكافل", ["إدارة بيانات العضوية، الاستيراد من الملفات، حساب سن المعاش، وبحث وطباعة بيانات الأعضاء."]),
-        ("الأصول والعهد والسلف", ["تسجيل الأصول الثابتة ونسب الإهلاك، وإدارة العهد والسلف وتسويتها بقيود محاسبية تلقائية."]),
-        ("القوائم المالية", ["إعداد الميزانية وحساب الإيرادات والمصروفات والمقبوضات والمدفوعات سنوياً مع فحص الأخطاء المحاسبية."]),
-        ("الفاتورة الإلكترونية", ["إعداد بيانات الممول والربط الضريبي، تجهيز الفواتير، ثم إرسالها عند اكتمال بيانات API وSDK التوقيع الرقمي."]),
-        ("النسخ الاحتياطي والأمان", ["إنشاء نسخة احتياطية مشفرة بكلمة مرور، واستعادتها عند الحاجة، ومراجعة سجل التدقيق حسب الصلاحيات."]),
+        {"title_ar": "صفحة تسجيل الدخول واختيار الجهة", "title_en": "Login and Organization Selection", "arabic": ["تبدأ الدورة التدريبية من شاشة تسجيل الدخول حيث يختار المستخدم الجهة التي يعمل عليها قبل إدخال اسم المستخدم وكلمة المرور.", "كل جهة لها بياناتها وصلاحياتها ووحداتها، لذلك يجب التأكد من اختيار الجهة الصحيحة قبل الدخول.", "إذا كانت خدمة Google Authenticator مفعلة لنوع الحساب، سيظهر حقل كود التحقق بعد قبول كلمة المرور."], "english": ["Start by selecting the correct organization, then enter username and password.", "Each organization has isolated data, modules, and permissions.", "If Google Authenticator is enabled for the role, the OTP step appears after password validation."]},
+        {"title_ar": "لوحة البرنامج الرئيسية والتنقل", "title_en": "Main Dashboard and Navigation", "arabic": ["بعد الدخول تظهر لوحة البرامج حسب الصلاحيات: البنوك، الودائع، الإيرادات، المصروفات، التسويات، العضوية، الأصول، العهد، الفواتير، التقارير والقوائم المالية.", "الصفحات غير المفعلة للجهة أو غير المصرح بها لا تظهر للمستخدم."], "english": ["The dashboard displays only allowed modules such as banks, deposits, revenues, expenses, reconciliations, memberships, assets, invoices, and reports.", "Unavailable or unauthorized modules are hidden to keep workflows clean."]},
+        {"title_ar": "إدارة البنوك والأرصدة الافتتاحية", "title_en": "Banks and Opening Balances", "arabic": ["يتم إضافة البنك باسم واضح ورقم حساب ونوع الحساب والرصيد الافتتاحي.", "تستخدم هذه البيانات لاحقاً في الودائع والتسويات البنكية والتقارير."], "english": ["Create bank records with account details and opening balances.", "These balances support deposit tracking, reconciliations, and reports."]},
+        {"title_ar": "إدارة الودائع واحتساب الفوائد", "title_en": "Deposits and Interest Calculation", "arabic": ["من صفحة الودائع يتم إدخال مبلغ الوديعة والبنك وتاريخ البداية والاستحقاق وسعر الفائدة.", "يقوم النظام بحساب الفوائد ومتابعة حالة الوديعة وربطها بالتقارير المالية حسب الجهة."], "english": ["Enter deposit amount, bank, start date, maturity date, and interest rate.", "The system calculates interest and tracks maturity status."]},
+        {"title_ar": "الإيرادات والتحصيل", "title_en": "Revenues and Collections", "arabic": ["تسجل الإيرادات بالمبلغ والتاريخ والبنك والبيان ونوع الإيراد.", "ينشئ النظام قيوداً محاسبية تلقائية عند الحاجة، وتظهر الإيرادات في التحليلات والقوائم المالية."], "english": ["Record revenue date, amount, bank, description, and category.", "Accounting entries and financial reports are updated automatically where applicable."]},
+        {"title_ar": "المصروفات وأذون الصرف", "title_en": "Expenses and Payment Vouchers", "arabic": ["تسجل المصروفات مع تحديد الجهة والبند والبنك والبيان، ويمكن طباعة إذن صرف يحتوي بيانات الجهة والبريد الإلكتروني إذا تم إدخاله.", "تستخدم هذه البيانات في تحليل المصروفات والقوائم السنوية."], "english": ["Record expenses by organization, category, bank, and description.", "Payment vouchers include organization details and email when configured."]},
+        {"title_ar": "تحليل المصروفات", "title_en": "Expense Analysis", "arabic": ["تعرض صفحة تحليل المصروفات إجماليات البنود، التفاصيل الشهرية والسنوية، ونسب كل بند من إجمالي المصروفات.", "يمكن استخدام التصدير والطباعة لمراجعة الاعتمادات والموازنات."], "english": ["Expense analysis shows totals by category, period, and share of total expenses.", "Use exported reports for budget review and approvals."]},
+        {"title_ar": "التسوية البنكية", "title_en": "Bank Reconciliation", "arabic": ["يدخل المستخدم رصيد كشف البنك ورصيد الدفتر والشيكات القائمة والشيكات تحت التحصيل.", "يقوم النظام بإظهار فرق التسوية ويساعد على الوصول لرصيد مطابق قابل للطباعة."], "english": ["Enter bank statement balance, book balance, outstanding checks, and deposits in transit.", "The reconciliation calculates differences and prepares a printable statement."]},
+        {"title_ar": "شجرة الحسابات والقيود اليومية", "title_en": "Chart of Accounts and Journal Entries", "arabic": ["تستخدم شجرة الحسابات لتنظيم الأصول والخصوم والإيرادات والمصروفات.", "القيود اليومية تربط العمليات المالية بالمحاسبة وتساعد في ميزان المراجعة والقوائم المالية."], "english": ["The chart of accounts organizes assets, liabilities, revenue, and expenses.", "Journal entries connect transactions to trial balance and statements."]},
+        {"title_ar": "الأصول الثابتة والإهلاك", "title_en": "Fixed Assets and Depreciation", "arabic": ["يتم تسجيل الأصل بتكلفته وتاريخ الشراء والتصنيف ونسبة الإهلاك.", "يحتسب النظام الإهلاك الدفتري ويحدث صافي القيمة الدفترية للأصل."], "english": ["Register assets with cost, purchase date, category, and depreciation rate.", "The system calculates depreciation and net book value."]},
+        {"title_ar": "العهد والسلف", "title_en": "Custody and Advances", "arabic": ["تسجل العهد والسلف باسم الموظف والمبلغ ونوع العملية وحالة التسوية.", "عند التسوية يتم تحديث الحالة وربطها بالأثر المحاسبي."], "english": ["Record custody/advance amount, employee, type, and settlement status.", "Settlement updates status and accounting impact."]},
+        {"title_ar": "العضوية والاستيراد", "title_en": "Memberships and Import", "arabic": ["تدار بيانات العضوية من حيث الاسم والرقم القومي والمحافظة واللجنة وتاريخ المعاش.", "يمكن الاستيراد من ملفات ثم مراجعة البيانات قبل اعتمادها داخل النظام."], "english": ["Manage member name, national ID, governorate, committee, and retirement date.", "Import files are reviewed before final save."]},
+        {"title_ar": "الفاتورة الإلكترونية", "title_en": "Electronic Invoice", "arabic": ["تجهز الفواتير من بيانات الإيرادات أو الإدخال المباشر مع العميل والبيان والضريبة والإجمالي.", "عند اكتمال إعدادات منظومة الضرائب وSDK التوقيع الرقمي يمكن إرسال الفاتورة للمنظومة وحفظ رقم الاعتماد والرابط."], "english": ["Prepare invoices from revenue data or direct entry with customer, description, tax, and totals.", "When ETA API and signing SDK are configured, invoices can be submitted and tracked."]},
+        {"title_ar": "إعدادات منظومة الضرائب المصرية", "title_en": "Egyptian Tax Authority Integration", "arabic": ["تضاف بيانات الممول والرقم الضريبي وكود النشاط والفرع وبيانات API وSDK التوقيع الرقمي.", "لا يتم إرسال أي فاتورة فعلياً قبل اكتمال بيانات الاعتماد والتوقيع."], "english": ["Configure taxpayer information, activity code, branch code, API credentials, and signing SDK command.", "No live submission occurs until required credentials and signature are complete."]},
+        {"title_ar": "إدارة المستخدمين والصلاحيات", "title_en": "Users and Permissions", "arabic": ["تتم إضافة المستخدمين وتحديد دورهم وصلاحياتهم والجهة التابعة لهم.", "يمكن تعطيل أو تفعيل الحسابات وتغيير كلمة المرور حسب الصلاحيات الإدارية."], "english": ["Create users, assign roles, organization, and permissions.", "Accounts can be enabled, disabled, or password-reset by authorized managers."]},
+        {"title_ar": "إعدادات الجهات والشعارات", "title_en": "Organizations and Branding", "arabic": ["يمكن تعديل اسم البرنامج، أسماء الجهات، البريد الإلكتروني، وشعارات شاشة الدخول.", "عند إخفاء شعار لا يترك النظام مساحة فارغة، وعند تغييره يتم احتواؤه بحجم مناسب."], "english": ["Update program name, organization names, emails, and login branding.", "Hidden logos leave no placeholder; uploaded logos fit the designed frame."]},
+        {"title_ar": "النسخ الاحتياطي والاستعادة", "title_en": "Backup and Restore", "arabic": ["ينشئ النظام نسخة احتياطية مشفرة بكلمة مرور تشمل بيانات البرنامج حسب صلاحيات الدور.", "احتفظ بكلمة المرور في مكان آمن لأنها مطلوبة للاستعادة."], "english": ["Create password-protected encrypted backups according to role policy.", "Keep the password safe because it is required for restore."]},
+        {"title_ar": "سجل التدقيق والمراجعة الأمنية", "title_en": "Audit Log and Security Review", "arabic": ["يسجل النظام عمليات الإضافة والتعديل والحذف والدخول حسب المستخدم والوقت والمسار.", "يمكن استخدام الفلاتر الشهرية والسنوية لمراجعة النشاط."], "english": ["The audit log records actions, actor, time, route, and status.", "Use filters to review activity by year, month, and hour."]},
+        {"title_ar": "ميزان المراجعة", "title_en": "Trial Balance", "arabic": ["يعرض ميزان المراجعة أرصدة الحسابات المدينة والدائنة قبل إعداد القوائم المالية.", "يجب مراجعة أي فروق قبل إصدار الميزانية."], "english": ["Trial balance shows debit and credit balances before financial statements.", "Review differences before issuing the balance sheet."]},
+        {"title_ar": "إصدار الميزانية والقوائم المالية", "title_en": "Balance Sheet and Financial Statements", "arabic": ["من صفحة القوائم المالية يتم اختيار السنة ثم استخراج الميزانية وحساب الإيرادات والمصروفات وحساب المقبوضات والمدفوعات.", "يعرض النظام أخطاء الربط المحاسبي إن وجدت، ويجب مراجعتها قبل الطباعة والاعتماد."], "english": ["Select the year to generate balance sheet, revenues/expenses, and receipts/payments statements.", "Review accounting linkage warnings before printing and approval."]},
     ]
-    return system_name, pages
+    return system_name, organization_name, pages
 
 
 @api_router.get("/admin/training/manual.pdf")
-async def download_training_manual(_: dict = Depends(require_admin)):
-    system_name, pages = await training_pages()
-    images = [draw_training_page(title, lines, index + 1, system_name) for index, (title, lines) in enumerate(pages)]
+async def download_training_manual(current_user: dict = Depends(require_admin)):
+    system_name, organization_name, pages = await training_pages(current_user)
+    images = [draw_training_cover(system_name, organization_name), draw_training_index(system_name, pages)]
+    images.extend([draw_training_page(page, index + 3, system_name) for index, page in enumerate(pages)])
     path = TRAINING_DIR / "دليل-استخدام-البرنامج.pdf"
     images[0].save(path, save_all=True, append_images=images[1:])
     return FileResponse(str(path), filename=path.name, media_type="application/pdf")
 
 
 @api_router.get("/admin/training/screenshots.zip")
-async def download_training_screenshots(_: dict = Depends(require_admin)):
-    system_name, pages = await training_pages()
+async def download_training_screenshots(current_user: dict = Depends(require_admin)):
+    system_name, organization_name, pages = await training_pages(current_user)
     zip_path = TRAINING_DIR / "لقطات-صفحات-البرنامج.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for index, (title, lines) in enumerate(pages, start=1):
-            image = draw_training_page(title, lines, index, system_name)
+        cover = draw_training_cover(system_name, organization_name)
+        buffer = BytesIO()
+        cover.save(buffer, format="PNG")
+        archive.writestr("00-غلاف-الدليل.png", buffer.getvalue())
+        for index, page in enumerate(pages, start=1):
+            image = draw_training_page(page, index + 2, system_name)
             buffer = BytesIO()
             image.save(buffer, format="PNG")
-            archive.writestr(f"{index:02d}-{title}.png", buffer.getvalue())
+            archive.writestr(f"{index:02d}-{page['title_ar']}.png", buffer.getvalue())
     return FileResponse(str(zip_path), filename=zip_path.name, media_type="application/zip")
 
 
 @api_router.get("/admin/training/video-guide.gif")
-async def download_training_video(_: dict = Depends(require_admin)):
-    system_name, pages = await training_pages()
-    frames = [draw_training_page(title, lines, index + 1, system_name).resize((620, 877)) for index, (title, lines) in enumerate(pages)]
+async def download_training_video(current_user: dict = Depends(require_admin)):
+    system_name, organization_name, pages = await training_pages(current_user)
+    frames = [draw_training_cover(system_name, organization_name).resize((620, 877))]
+    frames.extend([draw_training_page(page, index + 3, system_name).resize((620, 877)) for index, page in enumerate(pages[:10])])
     path = TRAINING_DIR / "فيديو-استرشادي-slideshow.gif"
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=2200, loop=0)
     return FileResponse(str(path), filename=path.name, media_type="image/gif")
