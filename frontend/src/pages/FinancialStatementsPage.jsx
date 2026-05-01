@@ -18,6 +18,11 @@ const years = Array.from({ length: 16 }, (_, index) => currentYear - 10 + index)
 const yearRange = (year) => ({ from_date: `${year}-01-01`, to_date: `${year}-12-31` });
 const lineAmount = (line) => Number(line?.amount || 0);
 const sectionTotal = (section) => Number(section?.total || 0);
+const officialEmailOrEmpty = (email) => {
+  const value = (email || "").trim();
+  if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
+  return value;
+};
 
 function buildCompareMap(sections = []) {
   const map = new Map();
@@ -148,7 +153,7 @@ export default function FinancialStatementsPage() {
   const { settings } = useAppSettings();
   const unionName = settings.organizations?.["general-union"]?.name || "النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الأراضي";
   const projectName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
-  const reportEmail = settings.organizations?.[user?.organization_id]?.email || settings.organizations?.["general-union"]?.email || "";
+  const reportEmail = officialEmailOrEmpty(settings.organizations?.[user?.organization_id]?.email);
   const [year, setYear] = useState(String(currentYear));
   const [report, setReport] = useState(null);
   const [previousReport, setPreviousReport] = useState(null);

@@ -1,0 +1,47 @@
+{
+  "summary": "Executed backend+frontend validation for requested financial statements integrity, public/org email masking, auth playbook checks, iteration29/30/31 regressions, and setup download availability on public URL.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Credentialed CORS preflight still returns Access-Control-Allow-Origin=* and misses Access-Control-Allow-Credentials=true on public endpoint.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration45_financial_statements_public_email_regression.py",
+    "/app/backend/tests/test_iteration29_financial_statements_and_auth.py",
+    "/app/backend/tests/test_iteration30_financial_statements_annual.py",
+    "/app/backend/tests/test_iteration31_financial_statements_entry5_repair.py",
+    "/app/test_reports/pytest/pytest_results_iter45_backend.xml"
+  ],
+  "action_items": [
+    "Fix edge/ingress CORS override for /api/auth/login OPTIONS to return explicit requesting origin and Access-Control-Allow-Credentials=true.",
+    "Re-run auth browser checks after CORS fix.",
+    "If release process requires setup.exe freshness proof, add build timestamp/version endpoint or checksum comparison in CI (current run validated only availability/non-empty download)."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains oversized (6k+ lines) and should be split into focused routers/services to lower regression risk.",
+    "The /api/financial-statements endpoint currently declares from_date/to_date only; year query works implicitly but is not explicitly modeled/validated in handler signature."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration45_financial_statements_public_email_regression.py",
+    "/app/test_reports/iteration_45.json"
+  ],
+  "success_rate": {
+    "backend": "93%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "No persistent business seed data created. Cleared known lockout records for legacy probe users in login_attempts as precondition for iteration29/30 regression.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Pytest run: 44 collected => 40 passed, 3 failed, 1 skipped. iteration29/30/31 financial statement regressions passed after lockout cleanup; only CORS preflight assertions failed (same known public-edge issue). Verified: /api/app-settings/public has no @example.com or +iter emails, /api/financial-statements (social-solidarity, 2026) includes balance_sheet/revenues_expenses/receipts_payments with valid formulas and is_accounting_valid=true, and /api/download/setup returns executable payload. UI check (social admin): financial statements and expenses pages show no example emails and no visible error blocks.",
+  "rca of the issue": "RCA: App code configures CORSMiddleware with allow_credentials=True and explicit origins, but public OPTIONS responses still come from edge/proxy with wildcard CORS headers (Access-Control-Allow-Origin=* and missing Access-Control-Allow-Credentials). Reproduction: OPTIONS {REACT_APP_BACKEND_URL}/api/auth/login with Origin + Access-Control-Request-* headers. Mitigation: align ingress/CDN CORS policy precedence with app settings for credentialed requests."
+}

@@ -21,6 +21,11 @@ const methodLabels = { cash: "نقداً", check: "شيك", bank_transfer: "تح
 const checkClearingLabels = { internal: "داخلي", external: "خارجي" };
 const expenseCollectionStatusLabels = { paid: "تم التحصيل", not_presented: "تحت التحصيل" };
 const organizationLabels = { general_union: "النقابة العامة", social_solidarity_project: "مشروع التكافل الاجتماعي" };
+const officialEmailOrEmpty = (email) => {
+  const value = (email || "").trim();
+  if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
+  return value;
+};
 const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة" };
 const monthLabels = { "01": "يناير", "02": "فبراير", "03": "مارس", "04": "أبريل", "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس", "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر" };
 const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
@@ -62,7 +67,7 @@ export default function ExpensesPage() {
   };
   const dynamicUnionFullName = settings.organizations?.["general-union"]?.name || "النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الأراضي";
   const dynamicSocialName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
-  const organizationEmail = settings.organizations?.[user?.organization_id]?.email || settings.organizations?.["general-union"]?.email || "";
+  const organizationEmail = officialEmailOrEmpty(settings.organizations?.[user?.organization_id]?.email);
   const [banks, setBanks] = useState(fallbackBanks);
   const [expenses, setExpenses] = useState([]);
   const [form, setForm] = useState(defaultForm);
