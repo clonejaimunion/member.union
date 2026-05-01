@@ -1463,6 +1463,16 @@ def app_icon_url(updated_at: Optional[str] = None) -> Optional[str]:
     return f"/api/app-settings/icon?v={version}"
 
 
+def official_email_or_none(email: Optional[str]) -> Optional[str]:
+    cleaned = (email or "").strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if lowered.endswith("@example.com") or "+iter" in lowered:
+        return None
+    return cleaned
+
+
 async def get_app_settings_document() -> dict:
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     document = await db.app_settings.find_one({"id": "global"}, {"_id": 0})
@@ -1502,7 +1512,7 @@ async def build_app_settings_response(document: dict) -> AppSettingsResponse:
     organization_id = organization_id_or_default()
     organization_name = document.get("organization_name")
     organization_login_label = document.get("organization_login_label")
-    organizations = {item["id"]: {"id": item["id"], "name": item["name"], "login_label": item["login_label"], "email": item.get("email"), "is_active": item.get("is_active", True), "modules": item.get("modules", {})} for item in await list_organization_documents()}
+    organizations = {item["id"]: {"id": item["id"], "name": item["name"], "login_label": item["login_label"], "email": official_email_or_none(item.get("email")), "is_active": item.get("is_active", True), "modules": item.get("modules", {})} for item in await list_organization_documents()}
     return AppSettingsResponse(
         system_name=document.get("system_name") or DEFAULT_SYSTEM_NAME,
         organization_id=organization_id,
