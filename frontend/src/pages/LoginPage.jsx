@@ -42,9 +42,9 @@ export default function LoginPage() {
   }, []);
 
   const selectedOrganization = organizations.find((item) => item.id === selectedOrganizationId);
-  const renderedAuthorityLogos = (settings.login_authority_logos?.length
-    ? settings.login_authority_logos.map((item, index) => ({ ...authorityLogos[index], ...item, src: item.src || authorityLogos[index]?.src }))
-    : authorityLogos).filter((item) => item.enabled !== false);
+  const renderedAuthorityLogos = authorityLogos
+    .map((fallback, index) => ({ ...fallback, ...(settings.login_authority_logos?.[index] || {}), src: settings.login_authority_logos?.[index]?.src || fallback.src }))
+    .filter((item) => item.enabled !== false);
 
   const selectOrganization = (organizationId) => {
     setSelectedOrganizationId(organizationId);

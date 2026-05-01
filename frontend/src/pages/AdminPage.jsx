@@ -199,7 +199,7 @@ export default function AdminPage() {
       setOrganizationEmailEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.email || ""])));
       setUnionLogoVisible(response.data.login_union_logo_visible !== false);
       setUnionLogoDataUrl(response.data.login_union_logo_data_url || "");
-      setAuthorityLogoSettings((response.data.login_authority_logos?.length ? response.data.login_authority_logos : defaultAuthorityLogoSettings).map((item, index) => ({ ...defaultAuthorityLogoSettings[index], ...item })));
+      setAuthorityLogoSettings(defaultAuthorityLogoSettings.map((item, index) => ({ ...item, ...(response.data.login_authority_logos?.[index] || {}) })));
       setBackupEnabled(response.data.backup_enabled !== false);
       setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
       setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });
@@ -606,7 +606,7 @@ export default function AdminPage() {
       setOrganizationEmailEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.email || ""])));
       setUnionLogoVisible(response.data.login_union_logo_visible !== false);
       setUnionLogoDataUrl(response.data.login_union_logo_data_url || "");
-      setAuthorityLogoSettings((response.data.login_authority_logos?.length ? response.data.login_authority_logos : defaultAuthorityLogoSettings).map((item, index) => ({ ...defaultAuthorityLogoSettings[index], ...item })));
+      setAuthorityLogoSettings(defaultAuthorityLogoSettings.map((item, index) => ({ ...item, ...(response.data.login_authority_logos?.[index] || {}) })));
       setBackupEnabled(response.data.backup_enabled !== false);
       setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
       setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });

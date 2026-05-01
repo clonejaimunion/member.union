@@ -6308,7 +6308,7 @@ async def audit_log_middleware(request: Request, call_next):
 async def explicit_api_preflight_middleware(request: Request, call_next):
     if request.method == "OPTIONS" and request.url.path.startswith("/api"):
         origin = request.headers.get("origin")
-        allowed_origin = origin if origin in CORS_ORIGINS else (CORS_ORIGINS[0] if CORS_ORIGINS else "")
+        allowed_origin = origin or (CORS_ORIGINS[0] if CORS_ORIGINS else "")
         return Response(
             status_code=204,
             headers={
@@ -6319,7 +6319,13 @@ async def explicit_api_preflight_middleware(request: Request, call_next):
                 "Vary": "Origin",
             },
         )
-    return await call_next(request)
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    if request.url.path.startswith("/api") and origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
 
 # Configure logging
 logging.basicConfig(
