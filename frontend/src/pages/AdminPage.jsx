@@ -66,6 +66,14 @@ const defaultEtaIntegration = {
   notes: "",
 };
 
+const defaultAuthorityLogoSettings = [
+  { name: "مصلحة الضرائب المصرية", enabled: true, src: "" },
+  { name: "مصلحة الخزانة العامة", enabled: true, src: "" },
+  { name: "وزارة المالية", enabled: true, src: "" },
+  { name: "وزارة العمل المصرية", enabled: true, src: "" },
+  { name: "وزارة الاتصالات وتكنولوجيا المعلومات", enabled: true, src: "" },
+];
+
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
   { id: "feature-settings", title: "إعدادات الخواص", subtitle: "تفعيل وتعطيل وحدات الجهة", icon: SlidersHorizontal },
@@ -111,6 +119,14 @@ export default function AdminPage() {
   const [organizationLoginLabel, setOrganizationLoginLabel] = useState("");
   const [organizationEdits, setOrganizationEdits] = useState({});
   const [organizationLabelEdits, setOrganizationLabelEdits] = useState({});
+  const [organizationEmailEdits, setOrganizationEmailEdits] = useState({});
+  const [newOrganization, setNewOrganization] = useState({ name: "", login_label: "", email: "", clone_from: "social-solidarity" });
+  const [unionLogoVisible, setUnionLogoVisible] = useState(true);
+  const [unionLogoDataUrl, setUnionLogoDataUrl] = useState("");
+  const [authorityLogoSettings, setAuthorityLogoSettings] = useState(defaultAuthorityLogoSettings);
+  const [backupEnabled, setBackupEnabled] = useState(true);
+  const [backupAllowedRoles, setBackupAllowedRoles] = useState({ super_admin: true, admin: true, user: false });
+  const [twoFactorPolicy, setTwoFactorPolicy] = useState({ super_admin: false, admin: false, user: false });
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
@@ -118,6 +134,8 @@ export default function AdminPage() {
   const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
   const [etaIntegration, setEtaIntegration] = useState(defaultEtaIntegration);
   const [etaConnection, setEtaConnection] = useState(null);
+  const [twoFactorSetup, setTwoFactorSetup] = useState(null);
+  const [otpCode, setOtpCode] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [moduleSettingsLoading, setModuleSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -178,6 +196,13 @@ export default function AdminPage() {
       const orgs = response.data.organizations || {};
       setOrganizationEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.name || ""])));
       setOrganizationLabelEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.login_label || ""])));
+      setOrganizationEmailEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.email || ""])));
+      setUnionLogoVisible(response.data.login_union_logo_visible !== false);
+      setUnionLogoDataUrl(response.data.login_union_logo_data_url || "");
+      setAuthorityLogoSettings((response.data.login_authority_logos?.length ? response.data.login_authority_logos : defaultAuthorityLogoSettings).map((item, index) => ({ ...defaultAuthorityLogoSettings[index], ...item })));
+      setBackupEnabled(response.data.backup_enabled !== false);
+      setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
+      setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -274,6 +299,26 @@ export default function AdminPage() {
   };
 
   const updateEtaField = (field, value) => setEtaIntegration((current) => ({ ...current, [field]: value }));
+
+  const readImageAsDataUrl = (file, callback) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => callback(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const createOrganization = async () => {
+    if (!newOrganization.name.trim()) return toast.error("أدخل اسم الجهة الجديدة");
+    try {
+      await api.post("/admin/organizations", newOrganization);
+      setNewOrganization({ name: "", login_label: "", email: "", clone_from: "social-solidarity" });
+      await loadAppSettings();
+      await loadOrganizations();
+      toast.success("تمت إضافة الجهة الجديدة مع نسخ الخواص الأساسية");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر إضافة الجهة");
+    }
+  };
 
   const saveEtaIntegration = async () => {
     if (!isSuperAdmin) return toast.error("إعدادات الربط الضريبي متاحة للسوبر أدمن فقط");
@@ -475,6 +520,63 @@ export default function AdminPage() {
     }
   };
 
+  const clearAuditLogs = async () => {
+    if (!window.confirm("سيتم مسح محتويات سجل التدقيق بالكامل. هل تريد المتابعة؟")) return;
+    try {
+      await api.delete("/admin/security/audit-logs");
+      setAuditLogs([]);
+      toast.success("تم مسح سجل التدقيق");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر مسح سجل التدقيق");
+    }
+  };
+
+  const setup2FA = async () => {
+    try {
+      const response = await api.post("/admin/2fa/setup");
+      setTwoFactorSetup(response.data);
+      toast.info("امسح QR Code من تطبيق Google Authenticator");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر إعداد Google Authenticator");
+    }
+  };
+
+  const verify2FA = async () => {
+    try {
+      await api.post("/admin/2fa/verify", { otp_code: otpCode });
+      setTwoFactorSetup(null);
+      setOtpCode("");
+      await refreshMe();
+      toast.success("تم تفعيل Google Authenticator للحساب");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "كود التحقق غير صحيح");
+    }
+  };
+
+  const disable2FA = async () => {
+    try {
+      await api.post("/admin/2fa/disable");
+      await refreshMe();
+      toast.success("تم تعطيل Google Authenticator لهذا الحساب");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تعطيل الخدمة");
+    }
+  };
+
+  const downloadProtectedFile = async (url, filename) => {
+    try {
+      const response = await api.get(url, { responseType: "blob" });
+      const objectUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast.error("تعذر تصدير الملف");
+    }
+  };
+
   const saveAppSystemName = async (event) => {
     event.preventDefault();
     if (!systemName.trim()) return toast.error("أدخل اسم النظام");
@@ -486,6 +588,13 @@ export default function AdminPage() {
         organization_login_label: organizationLoginLabel.trim(),
         organization_names: organizationEdits,
         organization_login_labels: organizationLabelEdits,
+        organization_emails: organizationEmailEdits,
+        login_union_logo_visible: unionLogoVisible,
+        login_union_logo_data_url: unionLogoDataUrl,
+        login_authority_logos: authorityLogoSettings,
+        backup_enabled: backupEnabled,
+        backup_allowed_roles: backupAllowedRoles,
+        two_factor_role_policy: twoFactorPolicy,
       });
       setAppSettings(response.data);
       setSystemName(response.data.system_name || systemName.trim());
@@ -494,6 +603,13 @@ export default function AdminPage() {
       const orgs = response.data.organizations || {};
       setOrganizationEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.name || ""])));
       setOrganizationLabelEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.login_label || ""])));
+      setOrganizationEmailEdits(Object.fromEntries(Object.entries(orgs).map(([id, item]) => [id, item.email || ""])));
+      setUnionLogoVisible(response.data.login_union_logo_visible !== false);
+      setUnionLogoDataUrl(response.data.login_union_logo_data_url || "");
+      setAuthorityLogoSettings((response.data.login_authority_logos?.length ? response.data.login_authority_logos : defaultAuthorityLogoSettings).map((item, index) => ({ ...defaultAuthorityLogoSettings[index], ...item })));
+      setBackupEnabled(response.data.backup_enabled !== false);
+      setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
+      setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });
       await refreshSettings();
       toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
@@ -558,7 +674,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-4" data-testid="admin-heading-block">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="admin-heading-icon"><UserCog className="h-6 w-6" /></div>
             <div>
-              <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-eyebrow">الرابط الخاص للأدمن</p>
+              <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-eyebrow">لوحة إدارة النظام</p>
               <h1 className="text-3xl font-extrabold" data-testid="admin-title">لوحة التحكم الآمنة</h1>
             </div>
           </div>
@@ -693,7 +809,7 @@ export default function AdminPage() {
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-checklist-card"><h3 className="mb-3 font-extrabold" data-testid="security-checklist-title">مؤشرات المراجعة والأمان</h3><ul className="space-y-2 text-sm font-bold text-slate-700" data-testid="security-checklist"><li>✓ سجل تدقيق لكل عمليات API المؤثرة.</li><li>✓ إقفال شهري وسنوي ومنع تعديل الفترات المقفلة.</li><li>✓ اعتماد تقارير برقم اعتماد واسم معتمد وملاحظات.</li><li>✓ نسخ احتياطي مشفر بكلمة مرور يحددها الأدمن.</li><li>✓ دليل إجراءات: الإدخال للمستخدم، المراجعة للأدمن، الاعتماد عبر هذه الصفحة، الإقفال بعد نهاية الفترة، وفتح الفترة بسبب مكتوب.</li><li>⚠ مراجعة محاسب قانوني ومراجعة أمنية خارجية لا تتم آلياً ويجب تنفيذها بواسطة مختص.</li></ul></div>
             </div>}
-            {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><h3 className="mb-3 font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="rounded bg-slate-50 p-3 text-xs font-bold" data-testid={`audit-log-row-${item.id}`}><div className="grid grid-cols-1 gap-2 md:grid-cols-[110px_105px_180px_80px]" data-testid={`audit-log-row-${item.id}-summary`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-actor-full-name`}>{item.actor_full_name || item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div><p className="mt-2 leading-6 text-slate-700" data-testid={`audit-log-row-${item.id}-arabic-description`}>{item.arabic_description || item.action}</p></div>)}</div></div>}
+            {activeAdminSection === "audit-log" && <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4" data-testid="audit-log-card"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-extrabold" data-testid="audit-log-title">سجل التدقيق Audit Log</h3>{isSuperAdmin && <Button type="button" variant="outline" onClick={clearAuditLogs} className="border-red-200 bg-red-50 text-red-700" data-testid="clear-audit-logs-button">مسح سجل التدقيق</Button>}</div><div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid="audit-log-filter-grid"><select value={auditFilter.year} onChange={(event) => setAuditFilter((current) => ({ ...current, year: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-year-filter"><option value="all">كل السنوات</option>{adminYearOptions.map((year) => <option key={year} value={year}>{year}</option>)}</select><select value={auditFilter.month} onChange={(event) => setAuditFilter((current) => ({ ...current, month: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-month-filter"><option value="all">كل الشهور</option>{adminMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}</select><select value={auditFilter.hour} onChange={(event) => setAuditFilter((current) => ({ ...current, hour: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-extrabold" data-testid="audit-log-hour-filter"><option value="all">كل الساعات</option>{adminHourOptions.map((hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select><Button type="button" onClick={loadSecurityReview} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="apply-audit-log-filter-button">تطبيق الفلتر</Button></div><div className="max-h-[520px] overflow-y-auto space-y-2" data-testid="audit-log-list">{auditLogs.map((item) => <div key={item.id} className="rounded bg-slate-50 p-3 text-xs font-bold" data-testid={`audit-log-row-${item.id}`}><div className="grid grid-cols-1 gap-2 md:grid-cols-[110px_105px_180px_80px]" data-testid={`audit-log-row-${item.id}-summary`}><span data-testid={`audit-log-row-${item.id}-date`}>{new Date(item.created_at).toLocaleDateString('ar-EG')}</span><span data-testid={`audit-log-row-${item.id}-time`}>{new Date(item.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span><span data-testid={`audit-log-row-${item.id}-actor-full-name`}>{item.actor_full_name || item.username || 'غير معروف'}</span><span data-testid={`audit-log-row-${item.id}-status`}>{item.status_code}</span></div><p className="mt-2 leading-6 text-slate-700" data-testid={`audit-log-row-${item.id}-arabic-description`}>{item.arabic_description || item.action}</p></div>)}</div></div>}
           </section>}
 
           {isSuperAdmin && activeAdminSection === "users" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="users-list-section">
@@ -778,7 +894,7 @@ export default function AdminPage() {
               <div className="space-y-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4" data-testid="all-organizations-names-editor">
                 <p className="text-sm font-extrabold text-emerald-800" data-testid="all-organizations-names-title">تعديل أسماء الجهات في كل البرنامج</p>
                 {Object.entries(appSettings?.organizations || {}).map(([orgId, organization]) => (
-                  <div key={orgId} className="grid grid-cols-1 gap-3 lg:grid-cols-2" data-testid={`organization-global-editor-${orgId}`}>
+                  <div key={orgId} className="grid grid-cols-1 gap-3 lg:grid-cols-3" data-testid={`organization-global-editor-${orgId}`}>
                     <div className="space-y-2" data-testid={`organization-name-wrapper-${orgId}`}>
                       <Label data-testid={`organization-name-label-${orgId}`}>الاسم الكامل - {organization.login_label}</Label>
                       <Input value={organizationEdits[orgId] || ""} onChange={(event) => setOrganizationEdits((current) => ({ ...current, [orgId]: event.target.value }))} className="h-11 bg-white text-right" data-testid={`organization-name-input-${orgId}`} />
@@ -787,9 +903,38 @@ export default function AdminPage() {
                       <Label data-testid={`organization-login-label-label-${orgId}`}>الاسم المختصر</Label>
                       <Input value={organizationLabelEdits[orgId] || ""} onChange={(event) => setOrganizationLabelEdits((current) => ({ ...current, [orgId]: event.target.value }))} className="h-11 bg-white text-right" data-testid={`organization-login-label-input-${orgId}`} />
                     </div>
+                    <div className="space-y-2" data-testid={`organization-email-wrapper-${orgId}`}>
+                      <Label data-testid={`organization-email-label-${orgId}`}>البريد الإلكتروني للمطبوعات</Label>
+                      <Input value={organizationEmailEdits[orgId] || ""} onChange={(event) => setOrganizationEmailEdits((current) => ({ ...current, [orgId]: event.target.value }))} className="h-11 bg-white text-right" data-testid={`organization-email-input-${orgId}`} />
+                    </div>
                   </div>
                 ))}
               </div>
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="new-organization-panel">
+                <p className="text-sm font-extrabold text-slate-800" data-testid="new-organization-title">إضافة جهة جديدة مع نسخ كل الخواص</p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <Input placeholder="اسم الجهة الجديدة" value={newOrganization.name} onChange={(event) => setNewOrganization((current) => ({ ...current, name: event.target.value }))} data-testid="new-organization-name-input" />
+                  <Input placeholder="الاسم المختصر" value={newOrganization.login_label} onChange={(event) => setNewOrganization((current) => ({ ...current, login_label: event.target.value }))} data-testid="new-organization-label-input" />
+                  <Input placeholder="البريد الإلكتروني" value={newOrganization.email} onChange={(event) => setNewOrganization((current) => ({ ...current, email: event.target.value }))} data-testid="new-organization-email-input" />
+                  <select value={newOrganization.clone_from} onChange={(event) => setNewOrganization((current) => ({ ...current, clone_from: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="new-organization-clone-select">
+                    {organizations.map((item) => <option key={item.id} value={item.id}>{item.login_label}</option>)}
+                  </select>
+                </div>
+                <Button type="button" onClick={createOrganization} variant="outline" className="h-11 w-full bg-white" data-testid="create-new-organization-button"><Plus className="h-4 w-4" /> إضافة الجهة</Button>
+              </div>
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="login-logo-settings-panel">
+                <p className="text-sm font-extrabold text-slate-800" data-testid="login-logo-settings-title">شعارات صفحة تسجيل الدخول</p>
+                <label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold" data-testid="toggle-union-login-logo-label"><span>إظهار شعار النقابة الكبير</span><input type="checkbox" checked={unionLogoVisible} onChange={(event) => setUnionLogoVisible(event.target.checked)} data-testid="toggle-union-login-logo-checkbox" /></label>
+                <Input type="file" accept="image/*" onChange={(event) => readImageAsDataUrl(event.target.files?.[0], setUnionLogoDataUrl)} data-testid="union-login-logo-file-input" />
+                {authorityLogoSettings.map((logo, index) => <div key={logo.name} className="grid grid-cols-1 gap-2 rounded-lg bg-white p-3 md:grid-cols-[auto_1fr_1fr]" data-testid={`authority-logo-editor-${index}`}><label className="flex items-center gap-2 font-bold"><input type="checkbox" checked={logo.enabled !== false} onChange={(event) => setAuthorityLogoSettings((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: event.target.checked } : item))} data-testid={`authority-logo-enabled-${index}`} /> إظهار</label><Input value={logo.name} onChange={(event) => setAuthorityLogoSettings((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} data-testid={`authority-logo-name-${index}`} /><Input type="file" accept="image/*" onChange={(event) => readImageAsDataUrl(event.target.files?.[0], (url) => setAuthorityLogoSettings((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, src: url } : item)))} data-testid={`authority-logo-file-${index}`} /></div>)}
+              </div>
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-policy-settings-panel">
+                <p className="text-sm font-extrabold text-slate-800">النسخ الاحتياطي و Google Authenticator</p>
+                <label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>تشغيل خدمة النسخ الاحتياطي</span><input type="checkbox" checked={backupEnabled} onChange={(event) => setBackupEnabled(event.target.checked)} data-testid="backup-enabled-checkbox" /></label>
+                {['super_admin','admin','user'].map((role) => <div key={role} className="grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-sm font-bold" data-testid={`role-policy-${role}`}><label><input type="checkbox" checked={backupAllowedRoles[role] !== false} onChange={(event) => setBackupAllowedRoles((current) => ({ ...current, [role]: event.target.checked }))} /> نسخ احتياطي: {role}</label><label><input type="checkbox" checked={twoFactorPolicy[role] === true} onChange={(event) => setTwoFactorPolicy((current) => ({ ...current, [role]: event.target.checked }))} /> Google Authenticator: {role}</label></div>)}
+                <p className="text-xs font-bold text-amber-700">تنبيه: تفعيل Google Authenticator يحتاج اتصال إنترنت وقت تثبيت التطبيق أو مسح الرمز أول مرة فقط.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-3" data-testid="training-export-buttons"><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/manual.pdf', 'دليل-استخدام-البرنامج.pdf')} data-testid="download-training-manual-link">كتيب PDF</Button><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/video-guide.gif', 'فيديو-استرشادي.gif')} data-testid="download-training-video-link">فيديو Slideshow</Button><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/screenshots.zip', 'لقطات-صفحات-البرنامج.zip')} data-testid="download-screenshots-zip-link">Screenshots ZIP</Button></div>
               <Button type="submit" disabled={settingsLoading} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-app-system-name-button"><Save className="h-4 w-4" /> حفظ أسماء البرنامج والجهات</Button>
             </form>
             <div className="mt-5 space-y-3" data-testid="shortcut-icon-settings-panel">
@@ -914,6 +1059,13 @@ export default function AdminPage() {
               </div>
               <Button type="submit" className="h-12 w-full rounded-lg bg-slate-950 text-white" data-testid="admin-change-password-button"><Save className="h-4 w-4" /> حفظ كلمة المرور</Button>
             </form>
+            <div className="mt-5 space-y-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4" data-testid="admin-2fa-role-service-panel">
+              <p className="font-extrabold text-emerald-900" data-testid="admin-2fa-role-service-title">Google Authenticator</p>
+              <p className="text-xs font-bold text-amber-700" data-testid="admin-2fa-internet-warning">تنبيه: يجب أن يكون الجهاز متصلاً بالإنترنت عند تثبيت تطبيق Google Authenticator أو مسح الرمز أول مرة.</p>
+              <Badge className={user?.totp_enabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"} data-testid="admin-2fa-current-status">{user?.totp_enabled ? "مفعل لهذا الحساب" : "غير مفعل لهذا الحساب"}</Badge>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2"><Button type="button" onClick={setup2FA} variant="outline" className="bg-white" data-testid="admin-2fa-start-button">إظهار QR</Button><Button type="button" onClick={disable2FA} variant="outline" className="bg-white" data-testid="admin-2fa-disable-button">تعطيل للحساب</Button></div>
+              {twoFactorSetup && <div className="space-y-3" data-testid="admin-2fa-setup-box"><img src={twoFactorSetup.qr_data_url} alt="QR" className="mx-auto h-44 w-44 rounded-lg bg-white p-2" data-testid="admin-2fa-qr-image" /><Input value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder="كود التطبيق" className="text-center font-extrabold tracking-widest" data-testid="admin-2fa-code-input" /><Button type="button" onClick={verify2FA} className="w-full bg-emerald-700 text-white" data-testid="admin-2fa-verify-button">تفعيل</Button></div>}
+            </div>
           </section>}
         </aside>
       </section>

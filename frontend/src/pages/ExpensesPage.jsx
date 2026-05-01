@@ -62,6 +62,7 @@ export default function ExpensesPage() {
   };
   const dynamicUnionFullName = settings.organizations?.["general-union"]?.name || "النقابة العامة للعاملين بالزراعة والري والصيد واستصلاح الأراضي";
   const dynamicSocialName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
+  const organizationEmail = settings.organizations?.[user?.organization_id]?.email || settings.organizations?.["general-union"]?.email || "";
   const [banks, setBanks] = useState(fallbackBanks);
   const [expenses, setExpenses] = useState([]);
   const [form, setForm] = useState(defaultForm);
@@ -276,6 +277,7 @@ export default function ExpensesPage() {
         <header className="text-center leading-7" data-testid="expense-voucher-header">
           <p className="text-sm font-extrabold" data-testid="expense-voucher-union-name">{dynamicUnionFullName}</p>
           {item.organization_scope === "social_solidarity_project" && <p className="text-sm font-bold" data-testid="expense-voucher-fund-name">{dynamicSocialName}</p>}
+          {organizationEmail && <p className="text-xs font-bold" data-testid="expense-voucher-email">{organizationEmail}</p>}
           <p className="text-xs font-bold text-slate-600" data-testid="expense-voucher-address">١٧٠ شارع بورسعيد - السيدة زينب - القاهرة</p>
         </header>
         <div className="mt-5 grid grid-cols-3 items-center" data-testid="expense-voucher-title-row">

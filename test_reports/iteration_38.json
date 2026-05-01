@@ -1,0 +1,57 @@
+{
+  "summary": "Executed backend + frontend validation for super-admin controls, organization/email settings, training exports, backup/2FA policies, auth playbook checks, role restrictions, and setup package availability.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "CORS preflight on public URL still returns Access-Control-Allow-Origin=* instead of explicit origin with credentials.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Admin general settings login logos panel",
+        "issue": "Authority logos editor renders only 1 item (not 5).",
+        "selector": "[data-testid^='authority-logo-editor-']",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Login authority logos strip",
+        "issue": "Only 1 authority logo image appears on login page; expected 5 logos as images.",
+        "selector": "[data-testid^='login-authority-logo-'][data-testid$='-image']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration44_controls_and_policies.py",
+    "/app/test_reports/pytest/pytest_results_iter44_backend.xml"
+  ],
+  "action_items": [
+    "Fix edge/ingress CORS override so credentialed preflight returns explicit request origin.",
+    "Fix authority logos state merge/render to always support 5 logos in admin panel and login strip when configured.",
+    "Re-run UI regression for logo-hide/show and 5-logo rendering after fix."
+  ],
+  "critical_code_review_comments": [
+    "server.py remains oversized (~6k+ lines) and should be split into routers/services to reduce regression risk.",
+    "Older test file /app/backend/tests/test_iteration43_all_phase_controls.py still uses a localhost fallback for BASE_URL; should rely on REACT_APP_BACKEND_URL only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration44_controls_and_policies.py",
+    "/app/test_reports/iteration_38.json"
+  ],
+  "success_rate": {
+    "backend": "91%",
+    "frontend": "82%"
+  },
+  "seed_data_creation": "Created one temporary custom organization during API test and disabled it in same test flow.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend: 10/11 tests passed (only CORS explicit-origin check failed). Verified bcrypt hash prefix ($2b$), httpOnly login cookie, brute-force lockout after 5 fails, policy-gated backup/2FA behavior, training exports non-empty and free of super_admin string, admin_union restrictions, and setup download size=16,553,854 bytes. Frontend: role restrictions and union-logo hide/show worked; clear-audit button visible only for super admin. Blocking UI gap: only one authority logo editor/image renders instead of five.",
+  "rca of the issue": "RCA-1 (CORS): App code returns explicit origin in middleware, but public endpoint response still shows wildcard (*), indicating upstream edge/ingress CORS override. Repro: OPTIONS {REACT_APP_BACKEND_URL}/api/auth/login with Origin header.\nRCA-2 (Authority logos count): Frontend maps response.login_authority_logos directly when non-empty; if backend returns list length=1, UI renders one editor/image only, not the required fixed 5 slots."
+}

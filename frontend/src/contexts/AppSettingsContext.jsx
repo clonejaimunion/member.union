@@ -6,6 +6,12 @@ const defaultSettings = {
   shortcut_icon_url: null,
   shortcut_update_status: null,
   organizations: {},
+  login_union_logo_visible: true,
+  login_union_logo_data_url: null,
+  login_authority_logos: [],
+  backup_enabled: true,
+  backup_allowed_roles: { super_admin: true, admin: true, user: false },
+  two_factor_role_policy: { super_admin: false, admin: false, user: false },
   updated_at: null,
 };
 

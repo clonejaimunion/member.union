@@ -25,7 +25,8 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { loginWithToken } = useAuth();
   const { settings } = useAppSettings();
-  const [form, setForm] = useState({ username: "", password: "" });
+  const [form, setForm] = useState({ username: "", password: "", otp_code: "" });
+  const [requires2fa, setRequires2fa] = useState(false);
   const [organizations, setOrganizations] = useState([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState(() => window.localStorage.getItem("bank_selected_organization") || "");
   const [loading, setLoading] = useState(false);
@@ -41,10 +42,15 @@ export default function LoginPage() {
   }, []);
 
   const selectedOrganization = organizations.find((item) => item.id === selectedOrganizationId);
+  const renderedAuthorityLogos = (settings.login_authority_logos?.length
+    ? settings.login_authority_logos.map((item, index) => ({ ...authorityLogos[index], ...item, src: item.src || authorityLogos[index]?.src }))
+    : authorityLogos).filter((item) => item.enabled !== false);
 
   const selectOrganization = (organizationId) => {
     setSelectedOrganizationId(organizationId);
     window.localStorage.setItem("bank_selected_organization", organizationId);
+    setRequires2fa(false);
+    setForm((current) => ({ ...current, otp_code: "" }));
   };
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
@@ -59,7 +65,13 @@ export default function LoginPage() {
         return;
       }
       payload.organization_id = selectedOrganizationId;
+      if (requires2fa) payload.otp_code = form.otp_code;
       const response = await api.post("/auth/login", payload);
+      if (response.data.requires_2fa) {
+        setRequires2fa(true);
+        toast.info(response.data.message);
+        return;
+      }
       loginWithToken(response.data.token, response.data.user);
       toast.success(response.data.message);
       if (["admin", "super_admin"].includes(response.data.user?.role)) {
@@ -115,21 +127,25 @@ export default function LoginPage() {
                 <Input id="password" type="password" value={form.password} onChange={(event) => updateField("password", event.target.value)} required className="h-12 rounded-lg bg-slate-50 pr-11 text-right" data-testid="login-password-input" />
               </div>
             </div>
+            {requires2fa && <div className="space-y-2" data-testid="login-otp-wrapper">
+              <Label htmlFor="otp_code" data-testid="login-otp-label">كود Google Authenticator</Label>
+              <Input id="otp_code" value={form.otp_code} onChange={(event) => updateField("otp_code", event.target.value)} required className="h-12 rounded-lg bg-emerald-50 text-center text-lg font-extrabold tracking-widest" data-testid="login-otp-input" />
+            </div>}
             <Button type="submit" disabled={loading} className="h-12 w-full rounded-lg bg-slate-950 text-white hover:bg-slate-800" data-testid="login-submit-button">
-              <ShieldCheck className="h-4 w-4" /> {loading ? "جاري الدخول..." : "دخول البرنامج"}
+              <ShieldCheck className="h-4 w-4" /> {loading ? "جاري الدخول..." : requires2fa ? "تأكيد الكود" : "دخول البرنامج"}
             </Button>
           </form>
           <CreditLine className="mt-6 text-center text-xs font-bold text-slate-500" testId="login-creator-credit" />
         </section>
         <section className="order-1 space-y-6 lg:order-2" data-testid="login-hero-section">
-          <div className="relative mx-auto flex max-w-sm select-none items-center justify-center py-2 [perspective:1200px]" data-testid="login-union-logo-3d-stage">
+          {settings.login_union_logo_visible !== false && <div className="relative mx-auto flex max-w-sm select-none items-center justify-center py-2 [perspective:1200px]" data-testid="login-union-logo-3d-stage">
             <div className="absolute inset-x-8 bottom-0 h-10 rounded-full bg-emerald-400/20 blur-2xl" data-testid="login-union-logo-glow" />
             <div className="relative rounded-[2rem] border border-emerald-200/25 bg-white/10 p-4 shadow-[0_35px_90px_rgba(16,185,129,0.28)] backdrop-blur-xl transition-transform duration-500 hover:[transform:rotateY(6deg)_translateY(-4px)]" data-testid="login-union-logo-3d-card">
               <div className="absolute inset-0 rounded-[2rem] bg-[linear-gradient(135deg,rgba(255,255,255,0.32),transparent_38%,rgba(16,185,129,0.2))]" data-testid="login-union-logo-glass" />
-              <img src={unionLogo} alt="شعار النقابة العامة" draggable={false} className="relative h-40 w-40 rounded-[1.5rem] object-contain mix-blend-screen drop-shadow-[0_18px_30px_rgba(0,0,0,0.42)] sm:h-52 sm:w-52" data-testid="login-union-logo-image" />
+              <img src={settings.login_union_logo_data_url || unionLogo} alt="شعار النقابة العامة" draggable={false} className="relative h-40 w-40 rounded-[1.5rem] object-contain mix-blend-screen drop-shadow-[0_18px_30px_rgba(0,0,0,0.42)] sm:h-52 sm:w-52" data-testid="login-union-logo-image" />
               <div className="pointer-events-none absolute inset-3 rounded-[1.5rem] border border-white/20" data-testid="login-union-logo-protection-overlay" />
             </div>
-          </div>
+          </div>}
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-bold text-emerald-200" data-testid="login-security-badge">
             <ShieldCheck className="h-4 w-4" /> حماية بالصلاحيات وكلمات المرور
           </div>
@@ -138,7 +154,7 @@ export default function LoginPage() {
             <p className="max-w-2xl text-2xl font-extrabold leading-tight text-emerald-200 sm:text-3xl" data-testid="login-hero-title">{settings.system_name}</p>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="login-authority-logos-strip">
-            {authorityLogos.map((authority) => (
+            {renderedAuthorityLogos.map((authority) => (
               <div key={authority.name} className="flex min-h-16 items-center gap-3 rounded-xl border border-white/10 bg-white/[0.08] px-3 py-2 backdrop-blur-xl" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}`}>
                 <img src={authority.src} alt={`شعار ${authority.name}`} draggable={false} className="h-12 w-12 shrink-0 rounded-full object-contain drop-shadow-lg" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}-image`} />
                 <span className="text-sm font-extrabold leading-5 text-slate-100" data-testid={`login-authority-logo-${authority.name.replace(/\s+/g, '-')}-name`}>{authority.name}</span>

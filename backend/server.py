@@ -27,11 +27,14 @@ import shlex
 import urllib.parse
 from contextvars import ContextVar
 import zipfile
+import textwrap
 import xml.etree.ElementTree as ET
 
 import bcrypt
 import jwt
-from PIL import Image
+import pyotp
+import qrcode
+from PIL import Image, ImageDraw, ImageFont, JpegImagePlugin
 from pypdf import PdfReader
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -320,6 +323,12 @@ class AppSettingsResponse(BaseModel):
     organization_name: Optional[str] = None
     organization_login_label: Optional[str] = None
     organizations: Dict[str, dict] = Field(default_factory=dict)
+    login_union_logo_visible: bool = True
+    login_union_logo_data_url: Optional[str] = None
+    login_authority_logos: List[dict] = Field(default_factory=list)
+    backup_enabled: bool = True
+    backup_allowed_roles: Dict[str, bool] = Field(default_factory=lambda: {"super_admin": True, "admin": True, "user": False})
+    two_factor_role_policy: Dict[str, bool] = Field(default_factory=lambda: {"super_admin": False, "admin": False, "user": False})
     shortcut_icon_url: Optional[str] = None
     shortcut_icon_updated_at: Optional[str] = None
     shortcut_update_status: Optional[str] = None
@@ -332,12 +341,21 @@ class AppSettingsUpdate(BaseModel):
     organization_login_label: Optional[str] = Field(default=None, min_length=2, max_length=120)
     organization_names: Optional[Dict[str, str]] = None
     organization_login_labels: Optional[Dict[str, str]] = None
+    organization_emails: Optional[Dict[str, Optional[str]]] = None
+    login_union_logo_visible: Optional[bool] = None
+    login_union_logo_data_url: Optional[str] = None
+    login_authority_logos: Optional[List[dict]] = None
+    backup_enabled: Optional[bool] = None
+    backup_allowed_roles: Optional[Dict[str, bool]] = None
+    two_factor_role_policy: Optional[Dict[str, bool]] = None
 
 
 class OrganizationResponse(BaseModel):
     id: str
     name: str
     login_label: str
+    email: Optional[str] = None
+    is_active: bool = True
     modules: Dict[str, bool] = Field(default_factory=dict)
 
 
@@ -351,6 +369,22 @@ class OrganizationModulesResponse(BaseModel):
 
 class OrganizationModulesUpdate(BaseModel):
     modules: Dict[str, bool]
+
+
+class OrganizationCreate(BaseModel):
+    id: Optional[str] = None
+    name: str = Field(..., min_length=2, max_length=180)
+    login_label: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    email: Optional[str] = None
+    clone_from: Optional[str] = DEFAULT_ORGANIZATION_ID
+
+
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=180)
+    login_label: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    email: Optional[str] = None
+    is_active: Optional[bool] = None
+    modules: Optional[Dict[str, bool]] = None
 
 
 class TwoFactorSetupResponse(BaseModel):
@@ -1398,9 +1432,10 @@ def attach_organization(document: dict, organization_id: Optional[str] = None) -
 async def get_organization_document(organization_id: Optional[str] = None) -> dict:
     org_id = organization_id or organization_id_or_default()
     base = ORGANIZATIONS.get(org_id)
-    if not base:
-        raise HTTPException(status_code=404, detail="الجهة غير موجودة")
     custom = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+    if not base and not custom:
+        raise HTTPException(status_code=404, detail="الجهة غير موجودة")
+    base = base or {"id": org_id, "name": custom.get("name"), "login_label": custom.get("login_label") or custom.get("name")}
     document = {**base, **(custom or {})}
     document["modules"] = normalize_modules(org_id, document.get("modules"))
     return document
@@ -1408,8 +1443,14 @@ async def get_organization_document(organization_id: Optional[str] = None) -> di
 
 async def list_organization_documents() -> List[dict]:
     result = []
+    seen = set()
     for org_id in ORGANIZATIONS:
         result.append(await get_organization_document(org_id))
+        seen.add(org_id)
+    custom_orgs = await db.organizations.find({"id": {"$nin": list(seen)}, "is_active": {"$ne": False}}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    for custom in custom_orgs:
+        custom["modules"] = normalize_modules(custom["id"], custom.get("modules"))
+        result.append(custom)
     return result
 
 
@@ -1429,6 +1470,12 @@ async def get_app_settings_document() -> dict:
     document = {
         "id": "global",
         "system_name": DEFAULT_SYSTEM_NAME,
+        "login_union_logo_visible": True,
+        "login_union_logo_data_url": None,
+        "login_authority_logos": [],
+        "backup_enabled": True,
+        "backup_allowed_roles": {"super_admin": True, "admin": True, "user": False},
+        "two_factor_role_policy": {"super_admin": False, "admin": False, "user": False},
         "shortcut_icon_updated_at": None,
         "shortcut_update_status": "لم يتم رفع أيقونة مخصصة بعد",
         "created_at": now_iso,
@@ -1453,13 +1500,19 @@ async def build_app_settings_response(document: dict) -> AppSettingsResponse:
     organization_id = organization_id_or_default()
     organization_name = document.get("organization_name")
     organization_login_label = document.get("organization_login_label")
-    organizations = {item["id"]: {"id": item["id"], "name": item["name"], "login_label": item["login_label"], "modules": item.get("modules", {})} for item in await list_organization_documents()}
+    organizations = {item["id"]: {"id": item["id"], "name": item["name"], "login_label": item["login_label"], "email": item.get("email"), "is_active": item.get("is_active", True), "modules": item.get("modules", {})} for item in await list_organization_documents()}
     return AppSettingsResponse(
         system_name=document.get("system_name") or DEFAULT_SYSTEM_NAME,
         organization_id=organization_id,
         organization_name=organization_name,
         organization_login_label=organization_login_label,
         organizations=organizations,
+        login_union_logo_visible=bool(document.get("login_union_logo_visible", True)),
+        login_union_logo_data_url=document.get("login_union_logo_data_url"),
+        login_authority_logos=document.get("login_authority_logos") or [],
+        backup_enabled=bool(document.get("backup_enabled", True)),
+        backup_allowed_roles=document.get("backup_allowed_roles") or {"super_admin": True, "admin": True, "user": False},
+        two_factor_role_policy=document.get("two_factor_role_policy") or {"super_admin": False, "admin": False, "user": False},
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
         shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
         shortcut_update_status=document.get("shortcut_update_status"),
@@ -3458,7 +3511,7 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
             raise HTTPException(status_code=400, detail="اسم الجهة مطلوب")
         await db.organizations.update_one(
             {"id": organization_id},
-            {"$set": {"name": organization_name, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "login_label": ORGANIZATIONS[organization_id]["login_label"], "created_at": now_iso}},
+            {"$set": {"name": organization_name, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "login_label": ORGANIZATIONS.get(organization_id, {}).get("login_label", organization_name), "created_at": now_iso}},
             upsert=True,
         )
         await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_name": organization_name, "updated_at": now_iso}})
@@ -3468,34 +3521,50 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
             raise HTTPException(status_code=400, detail="اسم الجهة المختصر مطلوب")
         await db.organizations.update_one(
             {"id": organization_id},
-            {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "name": ORGANIZATIONS[organization_id]["name"], "created_at": now_iso}},
+            {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": organization_id, "name": ORGANIZATIONS.get(organization_id, {}).get("name", login_label), "created_at": now_iso}},
             upsert=True,
         )
     if payload.organization_names:
         for org_id, org_name_value in payload.organization_names.items():
-            if org_id not in ORGANIZATIONS:
-                continue
             org_name = (org_name_value or "").strip()
             if len(org_name) < 2:
                 raise HTTPException(status_code=400, detail="اسم الجهة مطلوب")
             await db.organizations.update_one(
                 {"id": org_id},
-                {"$set": {"name": org_name, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "login_label": ORGANIZATIONS[org_id]["login_label"], "created_at": now_iso}},
+                {"$set": {"name": org_name, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "login_label": ORGANIZATIONS.get(org_id, {}).get("login_label", org_name), "created_at": now_iso}},
                 upsert=True,
             )
             await db.users.update_many({"organization_id": org_id}, {"$set": {"organization_name": org_name, "updated_at": now_iso}})
     if payload.organization_login_labels:
         for org_id, label_value in payload.organization_login_labels.items():
-            if org_id not in ORGANIZATIONS:
-                continue
             login_label = (label_value or "").strip()
             if len(login_label) < 2:
                 raise HTTPException(status_code=400, detail="اسم الجهة المختصر مطلوب")
             await db.organizations.update_one(
                 {"id": org_id},
-                {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "name": ORGANIZATIONS[org_id]["name"], "created_at": now_iso}},
+                {"$set": {"login_label": login_label, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "name": ORGANIZATIONS.get(org_id, {}).get("name", login_label), "created_at": now_iso}},
                 upsert=True,
             )
+    if payload.organization_emails:
+        for org_id, email_value in payload.organization_emails.items():
+            email = (email_value or "").strip() or None
+            await db.organizations.update_one({"id": org_id}, {"$set": {"email": email, "updated_at": now_iso}, "$setOnInsert": {"id": org_id, "name": ORGANIZATIONS.get(org_id, {}).get("name", org_id), "login_label": ORGANIZATIONS.get(org_id, {}).get("login_label", org_id), "created_at": now_iso}}, upsert=True)
+    app_updates = {}
+    if payload.login_union_logo_visible is not None:
+        app_updates["login_union_logo_visible"] = payload.login_union_logo_visible
+    if payload.login_union_logo_data_url is not None:
+        app_updates["login_union_logo_data_url"] = payload.login_union_logo_data_url or None
+    if payload.login_authority_logos is not None:
+        app_updates["login_authority_logos"] = payload.login_authority_logos
+    if payload.backup_enabled is not None:
+        app_updates["backup_enabled"] = payload.backup_enabled
+    if payload.backup_allowed_roles is not None:
+        app_updates["backup_allowed_roles"] = {role: bool(payload.backup_allowed_roles.get(role)) for role in ["super_admin", "admin", "user"]}
+    if payload.two_factor_role_policy is not None:
+        app_updates["two_factor_role_policy"] = {role: bool(payload.two_factor_role_policy.get(role)) for role in ["super_admin", "admin", "user"]}
+    if app_updates:
+        app_updates["updated_at"] = now_iso
+        await db.app_settings.update_one({"id": "global"}, {"$set": app_updates, "$setOnInsert": {"id": "global", "created_at": now_iso}}, upsert=True)
     document = await get_app_settings_document()
     organization = await get_organization_document(organization_id)
     document["organization_name"] = organization["name"]
@@ -3523,6 +3592,55 @@ async def update_admin_organization_modules(payload: OrganizationModulesUpdate, 
     await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_modules": next_modules, "updated_at": now_iso}})
     updated = await get_organization_document(organization_id)
     return build_organization_modules_response(updated)
+
+
+@api_router.post("/admin/organizations", response_model=OrganizationResponse)
+async def create_custom_organization(payload: OrganizationCreate, _: dict = Depends(require_super_admin)):
+    base_id = re.sub(r"[^a-z0-9-]", "-", (payload.id or payload.login_label or payload.name).strip().lower()).strip("-") or f"org-{uuid.uuid4().hex[:8]}"
+    org_id = base_id
+    suffix = 2
+    while await db.organizations.find_one({"id": org_id}, {"_id": 0}) or org_id in ORGANIZATIONS:
+        org_id = f"{base_id}-{suffix}"
+        suffix += 1
+    clone_source = await get_organization_document(payload.clone_from or DEFAULT_ORGANIZATION_ID)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {
+        "id": org_id,
+        "name": payload.name.strip(),
+        "login_label": (payload.login_label or payload.name).strip(),
+        "email": (payload.email or "").strip() or None,
+        "modules": normalize_modules(org_id, clone_source.get("modules")),
+        "is_active": True,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await db.organizations.insert_one(document.copy())
+    return OrganizationResponse(**document)
+
+
+@api_router.put("/admin/organizations/{organization_id}", response_model=OrganizationResponse)
+async def update_custom_organization(organization_id: str, payload: OrganizationUpdate, _: dict = Depends(require_super_admin)):
+    organization = await get_organization_document(organization_id)
+    updates = {"updated_at": serialize_datetime(datetime.now(timezone.utc))}
+    if payload.name is not None:
+        updates["name"] = payload.name.strip()
+    if payload.login_label is not None:
+        updates["login_label"] = payload.login_label.strip()
+    if payload.email is not None:
+        updates["email"] = (payload.email or "").strip() or None
+    if payload.is_active is not None:
+        updates["is_active"] = payload.is_active
+    if payload.modules is not None:
+        updates["modules"] = normalize_modules(organization_id, payload.modules)
+    await db.organizations.update_one({"id": organization_id}, {"$set": updates, "$setOnInsert": {"id": organization_id, "name": organization["name"], "login_label": organization["login_label"], "created_at": updates["updated_at"]}}, upsert=True)
+    if "name" in updates or "modules" in updates:
+        user_updates = {"updated_at": updates["updated_at"]}
+        if "name" in updates:
+            user_updates["organization_name"] = updates["name"]
+        if "modules" in updates:
+            user_updates["organization_modules"] = updates["modules"]
+        await db.users.update_many({"organization_id": organization_id}, {"$set": user_updates})
+    return OrganizationResponse(**await get_organization_document(organization_id))
 
 
 @api_router.get("/admin/fixed-assets/categories", response_model=List[FixedAssetCategory])
@@ -3813,7 +3931,6 @@ async def ensure_default_admin():
             continue
         document.update({"id": str(uuid.uuid4()), "password_hash": hash_password(ADMIN_INITIAL_PASSWORD), "created_at": serialize_datetime(now)})
         await db.users.insert_one(document)
-    await disable_two_factor_for_all_users()
     await db.login_attempts.delete_many({"identifier": {"$in": [login_attempt_identifier(ADMIN_USERNAME, org_id) for org_id in ORGANIZATIONS]}})
 
 
@@ -3883,7 +4000,9 @@ async def download_setup_file():
 @api_router.post("/auth/login", response_model=AuthResponse)
 async def login(payload: LoginRequest, response: Response):
     organization_id = payload.organization_id.strip()
-    if organization_id not in ORGANIZATIONS:
+    try:
+        selected_login_org = await get_organization_document(organization_id)
+    except HTTPException:
         raise HTTPException(status_code=400, detail="اختر جهة صحيحة قبل تسجيل الدخول")
     await ensure_login_not_locked(payload.username, organization_id)
     username = payload.username.strip()
@@ -3896,10 +4015,24 @@ async def login(payload: LoginRequest, response: Response):
 
     token_user = user.copy()
     if is_super_admin(token_user):
-        organization = await get_organization_document(organization_id)
+        organization = selected_login_org
         token_user["organization_id"] = organization_id
         token_user["organization_name"] = organization["name"]
         token_user["organization_modules"] = normalize_modules(organization_id, organization.get("modules"))
+
+    app_settings = await get_app_settings_document()
+    two_factor_policy = app_settings.get("two_factor_role_policy") or {"super_admin": False, "admin": False, "user": False}
+    if two_factor_policy.get(token_user.get("role")) and user.get("totp_enabled"):
+        if not payload.otp_code:
+            return AuthResponse(
+                requires_2fa=True,
+                temp_token=create_access_token(token_user, purpose="2fa", minutes=5),
+                message="أدخل كود Google Authenticator لإكمال الدخول",
+            )
+        secret = user.get("totp_secret")
+        if not secret or not pyotp.TOTP(secret).verify(payload.otp_code, valid_window=1):
+            await record_failed_login(payload.username, organization_id)
+            raise HTTPException(status_code=401, detail="كود المصادقة الثنائية غير صحيح")
 
     token = create_access_token(token_user)
     await clear_failed_login(payload.username, organization_id)
@@ -3915,7 +4048,7 @@ async def login(payload: LoginRequest, response: Response):
     return AuthResponse(
         token=token,
         user=public_user(token_user),
-        requires_2fa_setup=False,
+        requires_2fa_setup=bool(two_factor_policy.get(token_user.get("role"))) and not user.get("totp_enabled", False),
         message="تم تسجيل الدخول بنجاح",
     )
 
@@ -3934,12 +4067,13 @@ async def list_users(admin_user: dict = Depends(require_super_admin)):
 @api_router.post("/admin/users", response_model=UserPublic)
 async def create_user(payload: UserCreate, admin_user: dict = Depends(require_super_admin)):
     organization_id = payload.organization_id if is_super_admin(admin_user) and payload.organization_id else admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
-    if organization_id not in ORGANIZATIONS:
+    try:
+        organization = await get_organization_document(organization_id)
+    except HTTPException:
         raise HTTPException(status_code=400, detail="الجهة غير صحيحة")
     role = payload.role if is_super_admin(admin_user) else "user"
     if role == "admin" and not is_super_admin(admin_user):
         raise HTTPException(status_code=403, detail="إضافة أدمن متاحة للسوبر أدمن فقط")
-    organization = await get_organization_document(organization_id)
     existing = await db.users.find_one({"username": payload.username.strip(), "organization_id": organization_id}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="اسم المستخدم موجود بالفعل")
@@ -4044,12 +4178,37 @@ async def change_admin_password(payload: ChangePasswordRequest, admin_user: dict
 
 @api_router.post("/admin/2fa/setup", response_model=TwoFactorSetupResponse)
 async def setup_admin_2fa(admin_user: dict = Depends(require_admin)):
-    raise HTTPException(status_code=410, detail="تم إلغاء المصادقة الثنائية نهائياً من النظام")
+    settings = await get_app_settings_document()
+    policy = settings.get("two_factor_role_policy") or {"super_admin": False, "admin": False, "user": False}
+    if not policy.get(admin_user.get("role")):
+        raise HTTPException(status_code=403, detail="خدمة Google Authenticator غير مفعلة لهذا النوع من الحسابات")
+    secret = pyotp.random_base32()
+    otpauth_uri = pyotp.TOTP(secret).provisioning_uri(name=admin_user["username"], issuer_name="Bank Deposit Interest System")
+    image = qrcode.make(otpauth_uri)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    qr_data_url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+    await db.users.update_one({"id": admin_user["id"]}, {"$set": {"totp_pending_secret": secret, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    return TwoFactorSetupResponse(otpauth_uri=otpauth_uri, qr_data_url=qr_data_url, manual_secret=secret)
 
 
 @api_router.post("/admin/2fa/verify", response_model=UserPublic)
 async def verify_admin_2fa(payload: TwoFactorVerifyRequest, admin_user: dict = Depends(require_admin)):
-    raise HTTPException(status_code=410, detail="تم إلغاء المصادقة الثنائية نهائياً من النظام")
+    secret = admin_user.get("totp_pending_secret") or admin_user.get("totp_secret")
+    if not secret:
+        raise HTTPException(status_code=400, detail="ابدأ إعداد المصادقة الثنائية أولاً")
+    if not pyotp.TOTP(secret).verify(payload.otp_code, valid_window=1):
+        raise HTTPException(status_code=400, detail="كود التحقق غير صحيح")
+    await db.users.update_one({"id": admin_user["id"]}, {"$set": {"totp_secret": secret, "totp_enabled": True, "totp_pending_secret": None, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    updated = await db.users.find_one({"id": admin_user["id"]}, {"_id": 0})
+    return public_user(updated)
+
+
+@api_router.post("/admin/2fa/disable", response_model=UserPublic)
+async def disable_current_user_2fa(admin_user: dict = Depends(require_admin)):
+    await db.users.update_one({"id": admin_user["id"]}, {"$set": {"totp_secret": None, "totp_pending_secret": None, "totp_enabled": False, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    updated = await db.users.find_one({"id": admin_user["id"]}, {"_id": 0})
+    return public_user(updated)
 
 
 @api_router.get("/banks", response_model=List[Bank])
@@ -5846,19 +6005,110 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
 
 
 BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+TRAINING_DIR = ROOT_DIR.parent / "training_exports"
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def training_font(size: int):
+    for path in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def draw_training_page(title: str, lines: List[str], page_no: int, system_name: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 170], fill="#0f172a")
+    draw.text((1160, 55), system_name, font=training_font(34), fill="white", anchor="ra")
+    draw.text((1160, 135), title, font=training_font(42), fill="#6ee7b7", anchor="ra")
+    y = 230
+    for line in lines:
+        for wrapped in textwrap.wrap(line, width=58):
+            draw.text((1120, y), wrapped, font=training_font(28), fill="#111827", anchor="ra")
+            y += 50
+        y += 16
+    draw.text((620, 1690), f"صفحة {page_no}", font=training_font(22), fill="#64748b", anchor="mm")
+    return image
+
+
+async def training_pages() -> tuple[str, List[tuple[str, List[str]]]]:
+    settings = await get_app_settings_document()
+    public = await build_app_settings_response(settings)
+    system_name = public.system_name
+    pages = [
+        ("مقدمة تشغيل البرنامج", ["هذا الكتيب يشرح استخدام النظام خطوة بخطوة للمستخدمين والأدمن العاديين دون ذكر أي حسابات مخفية.", "ابدأ باختيار الجهة ثم تسجيل الدخول باسم المستخدم وكلمة المرور."]),
+        ("فوائد الودائع والبنوك", ["إضافة البنوك، إدخال الودائع، متابعة تواريخ الإنشاء والاستحقاق، واحتساب الفوائد سنوياً مع تقارير قابلة للطباعة."]),
+        ("الإيرادات والمصروفات", ["تسجيل الإيرادات والمصروفات، اعتمادها، ربطها بالقيود اليومية، وطباعة التقارير الدورية حسب الصلاحيات."]),
+        ("التسويات البنكية", ["إدخال رصيد الدفتر وكشف البنك، الشيكات القائمة وتحت التحصيل، ثم استخراج التسوية البنكية للطباعة."]),
+        ("العضوية والتكافل", ["إدارة بيانات العضوية، الاستيراد من الملفات، حساب سن المعاش، وبحث وطباعة بيانات الأعضاء."]),
+        ("الأصول والعهد والسلف", ["تسجيل الأصول الثابتة ونسب الإهلاك، وإدارة العهد والسلف وتسويتها بقيود محاسبية تلقائية."]),
+        ("القوائم المالية", ["إعداد الميزانية وحساب الإيرادات والمصروفات والمقبوضات والمدفوعات سنوياً مع فحص الأخطاء المحاسبية."]),
+        ("الفاتورة الإلكترونية", ["إعداد بيانات الممول والربط الضريبي، تجهيز الفواتير، ثم إرسالها عند اكتمال بيانات API وSDK التوقيع الرقمي."]),
+        ("النسخ الاحتياطي والأمان", ["إنشاء نسخة احتياطية مشفرة بكلمة مرور، واستعادتها عند الحاجة، ومراجعة سجل التدقيق حسب الصلاحيات."]),
+    ]
+    return system_name, pages
+
+
+@api_router.get("/admin/training/manual.pdf")
+async def download_training_manual(_: dict = Depends(require_admin)):
+    system_name, pages = await training_pages()
+    images = [draw_training_page(title, lines, index + 1, system_name) for index, (title, lines) in enumerate(pages)]
+    path = TRAINING_DIR / "دليل-استخدام-البرنامج.pdf"
+    images[0].save(path, save_all=True, append_images=images[1:])
+    return FileResponse(str(path), filename=path.name, media_type="application/pdf")
+
+
+@api_router.get("/admin/training/screenshots.zip")
+async def download_training_screenshots(_: dict = Depends(require_admin)):
+    system_name, pages = await training_pages()
+    zip_path = TRAINING_DIR / "لقطات-صفحات-البرنامج.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for index, (title, lines) in enumerate(pages, start=1):
+            image = draw_training_page(title, lines, index, system_name)
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            archive.writestr(f"{index:02d}-{title}.png", buffer.getvalue())
+    return FileResponse(str(zip_path), filename=zip_path.name, media_type="application/zip")
+
+
+@api_router.get("/admin/training/video-guide.gif")
+async def download_training_video(_: dict = Depends(require_admin)):
+    system_name, pages = await training_pages()
+    frames = [draw_training_page(title, lines, index + 1, system_name).resize((620, 877)) for index, (title, lines) in enumerate(pages)]
+    path = TRAINING_DIR / "فيديو-استرشادي-slideshow.gif"
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=2200, loop=0)
+    return FileResponse(str(path), filename=path.name, media_type="image/gif")
+
+
+@api_router.delete("/admin/security/audit-logs")
+async def clear_audit_logs(_: dict = Depends(require_super_admin)):
+    result = await db.audit_logs.delete_many({})
+    return {"message": "تم مسح محتويات سجل التدقيق", "deleted_count": result.deleted_count}
+
+
+async def ensure_backup_allowed(current_user: dict):
+    settings = await get_app_settings_document()
+    if not settings.get("backup_enabled", True):
+        raise HTTPException(status_code=403, detail="خدمة النسخ الاحتياطي معطلة حالياً")
+    allowed = settings.get("backup_allowed_roles") or {"super_admin": True, "admin": True, "user": False}
+    if not allowed.get(current_user.get("role")):
+        raise HTTPException(status_code=403, detail="ليست لديك صلاحية استخدام النسخ الاحتياطي")
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
-async def list_backups(_: dict = Depends(require_admin)):
+async def list_backups(current_user: dict = Depends(require_admin)):
+    await ensure_backup_allowed(current_user)
     documents = await db.backup_records.find(with_organization({}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [BackupRecord(**hydrate_einvoice_document(document)) for document in documents]
 
 
 @api_router.post("/admin/security/backups", response_model=BackupRecord)
 async def create_backup(payload: BackupCreate, current_user: dict = Depends(require_admin)):
+    await ensure_backup_allowed(current_user)
     export_data = {}
     for collection_name in BACKUP_COLLECTIONS:
-        if collection_name == "app_settings":
+        if collection_name == "app_settings" or is_super_admin(current_user):
             export_data[collection_name] = await db[collection_name].find({}, {"_id": 0}).to_list(100000)
         else:
             export_data[collection_name] = await db[collection_name].find(with_organization({}, current_user.get("organization_id")), {"_id": 0}).to_list(100000)
@@ -5876,7 +6126,8 @@ async def create_backup(payload: BackupCreate, current_user: dict = Depends(requ
 
 
 @api_router.get("/admin/security/backups/{backup_id}/download")
-async def download_backup(backup_id: str, _: dict = Depends(require_admin)):
+async def download_backup(backup_id: str, current_user: dict = Depends(require_admin)):
+    await ensure_backup_allowed(current_user)
     record = await db.backup_records.find_one(with_organization({"id": backup_id}), {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="النسخة الاحتياطية غير موجودة")
@@ -5888,6 +6139,7 @@ async def download_backup(backup_id: str, _: dict = Depends(require_admin)):
 
 @api_router.post("/admin/security/backups/restore")
 async def restore_backup(password: str = Form(...), backup_file: UploadFile = File(...), admin_user: dict = Depends(require_admin)):
+    await ensure_backup_allowed(admin_user)
     content = await backup_file.read()
     try:
         salt_line, encrypted = content.split(b"\n", 1)
