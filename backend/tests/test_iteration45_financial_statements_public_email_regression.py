@@ -1,6 +1,7 @@
 """Regression tests for public email masking and 2026 financial statements integrity."""
 
 import os
+import time
 
 import bcrypt
 import pytest
@@ -107,19 +108,19 @@ def test_auth_playbook_login_sets_httponly_cookie(api_client, base_url):
     assert "HttpOnly" in set_cookie
 
 
-def test_auth_playbook_bruteforce_lockout_after_five_failures(api_client, base_url):
-    username = "TEST_iter45_lockout_probe"
+def test_auth_playbook_bruteforce_lockout_after_three_failures(api_client, base_url):
+    username = f"TEST_iter45_lockout_probe_{int(time.time())}"
     payload = {
         "username": username,
         "password": "WrongPass@123",
         "organization_id": "general-union",
     }
     statuses = []
-    for _ in range(6):
+    for _ in range(4):
         response = api_client.post(f"{base_url}/api/auth/login", json=payload)
         statuses.append(response.status_code)
-    assert statuses[:5] == [401, 401, 401, 401, 401]
-    assert statuses[5] == 429
+    assert statuses[:3] == [401, 401, 401]
+    assert statuses[3] == 429
 
 
 def test_auth_playbook_cors_preflight_allows_credentials(base_url):

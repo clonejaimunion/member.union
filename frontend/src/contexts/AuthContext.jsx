@@ -9,6 +9,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("bank:save-drafts-before-logout"));
     window.localStorage.removeItem("bank_auth_token");
     setAuthToken(null);
     setToken(null);

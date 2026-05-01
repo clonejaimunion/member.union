@@ -92,6 +92,43 @@ function ModuleRoute({ moduleKey, children }) {
   return children;
 }
 
+function SessionSecurityManager() {
+  const { token, logout } = useAuth();
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const saveDrafts = () => {
+      const drafts = {};
+      document.querySelectorAll("input, textarea, select").forEach((element) => {
+        const key = element.getAttribute("data-testid") || element.id || element.name;
+        if (!key || element.type === "password" || element.type === "file") return;
+        drafts[key] = element.type === "checkbox" ? element.checked : element.value;
+      });
+      window.localStorage.setItem("bank_last_unsaved_draft", JSON.stringify({ path: window.location.pathname, saved_at: new Date().toISOString(), fields: drafts }));
+    };
+    const resetTimer = () => {
+      window.clearTimeout(window.__bankIdleTimer);
+      window.__bankIdleTimer = window.setTimeout(() => {
+        saveDrafts();
+        logout();
+      }, 60 * 1000);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));
+    window.addEventListener("beforeunload", saveDrafts);
+    window.addEventListener("bank:save-drafts-before-logout", saveDrafts);
+    resetTimer();
+    return () => {
+      window.clearTimeout(window.__bankIdleTimer);
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
+      window.removeEventListener("beforeunload", saveDrafts);
+      window.removeEventListener("bank:save-drafts-before-logout", saveDrafts);
+    };
+  }, [token, logout]);
+
+  return null;
+}
+
 function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
@@ -112,6 +149,7 @@ function App() {
         <AuthProvider>
           <BrowserRouter>
             <PageTitleManager />
+            <SessionSecurityManager />
             <PrintOrganizationHeading />
             <Routes>
               <Route path="/login" element={<LoginPage />} />

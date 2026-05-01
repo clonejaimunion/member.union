@@ -334,6 +334,7 @@ class AppSettingsResponse(BaseModel):
     include_tech_stack_in_manual: bool = False
     hide_ai_attribution: bool = True
     intellectual_property_owner: Optional[str] = None
+    intellectual_property_national_id: Optional[str] = None
     intellectual_property_fingerprint: Optional[str] = None
     source_lock_password_set: bool = False
     source_integrity_digest: Optional[str] = None
@@ -359,6 +360,8 @@ class AppSettingsUpdate(BaseModel):
     include_tech_stack_in_manual: Optional[bool] = None
     hide_ai_attribution: Optional[bool] = None
     intellectual_property_owner: Optional[str] = None
+    intellectual_property_national_id: Optional[str] = None
+    intellectual_property_fingerprint: Optional[str] = None
 
 
 class SourceLockPasswordUpdate(BaseModel):
@@ -367,6 +370,7 @@ class SourceLockPasswordUpdate(BaseModel):
 
 class ProgramSecurityResponse(BaseModel):
     intellectual_property_owner: str
+    intellectual_property_national_id: Optional[str] = None
     intellectual_property_fingerprint: str
     source_lock_password_set: bool
     source_integrity_digest: str
@@ -1508,8 +1512,12 @@ def source_integrity_digest() -> str:
     return hasher.hexdigest()
 
 
-def intellectual_property_fingerprint(owner: Optional[str], system_name: str) -> str:
+def intellectual_property_fingerprint(owner: Optional[str], system_name: str, national_id: Optional[str] = None, override: Optional[str] = None) -> str:
+    if override:
+        return override
     material = f"{owner or 'OWNER-NOT-SET'}|{system_name}|{JWT_SECRET}|BANK-DEPOSIT-SYSTEM".encode()
+    if national_id:
+        material += f"|{national_id}".encode()
     digest = hashlib.sha256(material).hexdigest().upper()
     return f"IP-EG-{digest[:8]}-{digest[8:16]}-{digest[16:24]}-{digest[24:32]}"
 
@@ -1532,6 +1540,8 @@ async def get_app_settings_document() -> dict:
         "include_tech_stack_in_manual": False,
         "hide_ai_attribution": True,
         "intellectual_property_owner": None,
+        "intellectual_property_national_id": None,
+        "intellectual_property_fingerprint": None,
         "source_lock_password_hash": None,
         "shortcut_icon_updated_at": None,
         "shortcut_update_status": "لم يتم رفع أيقونة مخصصة بعد",
@@ -1573,7 +1583,8 @@ async def build_app_settings_response(document: dict) -> AppSettingsResponse:
         include_tech_stack_in_manual=bool(document.get("include_tech_stack_in_manual", False)),
         hide_ai_attribution=bool(document.get("hide_ai_attribution", True)),
         intellectual_property_owner=document.get("intellectual_property_owner"),
-        intellectual_property_fingerprint=intellectual_property_fingerprint(document.get("intellectual_property_owner"), document.get("system_name") or DEFAULT_SYSTEM_NAME),
+        intellectual_property_national_id=document.get("intellectual_property_national_id"),
+        intellectual_property_fingerprint=intellectual_property_fingerprint(document.get("intellectual_property_owner"), document.get("system_name") or DEFAULT_SYSTEM_NAME, document.get("intellectual_property_national_id"), document.get("intellectual_property_fingerprint")),
         source_lock_password_set=bool(document.get("source_lock_password_hash")),
         source_integrity_digest=source_integrity_digest(),
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
@@ -3444,7 +3455,7 @@ async def ensure_login_not_locked(username: str, organization_id: str):
         return
     locked_until = datetime.fromisoformat(attempt["locked_until"])
     if locked_until > datetime.now(timezone.utc):
-        raise HTTPException(status_code=429, detail="تم إيقاف تسجيل الدخول مؤقتاً بسبب محاولات خاطئة متكررة. حاول بعد دقيقة.")
+        raise HTTPException(status_code=429, detail="تم تعطيل الدخول على هذا الجهاز لمدة ٣ دقائق بسبب إدخال كلمة السر خطأ أكثر من ٣ مرات. حاول مرة أخرى بعد انتهاء المدة.")
     await db.login_attempts.delete_one({"identifier": attempt["identifier"]})
 
 
@@ -3454,8 +3465,8 @@ async def record_failed_login(username: str, organization_id: str):
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"count": 0}
     count = int(attempt.get("count", 0)) + 1
     update = {"identifier": identifier, "username": username.strip(), "organization_id": organization_id, "count": count, "updated_at": serialize_datetime(now)}
-    if count >= 5:
-        update["locked_until"] = serialize_datetime(now + timedelta(seconds=60))
+    if count >= 3:
+        update["locked_until"] = serialize_datetime(now + timedelta(minutes=3))
     await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"created_at": serialize_datetime(now)}}, upsert=True)
 
 
@@ -3631,6 +3642,10 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
         app_updates["hide_ai_attribution"] = payload.hide_ai_attribution
     if payload.intellectual_property_owner is not None:
         app_updates["intellectual_property_owner"] = payload.intellectual_property_owner.strip() or None
+    if payload.intellectual_property_national_id is not None:
+        app_updates["intellectual_property_national_id"] = payload.intellectual_property_national_id.strip() or None
+    if payload.intellectual_property_fingerprint is not None:
+        app_updates["intellectual_property_fingerprint"] = payload.intellectual_property_fingerprint.strip() or None
     if app_updates:
         app_updates["updated_at"] = now_iso
         await db.app_settings.update_one({"id": "global"}, {"$set": app_updates, "$setOnInsert": {"id": "global", "created_at": now_iso}}, upsert=True)
@@ -6216,7 +6231,7 @@ async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str,
     organization = await get_organization_document(organization_id)
     organization_name = organization.get("name") or public.organization_name or "الجهة المستخدمة للبرنامج"
     pages = [
-        {"title_ar": "صفحة تسجيل الدخول واختيار الجهة", "title_en": "Login and Organization Selection", "arabic": ["تبدأ الدورة التدريبية من شاشة تسجيل الدخول حيث يختار المستخدم الجهة التي يعمل عليها قبل إدخال اسم المستخدم وكلمة المرور.", "كل جهة لها بياناتها وصلاحياتها ووحداتها، لذلك يجب التأكد من اختيار الجهة الصحيحة قبل الدخول.", "إذا كانت خدمة Google Authenticator مفعلة لنوع الحساب، سيظهر حقل كود التحقق بعد قبول كلمة المرور."], "english": ["Start by selecting the correct organization, then enter username and password.", "Each organization has isolated data, modules, and permissions.", "If Google Authenticator is enabled for the role, the OTP step appears after password validation."]},
+        {"title_ar": "صفحة تسجيل الدخول واختيار الجهة", "title_en": "Login and Organization Selection", "arabic": ["تبدأ الدورة التدريبية من شاشة تسجيل الدخول حيث يختار المستخدم الجهة التي يعمل عليها قبل إدخال اسم المستخدم وكلمة المرور.", "كل جهة لها بياناتها وصلاحياتها ووحداتها، لذلك يجب التأكد من اختيار الجهة الصحيحة قبل الدخول.", "إذا كانت خدمة Google Authenticator مفعلة لنوع الحساب، سيظهر حقل كود التحقق بعد قبول كلمة المرور.", "بعد أكثر من ٣ محاولات كلمة مرور خاطئة يتم تعطيل الدخول على الجهاز لمدة ٣ دقائق قبل السماح بالمحاولة مرة أخرى."], "english": ["Start by selecting the correct organization, then enter username and password.", "Each organization has isolated data, modules, and permissions.", "If Google Authenticator is enabled for the role, the OTP step appears after password validation.", "After more than three wrong password attempts, login is locked on the computer for three minutes."]},
         {"title_ar": "لوحة البرنامج الرئيسية والتنقل", "title_en": "Main Dashboard and Navigation", "arabic": ["بعد الدخول تظهر لوحة البرامج حسب الصلاحيات: البنوك، الودائع، الإيرادات، المصروفات، التسويات، العضوية، الأصول، العهد، الفواتير، التقارير والقوائم المالية.", "الصفحات غير المفعلة للجهة أو غير المصرح بها لا تظهر للمستخدم."], "english": ["The dashboard displays only allowed modules such as banks, deposits, revenues, expenses, reconciliations, memberships, assets, invoices, and reports.", "Unavailable or unauthorized modules are hidden to keep workflows clean."]},
         {"title_ar": "إدارة البنوك والأرصدة الافتتاحية", "title_en": "Banks and Opening Balances", "arabic": ["يتم إضافة البنك باسم واضح ورقم حساب ونوع الحساب والرصيد الافتتاحي.", "تستخدم هذه البيانات لاحقاً في الودائع والتسويات البنكية والتقارير."], "english": ["Create bank records with account details and opening balances.", "These balances support deposit tracking, reconciliations, and reports."]},
         {"title_ar": "إدارة الودائع واحتساب الفوائد", "title_en": "Deposits and Interest Calculation", "arabic": ["من صفحة الودائع يتم إدخال مبلغ الوديعة والبنك وتاريخ البداية والاستحقاق وسعر الفائدة.", "يقوم النظام بحساب الفوائد ومتابعة حالة الوديعة وربطها بالتقارير المالية حسب الجهة."], "english": ["Enter deposit amount, bank, start date, maturity date, and interest rate.", "The system calculates interest and tracks maturity status."]},
@@ -6232,7 +6247,8 @@ async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str,
         {"title_ar": "إعدادات منظومة الضرائب المصرية", "title_en": "Egyptian Tax Authority Integration", "arabic": ["تضاف بيانات الممول والرقم الضريبي وكود النشاط والفرع وبيانات API وSDK التوقيع الرقمي.", "لا يتم إرسال أي فاتورة فعلياً قبل اكتمال بيانات الاعتماد والتوقيع."], "english": ["Configure taxpayer information, activity code, branch code, API credentials, and signing SDK command.", "No live submission occurs until required credentials and signature are complete."]},
         {"title_ar": "إدارة المستخدمين والصلاحيات", "title_en": "Users and Permissions", "arabic": ["تتم إضافة المستخدمين وتحديد دورهم وصلاحياتهم والجهة التابعة لهم.", "يمكن تعطيل أو تفعيل الحسابات وتغيير كلمة المرور حسب الصلاحيات الإدارية."], "english": ["Create users, assign roles, organization, and permissions.", "Accounts can be enabled, disabled, or password-reset by authorized managers."]},
         {"title_ar": "إعدادات الجهات والشعارات", "title_en": "Organizations and Branding", "arabic": ["يمكن تعديل اسم البرنامج، أسماء الجهات، البريد الإلكتروني، وشعارات شاشة الدخول.", "عند إخفاء شعار لا يترك النظام مساحة فارغة، وعند تغييره يتم احتواؤه بحجم مناسب."], "english": ["Update program name, organization names, emails, and login branding.", "Hidden logos leave no placeholder; uploaded logos fit the designed frame."]},
-        {"title_ar": "النسخ الاحتياطي والاستعادة", "title_en": "Backup and Restore", "arabic": ["ينشئ النظام نسخة احتياطية مشفرة بكلمة مرور تشمل بيانات البرنامج حسب صلاحيات الدور.", "احتفظ بكلمة المرور في مكان آمن لأنها مطلوبة للاستعادة."], "english": ["Create password-protected encrypted backups according to role policy.", "Keep the password safe because it is required for restore."]},
+        {"title_ar": "النسخ الاحتياطي والاستعادة", "title_en": "Backup and Restore", "arabic": ["ينشئ النظام نسخة احتياطية مشفرة بكلمة مرور تشمل بيانات البرنامج حسب صلاحيات الدور.", "احتفظ بكلمة المرور في مكان آمن لأنها مطلوبة للاستعادة.", "يتم حفظ آخر حقول تم إدخالها محلياً عند انتهاء الجلسة بسبب عدم النشاط، مع استبعاد كلمات المرور والملفات."], "english": ["Create password-protected encrypted backups according to role policy.", "Keep the password safe because it is required for restore.", "When the session times out due to inactivity, the latest entered draft fields are saved locally, excluding passwords and files."]},
+        {"title_ar": "إنهاء الجلسة وحماية الحساب", "title_en": "Session Timeout and Account Protection", "arabic": ["لضمان أمان البيانات، يتم تسجيل الخروج تلقائياً بعد دقيقة واحدة من عدم النشاط.", "قبل تسجيل الخروج التلقائي يحفظ النظام آخر البيانات غير الحساسة التي كان المستخدم يكتبها محلياً.", "يمنع النظام كليك يمين داخل الواجهة لتقليل نسخ أو عبث غير مقصود أثناء الاستخدام."], "english": ["For data security, the application logs out automatically after one minute of inactivity.", "Before timeout logout, non-sensitive draft fields are saved locally.", "Right-click is disabled in the interface to reduce accidental copying or tampering."]},
         {"title_ar": "سجل التدقيق والمراجعة الأمنية", "title_en": "Audit Log and Security Review", "arabic": ["يسجل النظام عمليات الإضافة والتعديل والحذف والدخول حسب المستخدم والوقت والمسار.", "يمكن استخدام الفلاتر الشهرية والسنوية لمراجعة النشاط."], "english": ["The audit log records actions, actor, time, route, and status.", "Use filters to review activity by year, month, and hour."]},
         {"title_ar": "ميزان المراجعة", "title_en": "Trial Balance", "arabic": ["يعرض ميزان المراجعة أرصدة الحسابات المدينة والدائنة قبل إعداد القوائم المالية.", "يجب مراجعة أي فروق قبل إصدار الميزانية."], "english": ["Trial balance shows debit and credit balances before financial statements.", "Review differences before issuing the balance sheet."]},
         {"title_ar": "إصدار الميزانية والقوائم المالية", "title_en": "Balance Sheet and Financial Statements", "arabic": ["من صفحة القوائم المالية يتم اختيار السنة ثم استخراج الميزانية وحساب الإيرادات والمصروفات وحساب المقبوضات والمدفوعات.", "يعرض النظام أخطاء الربط المحاسبي إن وجدت، ويجب مراجعتها قبل الطباعة والاعتماد."], "english": ["Select the year to generate balance sheet, revenues/expenses, and receipts/payments statements.", "Review accounting linkage warnings before printing and approval."]},
@@ -6292,7 +6308,8 @@ async def get_program_security(_: dict = Depends(require_super_admin)):
     owner = settings.get("intellectual_property_owner") or "غير محدد"
     return ProgramSecurityResponse(
         intellectual_property_owner=owner,
-        intellectual_property_fingerprint=intellectual_property_fingerprint(settings.get("intellectual_property_owner"), system_name),
+        intellectual_property_national_id=settings.get("intellectual_property_national_id"),
+        intellectual_property_fingerprint=intellectual_property_fingerprint(settings.get("intellectual_property_owner"), system_name, settings.get("intellectual_property_national_id"), settings.get("intellectual_property_fingerprint")),
         source_lock_password_set=bool(settings.get("source_lock_password_hash")),
         source_integrity_digest=source_integrity_digest(),
         encrypted_passwords_summary={

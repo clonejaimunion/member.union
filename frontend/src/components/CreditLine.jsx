@@ -1,5 +1,3 @@
-import { creatorCredit } from "@/lib/banks";
-
-export const CreditLine = ({ className = "text-center text-xs font-bold text-slate-500", testId = "creator-credit" }) => (
-  <p className={className} data-testid={testId}>{creatorCredit}</p>
+export const CreditLine = ({ testId = "creator-credit" }) => (
+  <span className="hidden" data-testid={testId} aria-hidden="true" />
 );

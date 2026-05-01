@@ -131,6 +131,8 @@ export default function AdminPage() {
   const [includeTechStackInManual, setIncludeTechStackInManual] = useState(false);
   const [hideAiAttribution, setHideAiAttribution] = useState(true);
   const [ipOwnerName, setIpOwnerName] = useState("");
+  const [ipNationalId, setIpNationalId] = useState("");
+  const [ipFingerprint, setIpFingerprint] = useState("");
   const [sourceLockPassword, setSourceLockPassword] = useState("");
   const [programSecurity, setProgramSecurity] = useState(null);
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
@@ -212,6 +214,8 @@ export default function AdminPage() {
       setIncludeTechStackInManual(response.data.include_tech_stack_in_manual === true);
       setHideAiAttribution(response.data.hide_ai_attribution !== false);
       setIpOwnerName(response.data.intellectual_property_owner || "");
+      setIpNationalId(response.data.intellectual_property_national_id || "");
+      setIpFingerprint(response.data.intellectual_property_fingerprint || "");
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -633,6 +637,8 @@ export default function AdminPage() {
         include_tech_stack_in_manual: includeTechStackInManual,
         hide_ai_attribution: hideAiAttribution,
         intellectual_property_owner: ipOwnerName,
+        intellectual_property_national_id: ipNationalId,
+        intellectual_property_fingerprint: ipFingerprint,
       });
       setAppSettings(response.data);
       setSystemName(response.data.system_name || systemName.trim());
@@ -651,6 +657,8 @@ export default function AdminPage() {
       setIncludeTechStackInManual(response.data.include_tech_stack_in_manual === true);
       setHideAiAttribution(response.data.hide_ai_attribution !== false);
       setIpOwnerName(response.data.intellectual_property_owner || "");
+      setIpNationalId(response.data.intellectual_property_national_id || "");
+      setIpFingerprint(response.data.intellectual_property_fingerprint || "");
       await refreshSettings();
       toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
@@ -999,7 +1007,7 @@ export default function AdminPage() {
           {isSuperAdmin && activeAdminSection === "program-security" && <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="program-security-section">
             <div className="flex items-center gap-3" data-testid="program-security-heading"><ShieldCheck className="h-6 w-6 text-emerald-700" /><h2 className="text-2xl font-extrabold" data-testid="program-security-title">أمان البرنامج وحقوق الملكية الفكرية</h2></div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="program-security-grid">
-              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="ip-fingerprint-card"><Label data-testid="ip-owner-label">اسم مالك حقوق الملكية الفكرية</Label><Input value={ipOwnerName} onChange={(event) => setIpOwnerName(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-owner-input" /><p className="break-all rounded-lg bg-white p-3 text-sm font-extrabold text-emerald-800" data-testid="ip-fingerprint-value">{programSecurity?.intellectual_property_fingerprint || appSettings?.intellectual_property_fingerprint || "احفظ الإعدادات لتوليد البصمة"}</p></div>
+              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="ip-fingerprint-card"><Label data-testid="ip-owner-label">اسم مالك حقوق الملكية الفكرية</Label><Input value={ipOwnerName} onChange={(event) => setIpOwnerName(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-owner-input" /><Label data-testid="ip-national-id-label">رقم بطاقة الرقم القومي</Label><Input value={ipNationalId} onChange={(event) => setIpNationalId(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-national-id-input" /><Label data-testid="ip-fingerprint-label">بصمة حقوق الملكية</Label><Input value={ipFingerprint} onChange={(event) => setIpFingerprint(event.target.value)} className="h-11 bg-white text-left font-mono" data-testid="ip-fingerprint-input" /><p className="break-all rounded-lg bg-white p-3 text-sm font-extrabold text-emerald-800" data-testid="ip-fingerprint-value">{programSecurity?.intellectual_property_fingerprint || appSettings?.intellectual_property_fingerprint || "احفظ الإعدادات لتوليد البصمة"}</p></div>
               <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="source-lock-card"><Label data-testid="source-lock-password-label">كلمة سر حماية ملفات برمجة البرنامج</Label><Input type="password" value={sourceLockPassword} onChange={(event) => setSourceLockPassword(event.target.value)} placeholder="٨ أحرف على الأقل" className="h-11 bg-white text-right" data-testid="source-lock-password-input" /><Button type="button" onClick={saveSourceLockPassword} className="w-full bg-slate-950 text-white" data-testid="save-source-lock-password-button">حفظ كلمة السر مشفرة</Button><p className="break-all text-xs font-bold text-slate-600" data-testid="source-integrity-digest">بصمة سلامة الملفات: {programSecurity?.source_integrity_digest || appSettings?.source_integrity_digest}</p></div>
             </div>
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="manual-privacy-options"><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إخفاء أي إشارة لتصميم بالذكاء الاصطناعي</span><input type="checkbox" checked={hideAiAttribution} onChange={(event) => setHideAiAttribution(event.target.checked)} data-testid="hide-ai-attribution-checkbox" /></label><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إظهار معلومات تقنية عامة داخل كتيب الإرشادات</span><input type="checkbox" checked={includeTechStackInManual} onChange={(event) => setIncludeTechStackInManual(event.target.checked)} data-testid="include-tech-stack-checkbox" /></label><p className="text-xs font-bold text-amber-700">افتراضياً يتم إخفاء لغة البرمجة والتقنيات من الكتيبات والمواد التعليمية.</p></div>
