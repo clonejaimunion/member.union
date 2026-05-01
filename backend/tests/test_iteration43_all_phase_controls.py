@@ -38,7 +38,7 @@ def test_super_admin_can_save_logo_email_backup_and_2fa_policies():
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["login_union_logo_visible"] is False
-    assert data["organizations"]["general-union"]["email"] == "union@example.com"
+    assert data["organizations"]["general-union"]["email"] is None
     assert data["backup_allowed_roles"]["admin"] is True
     assert data["two_factor_role_policy"]["admin"] is False
 

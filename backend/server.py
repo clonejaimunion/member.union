@@ -331,6 +331,12 @@ class AppSettingsResponse(BaseModel):
     backup_enabled: bool = True
     backup_allowed_roles: Dict[str, bool] = Field(default_factory=lambda: {"super_admin": True, "admin": True, "user": False})
     two_factor_role_policy: Dict[str, bool] = Field(default_factory=lambda: {"super_admin": False, "admin": False, "user": False})
+    include_tech_stack_in_manual: bool = False
+    hide_ai_attribution: bool = True
+    intellectual_property_owner: Optional[str] = None
+    intellectual_property_fingerprint: Optional[str] = None
+    source_lock_password_set: bool = False
+    source_integrity_digest: Optional[str] = None
     shortcut_icon_url: Optional[str] = None
     shortcut_icon_updated_at: Optional[str] = None
     shortcut_update_status: Optional[str] = None
@@ -350,6 +356,21 @@ class AppSettingsUpdate(BaseModel):
     backup_enabled: Optional[bool] = None
     backup_allowed_roles: Optional[Dict[str, bool]] = None
     two_factor_role_policy: Optional[Dict[str, bool]] = None
+    include_tech_stack_in_manual: Optional[bool] = None
+    hide_ai_attribution: Optional[bool] = None
+    intellectual_property_owner: Optional[str] = None
+
+
+class SourceLockPasswordUpdate(BaseModel):
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class ProgramSecurityResponse(BaseModel):
+    intellectual_property_owner: str
+    intellectual_property_fingerprint: str
+    source_lock_password_set: bool
+    source_integrity_digest: str
+    encrypted_passwords_summary: Dict[str, str]
 
 
 class OrganizationResponse(BaseModel):
@@ -1473,6 +1494,26 @@ def official_email_or_none(email: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def source_integrity_digest() -> str:
+    hasher = hashlib.sha256()
+    for path in [ROOT_DIR / "server.py", ROOT_DIR / "requirements.txt"]:
+        if path.exists():
+            hasher.update(path.name.encode())
+            hasher.update(path.read_bytes())
+    font_dir = ROOT_DIR / "assets" / "fonts"
+    if font_dir.exists():
+        for path in sorted(font_dir.glob("*.ttf")):
+            hasher.update(path.name.encode())
+            hasher.update(path.read_bytes())
+    return hasher.hexdigest()
+
+
+def intellectual_property_fingerprint(owner: Optional[str], system_name: str) -> str:
+    material = f"{owner or 'OWNER-NOT-SET'}|{system_name}|{JWT_SECRET}|BANK-DEPOSIT-SYSTEM".encode()
+    digest = hashlib.sha256(material).hexdigest().upper()
+    return f"IP-EG-{digest[:8]}-{digest[8:16]}-{digest[16:24]}-{digest[24:32]}"
+
+
 async def get_app_settings_document() -> dict:
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     document = await db.app_settings.find_one({"id": "global"}, {"_id": 0})
@@ -1488,6 +1529,10 @@ async def get_app_settings_document() -> dict:
         "backup_enabled": True,
         "backup_allowed_roles": {"super_admin": True, "admin": True, "user": False},
         "two_factor_role_policy": {"super_admin": False, "admin": False, "user": False},
+        "include_tech_stack_in_manual": False,
+        "hide_ai_attribution": True,
+        "intellectual_property_owner": None,
+        "source_lock_password_hash": None,
         "shortcut_icon_updated_at": None,
         "shortcut_update_status": "لم يتم رفع أيقونة مخصصة بعد",
         "created_at": now_iso,
@@ -1525,6 +1570,12 @@ async def build_app_settings_response(document: dict) -> AppSettingsResponse:
         backup_enabled=bool(document.get("backup_enabled", True)),
         backup_allowed_roles=document.get("backup_allowed_roles") or {"super_admin": True, "admin": True, "user": False},
         two_factor_role_policy=document.get("two_factor_role_policy") or {"super_admin": False, "admin": False, "user": False},
+        include_tech_stack_in_manual=bool(document.get("include_tech_stack_in_manual", False)),
+        hide_ai_attribution=bool(document.get("hide_ai_attribution", True)),
+        intellectual_property_owner=document.get("intellectual_property_owner"),
+        intellectual_property_fingerprint=intellectual_property_fingerprint(document.get("intellectual_property_owner"), document.get("system_name") or DEFAULT_SYSTEM_NAME),
+        source_lock_password_set=bool(document.get("source_lock_password_hash")),
+        source_integrity_digest=source_integrity_digest(),
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
         shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
         shortcut_update_status=document.get("shortcut_update_status"),
@@ -3574,6 +3625,12 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
         app_updates["backup_allowed_roles"] = {role: bool(payload.backup_allowed_roles.get(role)) for role in ["super_admin", "admin", "user"]}
     if payload.two_factor_role_policy is not None:
         app_updates["two_factor_role_policy"] = {role: bool(payload.two_factor_role_policy.get(role)) for role in ["super_admin", "admin", "user"]}
+    if payload.include_tech_stack_in_manual is not None:
+        app_updates["include_tech_stack_in_manual"] = payload.include_tech_stack_in_manual
+    if payload.hide_ai_attribution is not None:
+        app_updates["hide_ai_attribution"] = payload.hide_ai_attribution
+    if payload.intellectual_property_owner is not None:
+        app_updates["intellectual_property_owner"] = payload.intellectual_property_owner.strip() or None
     if app_updates:
         app_updates["updated_at"] = now_iso
         await db.app_settings.update_one({"id": "global"}, {"$set": app_updates, "$setOnInsert": {"id": "global", "created_at": now_iso}}, upsert=True)
@@ -6180,6 +6237,8 @@ async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str,
         {"title_ar": "ميزان المراجعة", "title_en": "Trial Balance", "arabic": ["يعرض ميزان المراجعة أرصدة الحسابات المدينة والدائنة قبل إعداد القوائم المالية.", "يجب مراجعة أي فروق قبل إصدار الميزانية."], "english": ["Trial balance shows debit and credit balances before financial statements.", "Review differences before issuing the balance sheet."]},
         {"title_ar": "إصدار الميزانية والقوائم المالية", "title_en": "Balance Sheet and Financial Statements", "arabic": ["من صفحة القوائم المالية يتم اختيار السنة ثم استخراج الميزانية وحساب الإيرادات والمصروفات وحساب المقبوضات والمدفوعات.", "يعرض النظام أخطاء الربط المحاسبي إن وجدت، ويجب مراجعتها قبل الطباعة والاعتماد."], "english": ["Select the year to generate balance sheet, revenues/expenses, and receipts/payments statements.", "Review accounting linkage warnings before printing and approval."]},
     ]
+    if settings.get("include_tech_stack_in_manual"):
+        pages.append({"title_ar": "معلومات تقنية اختيارية", "title_en": "Optional Technical Information", "arabic": ["هذه الصفحة تظهر فقط عند تفعيل خيار إظهار التقنية في كتيب الإرشادات من صفحة أمان البرنامج.", "يعتمد البرنامج على واجهة ويب محلية وخادم محلي وقاعدة بيانات محلية داخل بيئة Windows."], "english": ["This page appears only when the technical stack option is enabled from Program Security.", "The system runs as a local web application with a local server and local database on Windows."]})
     return system_name, organization_name, pages
 
 
@@ -6224,6 +6283,35 @@ async def download_training_video(current_user: dict = Depends(require_admin)):
 async def clear_audit_logs(_: dict = Depends(require_super_admin)):
     result = await db.audit_logs.delete_many({})
     return {"message": "تم مسح محتويات سجل التدقيق", "deleted_count": result.deleted_count}
+
+
+@api_router.get("/admin/program-security", response_model=ProgramSecurityResponse)
+async def get_program_security(_: dict = Depends(require_super_admin)):
+    settings = await get_app_settings_document()
+    system_name = settings.get("system_name") or DEFAULT_SYSTEM_NAME
+    owner = settings.get("intellectual_property_owner") or "غير محدد"
+    return ProgramSecurityResponse(
+        intellectual_property_owner=owner,
+        intellectual_property_fingerprint=intellectual_property_fingerprint(settings.get("intellectual_property_owner"), system_name),
+        source_lock_password_set=bool(settings.get("source_lock_password_hash")),
+        source_integrity_digest=source_integrity_digest(),
+        encrypted_passwords_summary={
+            "user_passwords": "محفوظة كـ bcrypt hash وليست نصاً صريحاً",
+            "backup_passwords": "تستخدم لاشتقاق مفتاح تشفير Fernet للنسخ الاحتياطية",
+            "eta_api_secrets": "Client Secret و PIN محفوظان مشفرين",
+            "source_lock_password": "كلمة سر حماية ملفات البرنامج تحفظ كـ bcrypt hash",
+        },
+    )
+
+
+@api_router.put("/admin/program-security/source-lock-password", response_model=ProgramSecurityResponse)
+async def set_source_lock_password(payload: SourceLockPasswordUpdate, _: dict = Depends(require_super_admin)):
+    await db.app_settings.update_one(
+        {"id": "global"},
+        {"$set": {"source_lock_password_hash": hash_password(payload.new_password), "updated_at": serialize_datetime(datetime.now(timezone.utc))}, "$setOnInsert": {"id": "global", "created_at": serialize_datetime(datetime.now(timezone.utc))}},
+        upsert=True,
+    )
+    return await get_program_security(_)
 
 
 async def ensure_backup_allowed(current_user: dict):

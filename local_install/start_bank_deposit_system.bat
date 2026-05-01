@@ -7,6 +7,9 @@ set APP_DIR=%~dp0
 set VENV_PY=%APP_DIR%backend\.venv\Scripts\python.exe
 set WHEEL_DIR=%APP_DIR%backend\wheels
 
+attrib +R "%APP_DIR%backend\server.py" >nul 2>nul
+attrib +R "%APP_DIR%frontend\build\*" /S /D >nul 2>nul
+
 echo ============================================
 echo   Bank Deposit Interest System
 echo   Created by Youssef Abdelghany Ahmed

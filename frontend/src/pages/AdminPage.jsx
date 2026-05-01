@@ -76,6 +76,7 @@ const defaultAuthorityLogoSettings = [
 
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
+  { id: "program-security", title: "أمان البرنامج", subtitle: "البصمة والدليل وحماية الملفات", icon: ShieldCheck },
   { id: "feature-settings", title: "إعدادات الخواص", subtitle: "تفعيل وتعطيل وحدات الجهة", icon: SlidersHorizontal },
   { id: "eta-integration", title: "منظومة الضرائب المصرية", subtitle: "ERP API و SDK التوقيع الرقمي", icon: PlugZap },
   { id: "fixed-asset-rates", title: "نسب إهلاك الأصول", subtitle: "تعديل نسب التصنيفات الثابتة", icon: SlidersHorizontal },
@@ -88,7 +89,7 @@ const adminSections = [
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["general-settings", "add-user", "users", "eta-integration"]);
+const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -127,6 +128,11 @@ export default function AdminPage() {
   const [backupEnabled, setBackupEnabled] = useState(true);
   const [backupAllowedRoles, setBackupAllowedRoles] = useState({ super_admin: true, admin: true, user: false });
   const [twoFactorPolicy, setTwoFactorPolicy] = useState({ super_admin: false, admin: false, user: false });
+  const [includeTechStackInManual, setIncludeTechStackInManual] = useState(false);
+  const [hideAiAttribution, setHideAiAttribution] = useState(true);
+  const [ipOwnerName, setIpOwnerName] = useState("");
+  const [sourceLockPassword, setSourceLockPassword] = useState("");
+  const [programSecurity, setProgramSecurity] = useState(null);
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
@@ -203,6 +209,9 @@ export default function AdminPage() {
       setBackupEnabled(response.data.backup_enabled !== false);
       setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
       setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });
+      setIncludeTechStackInManual(response.data.include_tech_stack_in_manual === true);
+      setHideAiAttribution(response.data.hide_ai_attribution !== false);
+      setIpOwnerName(response.data.intellectual_property_owner || "");
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -269,6 +278,10 @@ export default function AdminPage() {
     if (!isSuperAdmin && superAdminOnlySectionIds.has(activeAdminSection)) {
       setActiveAdminSection("fixed-asset-rates");
     }
+    if (isSuperAdmin && activeAdminSection === "program-security") {
+      loadProgramSecurity();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAdminSection, isSuperAdmin]);
 
   useEffect(() => {
@@ -577,8 +590,30 @@ export default function AdminPage() {
     }
   };
 
+  async function loadProgramSecurity() {
+    if (!isSuperAdmin) return;
+    try {
+      const response = await api.get("/admin/program-security");
+      setProgramSecurity(response.data);
+    } catch (error) {
+      toast.error("تعذر تحميل بيانات أمان البرنامج");
+    }
+  }
+
+  const saveSourceLockPassword = async () => {
+    if (!sourceLockPassword || sourceLockPassword.length < 8) return toast.error("كلمة السر يجب ألا تقل عن 8 أحرف");
+    try {
+      const response = await api.put("/admin/program-security/source-lock-password", { new_password: sourceLockPassword });
+      setProgramSecurity(response.data);
+      setSourceLockPassword("");
+      toast.success("تم حفظ كلمة سر حماية ملفات البرنامج بشكل مشفر");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ كلمة السر");
+    }
+  };
+
   const saveAppSystemName = async (event) => {
-    event.preventDefault();
+    event?.preventDefault?.();
     if (!systemName.trim()) return toast.error("أدخل اسم النظام");
     setSettingsLoading(true);
     try {
@@ -595,6 +630,9 @@ export default function AdminPage() {
         backup_enabled: backupEnabled,
         backup_allowed_roles: backupAllowedRoles,
         two_factor_role_policy: twoFactorPolicy,
+        include_tech_stack_in_manual: includeTechStackInManual,
+        hide_ai_attribution: hideAiAttribution,
+        intellectual_property_owner: ipOwnerName,
       });
       setAppSettings(response.data);
       setSystemName(response.data.system_name || systemName.trim());
@@ -610,6 +648,9 @@ export default function AdminPage() {
       setBackupEnabled(response.data.backup_enabled !== false);
       setBackupAllowedRoles(response.data.backup_allowed_roles || { super_admin: true, admin: true, user: false });
       setTwoFactorPolicy(response.data.two_factor_role_policy || { super_admin: false, admin: false, user: false });
+      setIncludeTechStackInManual(response.data.include_tech_stack_in_manual === true);
+      setHideAiAttribution(response.data.hide_ai_attribution !== false);
+      setIpOwnerName(response.data.intellectual_property_owner || "");
       await refreshSettings();
       toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
@@ -953,6 +994,24 @@ export default function AdminPage() {
               </div>
               <Button type="button" onClick={saveShortcutIcon} disabled={settingsLoading} variant="outline" className="h-11 w-full rounded-lg bg-white" data-testid="save-shortcut-icon-button"><FileUp className="h-4 w-4" /> تحديث شعار الاختصار</Button>
             </div>
+          </section>}
+
+          {isSuperAdmin && activeAdminSection === "program-security" && <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="program-security-section">
+            <div className="flex items-center gap-3" data-testid="program-security-heading"><ShieldCheck className="h-6 w-6 text-emerald-700" /><h2 className="text-2xl font-extrabold" data-testid="program-security-title">أمان البرنامج وحقوق الملكية الفكرية</h2></div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="program-security-grid">
+              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="ip-fingerprint-card"><Label data-testid="ip-owner-label">اسم مالك حقوق الملكية الفكرية</Label><Input value={ipOwnerName} onChange={(event) => setIpOwnerName(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-owner-input" /><p className="break-all rounded-lg bg-white p-3 text-sm font-extrabold text-emerald-800" data-testid="ip-fingerprint-value">{programSecurity?.intellectual_property_fingerprint || appSettings?.intellectual_property_fingerprint || "احفظ الإعدادات لتوليد البصمة"}</p></div>
+              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="source-lock-card"><Label data-testid="source-lock-password-label">كلمة سر حماية ملفات برمجة البرنامج</Label><Input type="password" value={sourceLockPassword} onChange={(event) => setSourceLockPassword(event.target.value)} placeholder="٨ أحرف على الأقل" className="h-11 bg-white text-right" data-testid="source-lock-password-input" /><Button type="button" onClick={saveSourceLockPassword} className="w-full bg-slate-950 text-white" data-testid="save-source-lock-password-button">حفظ كلمة السر مشفرة</Button><p className="break-all text-xs font-bold text-slate-600" data-testid="source-integrity-digest">بصمة سلامة الملفات: {programSecurity?.source_integrity_digest || appSettings?.source_integrity_digest}</p></div>
+            </div>
+            <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="manual-privacy-options"><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إخفاء أي إشارة لتصميم بالذكاء الاصطناعي</span><input type="checkbox" checked={hideAiAttribution} onChange={(event) => setHideAiAttribution(event.target.checked)} data-testid="hide-ai-attribution-checkbox" /></label><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إظهار معلومات تقنية عامة داخل كتيب الإرشادات</span><input type="checkbox" checked={includeTechStackInManual} onChange={(event) => setIncludeTechStackInManual(event.target.checked)} data-testid="include-tech-stack-checkbox" /></label><p className="text-xs font-bold text-amber-700">افتراضياً يتم إخفاء لغة البرمجة والتقنيات من الكتيبات والمواد التعليمية.</p></div>
+            <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-policy-settings-panel">
+              <p className="text-sm font-extrabold text-slate-800">النسخ الاحتياطي و Google Authenticator</p>
+              <label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>تشغيل خدمة النسخ الاحتياطي</span><input type="checkbox" checked={backupEnabled} onChange={(event) => setBackupEnabled(event.target.checked)} data-testid="backup-enabled-checkbox" /></label>
+              {['super_admin','admin','user'].map((role) => <div key={role} className="grid grid-cols-2 gap-2 rounded-lg bg-white p-3 text-sm font-bold" data-testid={`role-policy-${role}`}><label><input type="checkbox" checked={backupAllowedRoles[role] !== false} onChange={(event) => setBackupAllowedRoles((current) => ({ ...current, [role]: event.target.checked }))} /> نسخ احتياطي: {role}</label><label><input type="checkbox" checked={twoFactorPolicy[role] === true} onChange={(event) => setTwoFactorPolicy((current) => ({ ...current, [role]: event.target.checked }))} /> Google Authenticator: {role}</label></div>)}
+              <p className="text-xs font-bold text-amber-700">تنبيه: تفعيل Google Authenticator يحتاج اتصال إنترنت وقت تثبيت التطبيق أو مسح الرمز أول مرة فقط.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3" data-testid="training-export-buttons"><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/manual.pdf', 'دليل-استخدام-البرنامج.pdf')} data-testid="download-training-manual-link">كتيب PDF</Button><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/video-guide.gif', 'فيديو-استرشادي.gif')} data-testid="download-training-video-link">فيديو Slideshow</Button><Button type="button" variant="outline" className="bg-white" onClick={() => downloadProtectedFile('/admin/training/screenshots.zip', 'لقطات-صفحات-البرنامج.zip')} data-testid="download-screenshots-zip-link">Screenshots ZIP</Button></div>
+            <Button type="button" onClick={() => saveAppSystemName()} className="h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-program-security-settings-button"><Save className="h-4 w-4" /> حفظ إعدادات أمان البرنامج</Button>
+            <div className="rounded-lg bg-emerald-50 p-4 text-sm font-bold text-emerald-900" data-testid="encrypted-passwords-summary">{Object.entries(programSecurity?.encrypted_passwords_summary || {}).map(([key, value]) => <p key={key}>{value}</p>)}</div>
           </section>}
 
           {activeAdminSection === "feature-settings" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="feature-settings-section">

@@ -96,11 +96,18 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("dir", "rtl");
     document.documentElement.setAttribute("lang", "ar");
-    return applyEasternArabicNumeralsToDocument();
+    const preventContextMenu = (event) => event.preventDefault();
+    document.addEventListener("contextmenu", preventContextMenu);
+    document.body.setAttribute("data-context-menu-disabled", "true");
+    const cleanupNumerals = applyEasternArabicNumeralsToDocument();
+    return () => {
+      document.removeEventListener("contextmenu", preventContextMenu);
+      cleanupNumerals?.();
+    };
   }, []);
 
   return (
-    <div className="App" dir="rtl" data-testid="app-root">
+    <div className="App" dir="rtl" onContextMenu={(event) => event.preventDefault()} data-testid="app-root">
       <AppSettingsProvider>
         <AuthProvider>
           <BrowserRouter>
