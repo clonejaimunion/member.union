@@ -94,6 +94,7 @@ function ModuleRoute({ moduleKey, children }) {
 
 function SessionSecurityManager() {
   const { token, logout } = useAuth();
+  const { settings } = useAppSettings();
 
   useEffect(() => {
     if (!token) return undefined;
@@ -111,7 +112,7 @@ function SessionSecurityManager() {
       window.__bankIdleTimer = window.setTimeout(() => {
         saveDrafts();
         logout();
-      }, 60 * 1000);
+      }, Math.max(1, Number(settings.session_timeout_minutes || 1)) * 60 * 1000);
     };
     const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
     events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));
@@ -124,7 +125,7 @@ function SessionSecurityManager() {
       window.removeEventListener("beforeunload", saveDrafts);
       window.removeEventListener("bank:save-drafts-before-logout", saveDrafts);
     };
-  }, [token, logout]);
+  }, [token, logout, settings.session_timeout_minutes]);
 
   return null;
 }

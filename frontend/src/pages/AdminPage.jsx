@@ -134,6 +134,9 @@ export default function AdminPage() {
   const [ipNationalId, setIpNationalId] = useState("");
   const [ipFingerprint, setIpFingerprint] = useState("");
   const [sourceLockPassword, setSourceLockPassword] = useState("");
+  const [installedFilesPassword, setInstalledFilesPassword] = useState("");
+  const [installedFilesLockEnabled, setInstalledFilesLockEnabled] = useState(false);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(1);
   const [programSecurity, setProgramSecurity] = useState(null);
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
@@ -216,6 +219,8 @@ export default function AdminPage() {
       setIpOwnerName(response.data.intellectual_property_owner || "");
       setIpNationalId(response.data.intellectual_property_national_id || "");
       setIpFingerprint(response.data.intellectual_property_fingerprint || "");
+      setInstalledFilesLockEnabled(response.data.installed_files_lock_enabled === true);
+      setSessionTimeoutMinutes(response.data.session_timeout_minutes || 1);
     } catch (error) {
       toast.error("تعذر تحميل إعدادات النظام العامة");
     }
@@ -616,6 +621,19 @@ export default function AdminPage() {
     }
   };
 
+  const saveInstalledFilesPassword = async () => {
+    if (!installedFilesPassword || installedFilesPassword.length < 8) return toast.error("كلمة سر مجلد التثبيت يجب ألا تقل عن 8 أحرف");
+    try {
+      const response = await api.put("/admin/program-security/installed-files-password", { new_password: installedFilesPassword });
+      setProgramSecurity(response.data);
+      setInstalledFilesLockEnabled(true);
+      setInstalledFilesPassword("");
+      toast.success("تم حفظ كلمة سر مجلد الملفات المثبتة وتفعيل القفل");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ كلمة سر مجلد التثبيت");
+    }
+  };
+
   const saveAppSystemName = async (event) => {
     event?.preventDefault?.();
     if (!systemName.trim()) return toast.error("أدخل اسم النظام");
@@ -639,6 +657,8 @@ export default function AdminPage() {
         intellectual_property_owner: ipOwnerName,
         intellectual_property_national_id: ipNationalId,
         intellectual_property_fingerprint: ipFingerprint,
+        installed_files_lock_enabled: installedFilesLockEnabled,
+        session_timeout_minutes: Number(sessionTimeoutMinutes) || 1,
       });
       setAppSettings(response.data);
       setSystemName(response.data.system_name || systemName.trim());
@@ -659,6 +679,8 @@ export default function AdminPage() {
       setIpOwnerName(response.data.intellectual_property_owner || "");
       setIpNationalId(response.data.intellectual_property_national_id || "");
       setIpFingerprint(response.data.intellectual_property_fingerprint || "");
+      setInstalledFilesLockEnabled(response.data.installed_files_lock_enabled === true);
+      setSessionTimeoutMinutes(response.data.session_timeout_minutes || 1);
       await refreshSettings();
       toast.success("تم تحديث اسم النظام واسم الجهة");
     } catch (error) {
@@ -1009,6 +1031,8 @@ export default function AdminPage() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2" data-testid="program-security-grid">
               <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="ip-fingerprint-card"><Label data-testid="ip-owner-label">اسم مالك حقوق الملكية الفكرية</Label><Input value={ipOwnerName} onChange={(event) => setIpOwnerName(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-owner-input" /><Label data-testid="ip-national-id-label">رقم بطاقة الرقم القومي</Label><Input value={ipNationalId} onChange={(event) => setIpNationalId(event.target.value)} className="h-11 bg-white text-right" data-testid="ip-national-id-input" /><Label data-testid="ip-fingerprint-label">بصمة حقوق الملكية</Label><Input value={ipFingerprint} onChange={(event) => setIpFingerprint(event.target.value)} className="h-11 bg-white text-left font-mono" data-testid="ip-fingerprint-input" /><p className="break-all rounded-lg bg-white p-3 text-sm font-extrabold text-emerald-800" data-testid="ip-fingerprint-value">{programSecurity?.intellectual_property_fingerprint || appSettings?.intellectual_property_fingerprint || "احفظ الإعدادات لتوليد البصمة"}</p></div>
               <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="source-lock-card"><Label data-testid="source-lock-password-label">كلمة سر حماية ملفات برمجة البرنامج</Label><Input type="password" value={sourceLockPassword} onChange={(event) => setSourceLockPassword(event.target.value)} placeholder="٨ أحرف على الأقل" className="h-11 bg-white text-right" data-testid="source-lock-password-input" /><Button type="button" onClick={saveSourceLockPassword} className="w-full bg-slate-950 text-white" data-testid="save-source-lock-password-button">حفظ كلمة السر مشفرة</Button><p className="break-all text-xs font-bold text-slate-600" data-testid="source-integrity-digest">بصمة سلامة الملفات: {programSecurity?.source_integrity_digest || appSettings?.source_integrity_digest}</p></div>
+              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="installed-files-lock-card"><Label data-testid="installed-files-password-label">كلمة سر مجلد الملفات المثبتة</Label><Input type="password" value={installedFilesPassword} onChange={(event) => setInstalledFilesPassword(event.target.value)} placeholder="٨ أحرف على الأقل" className="h-11 bg-white text-right" data-testid="installed-files-password-input" /><Button type="button" onClick={saveInstalledFilesPassword} className="w-full bg-slate-950 text-white" data-testid="save-installed-files-password-button">حفظ وتفعيل قفل مجلد التثبيت</Button><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>تفعيل طلب كلمة السر قبل تشغيل البرنامج</span><input type="checkbox" checked={installedFilesLockEnabled} onChange={(event) => setInstalledFilesLockEnabled(event.target.checked)} data-testid="installed-files-lock-enabled-checkbox" /></label><p className="text-xs font-bold text-amber-700">ملاحظة: نظام Windows لا يدعم كلمة سر مباشرة للمجلد؛ لذلك يتم تطبيق قفل تشغيل بكلمة سر + Read-only/ACL قدر الإمكان بدون كسر تشغيل البرنامج.</p></div>
+              <div className="space-y-3 rounded-lg bg-slate-50 p-4" data-testid="session-timeout-card"><Label data-testid="session-timeout-label">وقت انتهاء جلسة تسجيل الدخول بالدقائق</Label><Input type="number" min="1" max="240" value={sessionTimeoutMinutes} onChange={(event) => setSessionTimeoutMinutes(event.target.value)} className="h-11 bg-white text-right" data-testid="session-timeout-input" /><p className="text-xs font-bold text-slate-600">القيمة الحالية تطبق على الخمول؛ عند انتهاء المدة يتم حفظ المسودات غير الحساسة وتسجيل الخروج.</p></div>
             </div>
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="manual-privacy-options"><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إخفاء أي إشارة لتصميم بالذكاء الاصطناعي</span><input type="checkbox" checked={hideAiAttribution} onChange={(event) => setHideAiAttribution(event.target.checked)} data-testid="hide-ai-attribution-checkbox" /></label><label className="flex items-center justify-between rounded-lg bg-white p-3 font-bold"><span>إظهار معلومات تقنية عامة داخل كتيب الإرشادات</span><input type="checkbox" checked={includeTechStackInManual} onChange={(event) => setIncludeTechStackInManual(event.target.checked)} data-testid="include-tech-stack-checkbox" /></label><p className="text-xs font-bold text-amber-700">افتراضياً يتم إخفاء لغة البرمجة والتقنيات من الكتيبات والمواد التعليمية.</p></div>
             <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="security-policy-settings-panel">

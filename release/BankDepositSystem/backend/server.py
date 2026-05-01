@@ -337,6 +337,9 @@ class AppSettingsResponse(BaseModel):
     intellectual_property_national_id: Optional[str] = None
     intellectual_property_fingerprint: Optional[str] = None
     source_lock_password_set: bool = False
+    installed_files_lock_enabled: bool = False
+    installed_files_password_set: bool = False
+    session_timeout_minutes: int = 1
     source_integrity_digest: Optional[str] = None
     shortcut_icon_url: Optional[str] = None
     shortcut_icon_updated_at: Optional[str] = None
@@ -362,9 +365,15 @@ class AppSettingsUpdate(BaseModel):
     intellectual_property_owner: Optional[str] = None
     intellectual_property_national_id: Optional[str] = None
     intellectual_property_fingerprint: Optional[str] = None
+    installed_files_lock_enabled: Optional[bool] = None
+    session_timeout_minutes: Optional[int] = Field(default=None, ge=1, le=240)
 
 
 class SourceLockPasswordUpdate(BaseModel):
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
+class InstalledFilesPasswordUpdate(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
@@ -373,6 +382,9 @@ class ProgramSecurityResponse(BaseModel):
     intellectual_property_national_id: Optional[str] = None
     intellectual_property_fingerprint: str
     source_lock_password_set: bool
+    installed_files_lock_enabled: bool
+    installed_files_password_set: bool
+    session_timeout_minutes: int
     source_integrity_digest: str
     encrypted_passwords_summary: Dict[str, str]
 
@@ -1543,6 +1555,9 @@ async def get_app_settings_document() -> dict:
         "intellectual_property_national_id": None,
         "intellectual_property_fingerprint": None,
         "source_lock_password_hash": None,
+        "installed_files_lock_enabled": False,
+        "installed_files_password_hash": None,
+        "session_timeout_minutes": 1,
         "shortcut_icon_updated_at": None,
         "shortcut_update_status": "لم يتم رفع أيقونة مخصصة بعد",
         "created_at": now_iso,
@@ -1586,6 +1601,9 @@ async def build_app_settings_response(document: dict) -> AppSettingsResponse:
         intellectual_property_national_id=document.get("intellectual_property_national_id"),
         intellectual_property_fingerprint=intellectual_property_fingerprint(document.get("intellectual_property_owner"), document.get("system_name") or DEFAULT_SYSTEM_NAME, document.get("intellectual_property_national_id"), document.get("intellectual_property_fingerprint")),
         source_lock_password_set=bool(document.get("source_lock_password_hash")),
+        installed_files_lock_enabled=bool(document.get("installed_files_lock_enabled", False)),
+        installed_files_password_set=bool(document.get("installed_files_password_hash")),
+        session_timeout_minutes=int(document.get("session_timeout_minutes") or 1),
         source_integrity_digest=source_integrity_digest(),
         shortcut_icon_url=document.get("shortcut_icon_url") or app_icon_url(document.get("shortcut_icon_updated_at")),
         shortcut_icon_updated_at=document.get("shortcut_icon_updated_at"),
@@ -3646,6 +3664,10 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
         app_updates["intellectual_property_national_id"] = payload.intellectual_property_national_id.strip() or None
     if payload.intellectual_property_fingerprint is not None:
         app_updates["intellectual_property_fingerprint"] = payload.intellectual_property_fingerprint.strip() or None
+    if payload.installed_files_lock_enabled is not None:
+        app_updates["installed_files_lock_enabled"] = payload.installed_files_lock_enabled
+    if payload.session_timeout_minutes is not None:
+        app_updates["session_timeout_minutes"] = payload.session_timeout_minutes
     if app_updates:
         app_updates["updated_at"] = now_iso
         await db.app_settings.update_one({"id": "global"}, {"$set": app_updates, "$setOnInsert": {"id": "global", "created_at": now_iso}}, upsert=True)
@@ -6311,12 +6333,16 @@ async def get_program_security(_: dict = Depends(require_super_admin)):
         intellectual_property_national_id=settings.get("intellectual_property_national_id"),
         intellectual_property_fingerprint=intellectual_property_fingerprint(settings.get("intellectual_property_owner"), system_name, settings.get("intellectual_property_national_id"), settings.get("intellectual_property_fingerprint")),
         source_lock_password_set=bool(settings.get("source_lock_password_hash")),
+        installed_files_lock_enabled=bool(settings.get("installed_files_lock_enabled", False)),
+        installed_files_password_set=bool(settings.get("installed_files_password_hash")),
+        session_timeout_minutes=int(settings.get("session_timeout_minutes") or 1),
         source_integrity_digest=source_integrity_digest(),
         encrypted_passwords_summary={
             "user_passwords": "محفوظة كـ bcrypt hash وليست نصاً صريحاً",
             "backup_passwords": "تستخدم لاشتقاق مفتاح تشفير Fernet للنسخ الاحتياطية",
             "eta_api_secrets": "Client Secret و PIN محفوظان مشفرين",
             "source_lock_password": "كلمة سر حماية ملفات البرنامج تحفظ كـ bcrypt hash",
+            "installed_files_password": "كلمة سر تشغيل مجلد التثبيت تحفظ كـ bcrypt hash وتُطلب قبل تشغيل الخادم المحلي عند تفعيل القفل",
         },
     )
 
@@ -6326,6 +6352,17 @@ async def set_source_lock_password(payload: SourceLockPasswordUpdate, _: dict = 
     await db.app_settings.update_one(
         {"id": "global"},
         {"$set": {"source_lock_password_hash": hash_password(payload.new_password), "updated_at": serialize_datetime(datetime.now(timezone.utc))}, "$setOnInsert": {"id": "global", "created_at": serialize_datetime(datetime.now(timezone.utc))}},
+        upsert=True,
+    )
+    return await get_program_security(_)
+
+
+@api_router.put("/admin/program-security/installed-files-password", response_model=ProgramSecurityResponse)
+async def set_installed_files_password(payload: InstalledFilesPasswordUpdate, _: dict = Depends(require_super_admin)):
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    await db.app_settings.update_one(
+        {"id": "global"},
+        {"$set": {"installed_files_password_hash": hash_password(payload.new_password), "installed_files_lock_enabled": True, "updated_at": now_iso}, "$setOnInsert": {"id": "global", "created_at": now_iso}},
         upsert=True,
     )
     return await get_program_security(_)

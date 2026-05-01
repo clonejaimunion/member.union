@@ -12,6 +12,9 @@ const defaultSettings = {
   backup_enabled: true,
   backup_allowed_roles: { super_admin: true, admin: true, user: false },
   two_factor_role_policy: { super_admin: false, admin: false, user: false },
+  installed_files_lock_enabled: false,
+  installed_files_password_set: false,
+  session_timeout_minutes: 1,
   updated_at: null,
 };
 
