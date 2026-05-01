@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, Plus, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, FileImage, FileUp, KeyRound, LockKeyhole, PlugZap, Plus, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,10 +50,26 @@ const adminMonthOptions = Array.from({ length: 12 }, (_, index) => String(index 
 const adminHourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
 const defaultPeriodForm = { period_type: "monthly", year: String(currentAdminDate.getFullYear()), month: String(currentAdminDate.getMonth() + 1), action: "lock", reason: "" };
 const defaultApprovalForm = { report_type: "عام", report_name: "", report_reference: "", period_label: "", status: "approved", approver_title: "", notes: "" };
+const defaultEtaIntegration = {
+  environment: "preprod",
+  issuer_tax_number: "",
+  issuer_name: "",
+  branch_code: "0",
+  activity_code: "",
+  client_id: "",
+  client_secret: "",
+  sdk_command_template: "",
+  certificate_label: "",
+  token_pin: "",
+  auto_submit_after_generation: false,
+  portal_url: "",
+  notes: "",
+};
 
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
   { id: "feature-settings", title: "إعدادات الخواص", subtitle: "تفعيل وتعطيل وحدات الجهة", icon: SlidersHorizontal },
+  { id: "eta-integration", title: "منظومة الضرائب المصرية", subtitle: "ERP API و SDK التوقيع الرقمي", icon: PlugZap },
   { id: "fixed-asset-rates", title: "نسب إهلاك الأصول", subtitle: "تعديل نسب التصنيفات الثابتة", icon: SlidersHorizontal },
   { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
   { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
@@ -64,7 +80,7 @@ const adminSections = [
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["add-user", "users"]);
+const superAdminOnlySectionIds = new Set(["add-user", "users", "eta-integration"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -97,6 +113,8 @@ export default function AdminPage() {
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
   const [fixedAssetRates, setFixedAssetRates] = useState([]);
   const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
+  const [etaIntegration, setEtaIntegration] = useState(defaultEtaIntegration);
+  const [etaConnection, setEtaConnection] = useState(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [moduleSettingsLoading, setModuleSettingsLoading] = useState(false);
   const [securityLoading, setSecurityLoading] = useState(false);
@@ -178,6 +196,22 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadEtaIntegration = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    try {
+      const response = await api.get("/admin/eta-integration");
+      setEtaIntegration({
+        ...defaultEtaIntegration,
+        ...response.data,
+        client_secret: "",
+        token_pin: "",
+      });
+      setEtaConnection(response.data.last_connection_status ? { status: response.data.last_connection_status, message: response.data.last_connection_message, required_items: response.data.required_items || [] } : null);
+    } catch (error) {
+      toast.error("تعذر تحميل إعدادات منظومة الضرائب");
+    }
+  }, [isSuperAdmin]);
+
   const loadOrganizations = useCallback(async () => {
     try {
       const response = await api.get("/organizations/public");
@@ -196,7 +230,8 @@ export default function AdminPage() {
     loadModuleSettings();
     loadFixedAssetRates();
     loadOrganizations();
-  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations]);
+    loadEtaIntegration();
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations, loadEtaIntegration]);
 
   useEffect(() => {
     if (!isSuperAdmin && superAdminOnlySectionIds.has(activeAdminSection)) {
@@ -228,6 +263,33 @@ export default function AdminPage() {
       loadUsers();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر إنشاء المستخدم");
+    }
+  };
+
+  const updateEtaField = (field, value) => setEtaIntegration((current) => ({ ...current, [field]: value }));
+
+  const saveEtaIntegration = async () => {
+    if (!isSuperAdmin) return toast.error("إعدادات الربط الضريبي متاحة للسوبر أدمن فقط");
+    try {
+      const payload = { ...etaIntegration };
+      if (!payload.client_secret) payload.client_secret = null;
+      if (!payload.token_pin) payload.token_pin = null;
+      const response = await api.put("/admin/eta-integration", payload);
+      setEtaIntegration({ ...defaultEtaIntegration, ...response.data, client_secret: "", token_pin: "" });
+      toast.success("تم حفظ إعدادات الربط الضريبي");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر حفظ إعدادات الربط الضريبي");
+    }
+  };
+
+  const testEtaConnection = async () => {
+    try {
+      const response = await api.post("/admin/eta-integration/test-connection");
+      setEtaConnection(response.data);
+      if (response.data.status === "configured") toast.success(response.data.message);
+      else toast.error(response.data.message);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر اختبار الاتصال بمنظومة الضرائب");
     }
   };
 
@@ -732,6 +794,47 @@ export default function AdminPage() {
               })}
             </div>
             <Button type="button" onClick={saveModuleSettings} disabled={moduleSettingsLoading} className="mt-5 h-11 w-full rounded-lg bg-slate-950 text-white" data-testid="save-feature-settings-button"><Save className="h-4 w-4" /> حفظ إعدادات الخواص</Button>
+          </section>}
+
+          {isSuperAdmin && activeAdminSection === "eta-integration" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="eta-integration-section">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="eta-integration-heading">
+              <div className="flex items-center gap-3">
+                <PlugZap className="h-6 w-6 text-emerald-700" />
+                <div>
+                  <p className="text-sm font-extrabold text-emerald-700" data-testid="eta-integration-eyebrow">ERP System / API Integration</p>
+                  <h2 className="text-2xl font-extrabold" data-testid="eta-integration-title">الربط والتكامل مع منظومة الضرائب المصرية</h2>
+                </div>
+              </div>
+              <Badge className={etaIntegration.is_configured ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-50" : "bg-amber-50 text-amber-800 hover:bg-amber-50"} data-testid="eta-integration-status-badge">
+                {etaIntegration.is_configured ? "جاهز للاختبار" : "بيانات ناقصة"}
+              </Badge>
+            </div>
+            <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="eta-integration-summary-grid">
+              <div className="rounded-lg bg-slate-950 p-4 text-white" data-testid="eta-summary-environment"><p className="text-xs font-bold text-slate-300">بيئة التشغيل</p><p className="text-xl font-extrabold">{etaIntegration.environment === "production" ? "Production" : "Preprod"}</p></div>
+              <div className="rounded-lg bg-emerald-50 p-4 text-emerald-900" data-testid="eta-summary-secret"><p className="text-xs font-bold text-emerald-700">Client Secret</p><p className="text-xl font-extrabold">{etaIntegration.has_client_secret ? "محفوظ مشفر" : "غير محفوظ"}</p></div>
+              <div className="rounded-lg bg-amber-50 p-4 text-amber-900" data-testid="eta-summary-sdk"><p className="text-xs font-bold text-amber-700">SDK التوقيع</p><p className="text-xl font-extrabold">{etaIntegration.sdk_command_template ? "محدد" : "مطلوب"}</p></div>
+            </div>
+            {etaIntegration.required_items?.length > 0 && <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900" data-testid="eta-required-items-alert">استكمل: {etaIntegration.required_items.join("، ")}</div>}
+            {etaConnection?.message && <div className={`mb-5 rounded-lg border p-4 text-sm font-bold ${etaConnection.status === "configured" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`} data-testid="eta-connection-message">{etaConnection.message}</div>}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="eta-integration-form-grid">
+              <div data-testid="eta-environment-wrapper"><Label data-testid="eta-environment-label">البيئة</Label><select value={etaIntegration.environment || "preprod"} onChange={(event) => updateEtaField("environment", event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="eta-environment-select"><option value="preprod">Preprod / Sandbox</option><option value="production">Production / الاعتماد الفعلي</option></select></div>
+              <div data-testid="eta-portal-url-wrapper"><Label data-testid="eta-portal-url-label">رابط البوابة</Label><Input value={etaIntegration.portal_url || ""} onChange={(event) => updateEtaField("portal_url", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-portal-url-input" /></div>
+              <div data-testid="eta-issuer-name-wrapper"><Label data-testid="eta-issuer-name-label">اسم الممول/الجهة</Label><Input value={etaIntegration.issuer_name || ""} onChange={(event) => updateEtaField("issuer_name", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-issuer-name-input" /></div>
+              <div data-testid="eta-tax-number-wrapper"><Label data-testid="eta-tax-number-label">الرقم الضريبي</Label><Input value={etaIntegration.issuer_tax_number || ""} onChange={(event) => updateEtaField("issuer_tax_number", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-tax-number-input" /></div>
+              <div data-testid="eta-branch-code-wrapper"><Label data-testid="eta-branch-code-label">كود الفرع</Label><Input value={etaIntegration.branch_code || ""} onChange={(event) => updateEtaField("branch_code", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-branch-code-input" /></div>
+              <div data-testid="eta-activity-code-wrapper"><Label data-testid="eta-activity-code-label">كود النشاط</Label><Input value={etaIntegration.activity_code || ""} onChange={(event) => updateEtaField("activity_code", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-activity-code-input" /></div>
+              <div data-testid="eta-client-id-wrapper"><Label data-testid="eta-client-id-label">Client ID</Label><Input value={etaIntegration.client_id || ""} onChange={(event) => updateEtaField("client_id", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-client-id-input" /></div>
+              <div data-testid="eta-client-secret-wrapper"><Label data-testid="eta-client-secret-label">Client Secret</Label><Input type="password" value={etaIntegration.client_secret || ""} onChange={(event) => updateEtaField("client_secret", event.target.value)} placeholder={etaIntegration.has_client_secret ? "محفوظ مشفر - اتركه فارغاً للإبقاء عليه" : "أدخل السر"} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-client-secret-input" /></div>
+              <div data-testid="eta-certificate-label-wrapper"><Label data-testid="eta-certificate-label-label">اسم شهادة/توكن التوقيع</Label><Input value={etaIntegration.certificate_label || ""} onChange={(event) => updateEtaField("certificate_label", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-certificate-label-input" /></div>
+              <div data-testid="eta-token-pin-wrapper"><Label data-testid="eta-token-pin-label">PIN التوكن إن احتاجه SDK</Label><Input type="password" value={etaIntegration.token_pin || ""} onChange={(event) => updateEtaField("token_pin", event.target.value)} placeholder={etaIntegration.has_token_pin ? "محفوظ مشفر - اتركه فارغاً للإبقاء عليه" : "اختياري حسب SDK"} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-token-pin-input" /></div>
+              <div className="md:col-span-2" data-testid="eta-sdk-template-wrapper"><Label data-testid="eta-sdk-template-label">أمر SDK للتوقيع الرقمي</Label><Input value={etaIntegration.sdk_command_template || ""} onChange={(event) => updateEtaField("sdk_command_template", event.target.value)} placeholder={'مثال: C:\\ETA-SDK\\signer.exe --input {input} --output {output} --pin {pin}'} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-sdk-template-input" /><p className="mt-2 text-xs font-bold text-slate-500" data-testid="eta-sdk-template-help">النظام يرسل الفاتورة بعد توقيعها عبر SDK الرسمي/أداة التوقيع التي تحددها هنا. لا يوجد إرسال MOCKED.</p></div>
+              <div className="md:col-span-2" data-testid="eta-notes-wrapper"><Label data-testid="eta-notes-label">ملاحظات الاعتماد</Label><Input value={etaIntegration.notes || ""} onChange={(event) => updateEtaField("notes", event.target.value)} className="mt-2 h-12 bg-slate-50 text-right" data-testid="eta-notes-input" /></div>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3" data-testid="eta-integration-actions">
+              <Button type="button" onClick={saveEtaIntegration} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="save-eta-integration-button"><Save className="h-4 w-4" /> حفظ إعدادات ERP/API</Button>
+              <Button type="button" onClick={testEtaConnection} variant="outline" className="h-11 rounded-lg bg-white" data-testid="test-eta-connection-button"><PlugZap className="h-4 w-4" /> اختبار الاتصال</Button>
+              <Button asChild type="button" variant="outline" className="h-11 rounded-lg bg-white" data-testid="open-electronic-invoice-page-button"><Link to="/electronic-invoice">فتح صفحة الفاتورة الإلكترونية</Link></Button>
+            </div>
           </section>}
 
           {activeAdminSection === "fixed-asset-rates" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="fixed-asset-rates-section">

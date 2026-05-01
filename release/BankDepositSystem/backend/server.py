@@ -22,6 +22,9 @@ import json
 import hashlib
 import secrets
 import subprocess
+import tempfile
+import shlex
+import urllib.parse
 from contextvars import ContextVar
 import zipfile
 import xml.etree.ElementTree as ET
@@ -902,6 +905,64 @@ class ElectronicInvoiceSettingsResponse(ElectronicInvoiceSettings):
     updated_at: datetime
 
 
+class EtaIntegrationSettings(BaseModel):
+    environment: Literal["preprod", "production"] = "preprod"
+    issuer_tax_number: Optional[str] = None
+    issuer_name: Optional[str] = None
+    branch_code: Optional[str] = "0"
+    activity_code: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    sdk_command_template: Optional[str] = None
+    certificate_label: Optional[str] = None
+    token_pin: Optional[str] = None
+    auto_submit_after_generation: bool = False
+    portal_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class EtaIntegrationSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    environment: Literal["preprod", "production"] = "preprod"
+    issuer_tax_number: Optional[str] = None
+    issuer_name: Optional[str] = None
+    branch_code: Optional[str] = None
+    activity_code: Optional[str] = None
+    client_id: Optional[str] = None
+    has_client_secret: bool = False
+    sdk_command_template: Optional[str] = None
+    certificate_label: Optional[str] = None
+    has_token_pin: bool = False
+    auto_submit_after_generation: bool = False
+    portal_url: Optional[str] = None
+    notes: Optional[str] = None
+    is_configured: bool = False
+    required_items: List[str] = Field(default_factory=list)
+    last_connection_status: Optional[str] = None
+    last_connection_message: Optional[str] = None
+    updated_at: datetime
+
+
+class EtaConnectionTestResponse(BaseModel):
+    status: Literal["configured", "configuration_required", "error"]
+    message: str
+    environment: str
+    required_items: List[str] = Field(default_factory=list)
+    token_received: bool = False
+
+
+class EtaSubmissionResponse(BaseModel):
+    status: Literal["submitted", "configuration_required", "sdk_required", "error"]
+    message: str
+    invoice_id: str
+    eta_document_uuid: Optional[str] = None
+    eta_submission_id: Optional[str] = None
+    eta_portal_url: Optional[str] = None
+    response_payload: Optional[dict] = None
+
+
 class ElectronicCustomerBase(BaseModel):
     name: str = Field(..., min_length=1)
     tax_number: Optional[str] = None
@@ -965,6 +1026,10 @@ class ElectronicInvoice(BaseModel):
     bank_name: str
     status: Literal["draft", "ready", "needs_review", "submitted", "accepted", "rejected"] = "draft"
     validation_notes: List[str] = Field(default_factory=list)
+    eta_document_uuid: Optional[str] = None
+    eta_submission_id: Optional[str] = None
+    eta_portal_url: Optional[str] = None
+    eta_last_response: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
@@ -2638,6 +2703,193 @@ async def get_einvoice_settings_document() -> dict:
     })
 
 
+def eta_urls(environment: str) -> dict:
+    if environment == "production":
+        return {
+            "identity": "https://id.eta.gov.eg",
+            "api": "https://api.invoicing.eta.gov.eg",
+            "portal": "https://invoicing.eta.gov.eg",
+        }
+    return {
+        "identity": "https://id.preprod.eta.gov.eg",
+        "api": "https://api.preprod.invoicing.eta.gov.eg",
+        "portal": "https://preprod.invoicing.eta.gov.eg",
+    }
+
+
+def eta_cipher() -> Fernet:
+    key = base64.urlsafe_b64encode(hashlib.sha256(JWT_SECRET.encode()).digest())
+    return Fernet(key)
+
+
+def eta_encrypt_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return eta_cipher().encrypt(value.encode()).decode()
+
+
+def eta_decrypt_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        return eta_cipher().decrypt(value.encode()).decode()
+    except InvalidToken:
+        return None
+
+
+def eta_required_items(document: dict) -> List[str]:
+    required = []
+    labels = {
+        "issuer_tax_number": "الرقم الضريبي للجهة",
+        "issuer_name": "اسم الممول/الجهة",
+        "branch_code": "كود الفرع",
+        "activity_code": "كود النشاط",
+        "client_id": "Client ID من بوابة الضرائب",
+        "client_secret_encrypted": "Client Secret من بوابة الضرائب",
+        "sdk_command_template": "أمر SDK/أداة التوقيع الرقمي",
+    }
+    for key, label in labels.items():
+        if not str(document.get(key) or "").strip():
+            required.append(label)
+    return required
+
+
+def eta_public_response(document: dict) -> EtaIntegrationSettingsResponse:
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    clean.setdefault("id", "default")
+    clean.setdefault("environment", "preprod")
+    clean.setdefault("updated_at", clean.get("created_at") or now_iso)
+    clean["client_id"] = clean.get("client_id")
+    clean["has_client_secret"] = bool(clean.get("client_secret_encrypted"))
+    clean["has_token_pin"] = bool(clean.get("token_pin_encrypted"))
+    clean["portal_url"] = clean.get("portal_url") or eta_urls(clean.get("environment", "preprod"))["portal"]
+    clean["required_items"] = eta_required_items(clean)
+    clean["is_configured"] = len(clean["required_items"]) == 0
+    return EtaIntegrationSettingsResponse(**hydrate_einvoice_document(clean))
+
+
+async def get_eta_integration_document() -> dict:
+    document = await db.eta_integration_settings.find_one({"id": "default"}, {"_id": 0})
+    if document:
+        return document
+    now = serialize_datetime(datetime.now(timezone.utc))
+    settings = await get_einvoice_settings_document()
+    return {
+        "id": "default",
+        "environment": "preprod",
+        "issuer_tax_number": settings.get("tax_registration_number"),
+        "issuer_name": settings.get("organization_name"),
+        "branch_code": "0",
+        "activity_code": settings.get("activity_code"),
+        "client_id": None,
+        "client_secret_encrypted": None,
+        "sdk_command_template": None,
+        "certificate_label": None,
+        "token_pin_encrypted": None,
+        "auto_submit_after_generation": False,
+        "portal_url": eta_urls("preprod")["portal"],
+        "notes": None,
+        "last_connection_status": None,
+        "last_connection_message": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def build_eta_invoice_payload(invoice: dict, settings: dict, config: dict) -> dict:
+    uuid_source = f"{invoice.get('id')}|{invoice.get('invoice_number')}|{invoice.get('updated_at')}"
+    internal_uuid = hashlib.sha256(uuid_source.encode()).hexdigest()
+    return {
+        "issuer": {
+            "type": "B",
+            "id": config.get("issuer_tax_number"),
+            "name": config.get("issuer_name") or settings.get("organization_name"),
+            "address": {"branchID": config.get("branch_code") or "0", "country": "EG", "governate": settings.get("governorate") or "", "regionCity": settings.get("address") or ""},
+        },
+        "receiver": {"type": "P", "id": invoice.get("customer_tax_number") or "", "name": invoice.get("customer_name")},
+        "documentType": "I",
+        "documentTypeVersion": "1.0",
+        "dateTimeIssued": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "taxpayerActivityCode": config.get("activity_code") or settings.get("activity_code") or "",
+        "internalID": invoice.get("invoice_number"),
+        "uuid": internal_uuid,
+        "invoiceLines": [
+            {
+                "description": invoice.get("description"),
+                "itemType": "GS1",
+                "itemCode": invoice.get("service_code") or "EGS-SERVICE-001",
+                "unitType": "EA",
+                "quantity": 1,
+                "unitValue": {"currencySold": "EGP", "amountEGP": float(invoice.get("net_amount") or 0)},
+                "salesTotal": float(invoice.get("net_amount") or 0),
+                "total": float(invoice.get("total_amount") or 0),
+                "valueDifference": 0,
+                "totalTaxableFees": 0,
+                "netTotal": float(invoice.get("net_amount") or 0),
+                "itemsDiscount": 0,
+                "taxableItems": [],
+            }
+        ],
+        "totalSalesAmount": float(invoice.get("net_amount") or 0),
+        "totalDiscountAmount": 0,
+        "netAmount": float(invoice.get("net_amount") or 0),
+        "taxTotals": [],
+        "totalAmount": float(invoice.get("total_amount") or 0),
+        "extraDiscountAmount": 0,
+        "totalItemsDiscountAmount": 0,
+    }
+
+
+def run_eta_sdk_signer(config: dict, payload: dict) -> dict:
+    template = (config.get("sdk_command_template") or "").strip()
+    if not template:
+        raise HTTPException(status_code=400, detail="ضع أمر SDK/أداة التوقيع الرقمي أولاً قبل الإرسال الفعلي")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = Path(temp_dir) / "invoice.json"
+        output_path = Path(temp_dir) / "signed-invoice.json"
+        input_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        command = template.format(input=shlex.quote(str(input_path)), output=shlex.quote(str(output_path)), pin=shlex.quote(eta_decrypt_secret(config.get("token_pin_encrypted")) or ""))
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=90)
+        if result.returncode != 0:
+            raise HTTPException(status_code=400, detail=f"فشل توقيع الفاتورة عبر SDK: {result.stderr or result.stdout or 'خطأ غير معروف'}")
+        if not output_path.exists():
+            raise HTTPException(status_code=400, detail="أداة SDK لم تُنشئ ملف الفاتورة الموقعة")
+        return json.loads(output_path.read_text(encoding="utf-8"))
+
+
+def eta_get_access_token(config: dict) -> str:
+    client_secret = eta_decrypt_secret(config.get("client_secret_encrypted"))
+    if not config.get("client_id") or not client_secret:
+        raise HTTPException(status_code=400, detail="Client ID و Client Secret مطلوبان للاتصال بمنظومة الضرائب")
+    token_url = eta_urls(config.get("environment", "preprod"))["identity"] + "/connect/token"
+    data = urllib.parse.urlencode({"grant_type": "client_credentials", "client_id": config.get("client_id"), "client_secret": client_secret, "scope": "InvoicingAPI"}).encode()
+    request = urllib.request.Request(token_url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            payload = json.loads(response.read().decode())
+            token = payload.get("access_token")
+            if not token:
+                raise HTTPException(status_code=400, detail="لم يتم استلام access_token من منظومة الضرائب")
+            return token
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"فشل الاتصال بخدمة هوية الضرائب: {exc}")
+
+
+def eta_submit_signed_document(config: dict, signed_payload: dict) -> dict:
+    token = eta_get_access_token(config)
+    url = eta_urls(config.get("environment", "preprod"))["api"] + "/api/v1.0/documentsubmissions"
+    body = json.dumps({"documents": [signed_payload]}, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=40) as response:
+            return json.loads(response.read().decode())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"فشل إرسال الفاتورة إلى منظومة الضرائب: {exc}")
+
+
 async def get_default_service_code(settings: dict) -> dict:
     service = await db.einvoice_service_codes.find_one(with_organization({"is_default": True}), {"_id": 0})
     if service:
@@ -3151,7 +3403,7 @@ async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
 
 async def require_super_admin(current_user: dict = Depends(get_current_user)) -> dict:
     if not is_super_admin(current_user):
-        raise HTTPException(status_code=403, detail="إدارة المستخدمين متاحة لحساب السوبر أدمن admin فقط")
+        raise HTTPException(status_code=403, detail="هذه الصفحة متاحة لحساب السوبر أدمن admin فقط")
     return current_user
 
 
@@ -5253,6 +5505,59 @@ async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(document))
 
 
+@api_router.get("/admin/eta-integration", response_model=EtaIntegrationSettingsResponse)
+async def get_eta_integration_settings(_: dict = Depends(require_super_admin)):
+    document = await get_eta_integration_document()
+    return eta_public_response(document)
+
+
+@api_router.put("/admin/eta-integration", response_model=EtaIntegrationSettingsResponse)
+async def save_eta_integration_settings(payload: EtaIntegrationSettings, _: dict = Depends(require_super_admin)):
+    existing = await get_eta_integration_document()
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    updates = {
+        "id": "default",
+        "environment": payload.environment,
+        "issuer_tax_number": (payload.issuer_tax_number or "").strip() or None,
+        "issuer_name": (payload.issuer_name or "").strip() or None,
+        "branch_code": (payload.branch_code or "0").strip() or "0",
+        "activity_code": (payload.activity_code or "").strip() or None,
+        "client_id": (payload.client_id or "").strip() or None,
+        "sdk_command_template": (payload.sdk_command_template or "").strip() or None,
+        "certificate_label": (payload.certificate_label or "").strip() or None,
+        "auto_submit_after_generation": bool(payload.auto_submit_after_generation),
+        "portal_url": (payload.portal_url or "").strip() or eta_urls(payload.environment)["portal"],
+        "notes": (payload.notes or "").strip() or None,
+        "updated_at": now_iso,
+    }
+    updates["client_secret_encrypted"] = existing.get("client_secret_encrypted") if payload.client_secret is None else eta_encrypt_secret(payload.client_secret.strip())
+    updates["token_pin_encrypted"] = existing.get("token_pin_encrypted") if payload.token_pin is None else eta_encrypt_secret(payload.token_pin.strip())
+    if not existing.get("created_at"):
+        updates["created_at"] = now_iso
+    await db.eta_integration_settings.update_one({"id": "default"}, {"$set": updates}, upsert=True)
+    document = await db.eta_integration_settings.find_one({"id": "default"}, {"_id": 0})
+    return eta_public_response(document)
+
+
+@api_router.post("/admin/eta-integration/test-connection", response_model=EtaConnectionTestResponse)
+async def test_eta_integration_connection(_: dict = Depends(require_super_admin)):
+    document = await get_eta_integration_document()
+    required = eta_required_items(document)
+    if required:
+        message = "استكمل بيانات الربط أولاً: " + "، ".join(required)
+        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "configuration_required", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        return EtaConnectionTestResponse(status="configuration_required", message=message, environment=document.get("environment", "preprod"), required_items=required)
+    try:
+        eta_get_access_token(document)
+        message = "تم الاتصال بخدمة هوية منظومة الضرائب واستلام رمز وصول بنجاح"
+        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "configured", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        return EtaConnectionTestResponse(status="configured", message=message, environment=document.get("environment", "preprod"), token_received=True)
+    except HTTPException as exc:
+        message = str(exc.detail)
+        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "error", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        return EtaConnectionTestResponse(status="error", message=message, environment=document.get("environment", "preprod"))
+
+
 @api_router.get("/electronic-invoice/customers", response_model=List[ElectronicCustomer])
 async def list_electronic_customers(_: dict = Depends(require_einvoice_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
     documents = await db.einvoice_customers.find(with_organization({}), {"_id": 0}).sort("name", 1).to_list(1000)
@@ -5372,6 +5677,39 @@ async def update_electronic_invoice_status(invoice_id: str, payload: ElectronicI
     return ElectronicInvoice(**hydrate_einvoice_document(updated))
 
 
+@api_router.post("/electronic-invoices/{invoice_id}/submit-eta", response_model=EtaSubmissionResponse)
+async def submit_electronic_invoice_to_eta(invoice_id: str, _: dict = Depends(require_super_admin)):
+    invoice = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+    config = await get_eta_integration_document()
+    required = eta_required_items(config)
+    if required:
+        return EtaSubmissionResponse(status="configuration_required", message="استكمل بيانات الربط أولاً: " + "، ".join(required), invoice_id=invoice_id)
+    settings = await get_einvoice_settings_document()
+    payload = build_eta_invoice_payload(invoice, settings, config)
+    try:
+        signed_payload = run_eta_sdk_signer(config, payload)
+    except HTTPException as exc:
+        return EtaSubmissionResponse(status="sdk_required", message=str(exc.detail), invoice_id=invoice_id)
+    response_payload = eta_submit_signed_document(config, signed_payload)
+    accepted_documents = response_payload.get("acceptedDocuments") or []
+    first_document = accepted_documents[0] if accepted_documents else {}
+    eta_document_uuid = first_document.get("uuid") or response_payload.get("uuid")
+    eta_submission_id = response_payload.get("submissionId") or response_payload.get("submissionUUID")
+    portal_url = f"{config.get('portal_url') or eta_urls(config.get('environment', 'preprod'))['portal']}/documents/{eta_document_uuid}" if eta_document_uuid else config.get("portal_url")
+    updates = {
+        "status": "submitted",
+        "eta_document_uuid": eta_document_uuid,
+        "eta_submission_id": eta_submission_id,
+        "eta_portal_url": portal_url,
+        "eta_last_response": response_payload,
+        "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+    }
+    await db.electronic_invoices.update_one(with_organization({"id": invoice_id}), {"$set": updates})
+    return EtaSubmissionResponse(status="submitted", message="تم إرسال الفاتورة إلى منظومة الضرائب المصرية", invoice_id=invoice_id, eta_document_uuid=eta_document_uuid, eta_submission_id=eta_submission_id, eta_portal_url=portal_url, response_payload=response_payload)
+
+
 @api_router.get("/admin/security/audit-logs", response_model=List[AuditLogResponse])
 async def list_audit_logs(
     limit: int = Query(default=200, ge=1, le=1000),
@@ -5467,7 +5805,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
 
 
 @api_router.get("/admin/security/backups", response_model=List[BackupRecord])
