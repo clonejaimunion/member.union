@@ -33,7 +33,7 @@ def test_installed_files_password_is_hashed_and_session_timeout_is_configurable(
     assert password_response.status_code == 200, password_response.text
     password_data = password_response.json()
     assert password_data["installed_files_password_set"] is True
-    assert password_data["installed_files_lock_enabled"] is True
+    assert password_data["installed_files_lock_enabled"] is False
 
     settings_response = requests.put(
         f"{BASE_URL}/api/admin/app-settings",

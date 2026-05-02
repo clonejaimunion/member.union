@@ -6342,7 +6342,7 @@ async def get_program_security(_: dict = Depends(require_super_admin)):
             "backup_passwords": "تستخدم لاشتقاق مفتاح تشفير Fernet للنسخ الاحتياطية",
             "eta_api_secrets": "Client Secret و PIN محفوظان مشفرين",
             "source_lock_password": "كلمة سر حماية ملفات البرنامج تحفظ كـ bcrypt hash",
-            "installed_files_password": "كلمة سر تشغيل مجلد التثبيت تحفظ كـ bcrypt hash وتُطلب قبل تشغيل الخادم المحلي عند تفعيل القفل",
+            "installed_files_password": "كلمة سر مجلد التثبيت محفوظة كـ bcrypt hash داخل إعدادات الأمان ولا تُطلب عند تشغيل الاختصار",
         },
     )
 
@@ -6362,7 +6362,7 @@ async def set_installed_files_password(payload: InstalledFilesPasswordUpdate, _:
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     await db.app_settings.update_one(
         {"id": "global"},
-        {"$set": {"installed_files_password_hash": hash_password(payload.new_password), "installed_files_lock_enabled": True, "updated_at": now_iso}, "$setOnInsert": {"id": "global", "created_at": now_iso}},
+        {"$set": {"installed_files_password_hash": hash_password(payload.new_password), "updated_at": now_iso}, "$setOnInsert": {"id": "global", "created_at": now_iso}},
         upsert=True,
     )
     return await get_program_security(_)

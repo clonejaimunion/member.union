@@ -11,6 +11,7 @@ attrib +R "%APP_DIR%backend\server.py" >nul 2>nul
 attrib +R "%APP_DIR%frontend\build\*" /S /D >nul 2>nul
 icacls "%APP_DIR%backend\server.py" /inheritance:r /grant:r "%USERNAME%:R" Administrators:F SYSTEM:F >nul 2>nul
 icacls "%APP_DIR%frontend\build" /inheritance:r /grant:r "%USERNAME%:RX" Administrators:F SYSTEM:F /T >nul 2>nul
+cipher /e /s:"%APP_DIR%" >nul 2>nul
 
 echo ============================================
 echo   Bank Deposit Interest System
@@ -58,15 +59,6 @@ echo Checking application server package...
 "%VENV_PY%" -m pip show uvicorn >nul 2>nul
 if errorlevel 1 (
   echo Uvicorn was not installed correctly from local packages.
-  pause
-  exit /b 1
-)
-
-echo Verifying installed files folder password if enabled...
-"%VENV_PY%" "%APP_DIR%backend\verify_installed_files_password.py"
-if errorlevel 1 (
-  echo.
-  echo Program folder password verification failed. The system will not start.
   pause
   exit /b 1
 )
