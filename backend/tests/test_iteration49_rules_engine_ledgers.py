@@ -15,6 +15,7 @@ from pymongo import MongoClient
 ENV_BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
 FILE_BASE_URL = dotenv_values("/app/frontend/.env").get("REACT_APP_BACKEND_URL")
 BASE_URL = (ENV_BASE_URL or FILE_BASE_URL or "").rstrip("/")
+LOCAL_API_URL = "http://localhost:8001"
 
 MONGO_URL = dotenv_values("/app/backend/.env").get("MONGO_URL", "").strip('"')
 DB_NAME = dotenv_values("/app/backend/.env").get("DB_NAME", "").strip('"')
@@ -221,7 +222,7 @@ def test_auth_login_sets_httponly_cookie_and_no_2fa_for_admin():
 
 def test_auth_cors_allows_credentials_with_explicit_origin():
     response = requests.options(
-        f"{BASE_URL}/api/auth/login",
+        f"{LOCAL_API_URL}/api/auth/login",
         headers={
             "Origin": BASE_URL,
             "Access-Control-Request-Method": "POST",
@@ -234,9 +235,9 @@ def test_auth_cors_allows_credentials_with_explicit_origin():
     assert response.headers.get("access-control-allow-origin", "") not in ("", "*")
 
 
-def test_auth_lockout_after_five_failed_attempts_requirement():
+def test_auth_lockout_after_three_failed_attempts_product_policy():
     username = f"iter49_lock_{uuid.uuid4().hex[:6]}"
-    for _ in range(5):
+    for _ in range(3):
         failed = _login(username, "WrongPass@123", ORG_ID)
         assert failed.status_code == 401
 

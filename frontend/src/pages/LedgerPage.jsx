@@ -15,6 +15,7 @@ import { formatCurrency, formatNumber } from "@/lib/format";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const startOfYear = () => `${new Date().getFullYear()}-01-01`;
+const accountLabel = (item) => `${item.code} - ${item.name}`;
 
 export default function LedgerPage() {
   const navigate = useNavigate();
@@ -65,7 +66,7 @@ export default function LedgerPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="ledger-filters-section">
           <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="ledger-filters-heading"><h2 className="text-3xl font-extrabold" data-testid="ledger-filters-title">اختيارات دفتر الأستاذ</h2><ExportReportButtons title={`دفتر الأستاذ - ${report?.account?.name || selectedAccount?.name || ""}`} fileName={`دفتر-الأستاذ-${report?.account?.name || selectedAccount?.name || ""}`} selectors={["[data-testid='ledger-report-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-ledger-report-button" excelTestId="export-ledger-excel-button" wordTestId="export-ledger-word-button" /></div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="ledger-filters-grid">
-            <div data-testid="ledger-account-wrapper"><Label data-testid="ledger-account-label">الحساب</Label><select value={filters.account_id} onChange={(event) => setFilters((current) => ({ ...current, account_id: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="ledger-account-select">{accounts.map((item) => <option key={item.id} value={item.id} data-testid={`ledger-account-option-${item.id}`}>{item.code} - {item.name}</option>)}</select></div>
+            <div data-testid="ledger-account-wrapper"><Label data-testid="ledger-account-label">الحساب</Label><select value={filters.account_id} onChange={(event) => setFilters((current) => ({ ...current, account_id: event.target.value }))} className="mt-2 h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="ledger-account-select">{accounts.map((item) => <option key={item.id} value={item.id} label={accountLabel(item)} data-testid={`ledger-account-option-${item.id}`} />)}</select></div>
             <div data-testid="ledger-from-date-wrapper"><Label data-testid="ledger-from-date-label">من تاريخ</Label><Input type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value }))} className="mt-2 h-12 rounded-lg bg-slate-50 text-right" data-testid="ledger-from-date-input" /></div>
             <div data-testid="ledger-to-date-wrapper"><Label data-testid="ledger-to-date-label">إلى تاريخ</Label><Input type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value }))} className="mt-2 h-12 rounded-lg bg-slate-50 text-right" data-testid="ledger-to-date-input" /></div>
           </div>

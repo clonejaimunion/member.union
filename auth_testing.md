@@ -1,5 +1,24 @@
 # Auth Testing Notes
 
+## Current Product Auth Policy
+- نظام المصادقة الحالي JWT مخصص مع FastAPI + MongoDB + bcrypt.
+- 2FA ملغاة نهائياً ولا يجب إعادة اختبار أو تفعيل Google Authenticator.
+- سياسة القفل المعتمدة من المستخدم: **3 محاولات خاطئة لمدة 3 دقائق**.
+- عند اختبار CORS للتطبيق نفسه، استخدم `http://localhost:8001` لأن public preview يمر عبر Cloudflare/ingress وقد يستبدل preflight headers خارج كود التطبيق.
+
+### Local CORS Preflight Check
+```bash
+curl -i -X OPTIONS http://localhost:8001/api/auth/login \
+  -H "Origin: https://interest-calculator-12.preview.emergentagent.com" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type,authorization"
+```
+
+Expected locally:
+- `Access-Control-Allow-Origin` = explicit Origin
+- `Access-Control-Allow-Credentials: true`
+- `Access-Control-Allow-Headers` includes `content-type,authorization`
+
 ## Required Login Flow
 1. Open `/login`.
 2. Login with the official admin account from `/app/memory/test_credentials.md`.
