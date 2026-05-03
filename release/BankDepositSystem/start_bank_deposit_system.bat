@@ -17,6 +17,9 @@ echo ============================================
 echo   Bank Deposit Interest System
 echo   Created by Youssef Abdelghany Ahmed
 echo ============================================
+echo.
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1 -ExpandProperty IPAddress)"`) do set LAN_IP=%%I
+if "%LAN_IP%"=="" set LAN_IP=YOUR-COMPUTER-IP
 
 where python >nul 2>nul
 if errorlevel 1 (
@@ -64,6 +67,8 @@ if errorlevel 1 (
 )
 
 echo Starting local system on http://localhost:8001 ...
+echo Network access on other computers: http://%LAN_IP%:8001
+netsh advfirewall firewall add rule name="Bank Deposit System 8001" dir=in action=allow protocol=TCP localport=8001 >nul 2>nul
 start "Bank Deposit System" "%APP_DIR%run_backend_server.bat"
 
 timeout /t 4 > nul
@@ -71,6 +76,8 @@ start http://localhost:8001
 
 echo.
 echo Admin URL: http://localhost:8001/secure-admin-control-panel
+echo Network URL: http://%LAN_IP%:8001
+echo Use the Network URL from any computer connected to the same local network.
 echo Username: admin
 echo Password: Admin@123
 echo.

@@ -6240,6 +6240,40 @@ def draw_ltr_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, fon
     draw.text(xy, text, font=latin_training_font(getattr(font, "size", 24)), fill=fill, anchor=anchor)
 
 
+def draw_rtl_wrapped_text(draw: ImageDraw.ImageDraw, x: int, y: int, text: str, font, fill: str, width: int, line_gap: int) -> int:
+    current_y = y
+    for wrapped in wrap_words(text, width):
+        draw_rtl_text(draw, (x, current_y), wrapped, font, fill)
+        current_y += line_gap
+    return current_y
+
+
+def draw_ltr_wrapped_text(draw: ImageDraw.ImageDraw, x: int, y: int, text: str, font, fill: str, width: int, line_gap: int) -> int:
+    current_y = y
+    for wrapped in wrap_words(text, width):
+        draw_ltr_text(draw, (x, current_y), wrapped, font, fill)
+        current_y += line_gap
+    return current_y
+
+
+def english_manual_label(value: Optional[str], fallback: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return fallback
+    known_labels = {
+        "يوسف عبد الغني احمد": "Youssef Abdelghany Ahmed",
+        "يوسف عبد الغني أحمد": "Youssef Abdelghany Ahmed",
+        "مشروع التكافل الاجتماعي": "Social Solidarity Project",
+        "النقابة العامة": "General Union",
+        "النقابة العامة للعاملين بالزراعة والري": "General Union for Agriculture and Irrigation Workers",
+    }
+    if text in known_labels:
+        return known_labels[text]
+    if re.search(r"[\u0600-\u06FF]", text):
+        return fallback
+    return text
+
+
 def draw_training_cover(system_name: str, organization_name: str) -> Image.Image:
     image = Image.new("RGB", (1240, 1754), "#f8fafc")
     draw = ImageDraw.Draw(image)
@@ -6324,26 +6358,26 @@ def draw_manual_cover(language: Literal["ar", "en"], system_name: str, organizat
     draw.polygon([(0, 520), (1240, 360), (1240, 620), (0, 770)], fill="#065f46")
     draw.rectangle([78, 650, 1162, 1580], fill="white", outline="#99f6e4", width=5)
     if language == "ar":
-        draw_rtl_text(draw, (1110, 135), "كتيب إرشادات البرنامج", training_font(62), "white")
-        draw_rtl_text(draw, (1110, 235), "النسخة العربية", training_font(40), "#6ee7b7")
-        draw_rtl_text(draw, (1085, 770), "برنامج تكامل الحسابات المالية والختامية", training_font(54), "#0f172a")
-        draw_rtl_text(draw, (1085, 870), organization_name, training_font(30), "#047857")
-        draw_rtl_text(draw, (1085, 995), f"اسم المبرمج: {owner_name}", training_font(32), "#111827")
-        draw_rtl_text(draw, (1085, 1075), "لغة برمجة البرنامج: Python / FastAPI + React", training_font(27), "#334155")
-        draw_rtl_text(draw, (1085, 1145), "درجة الحماية: مرتفعة - تشفير كلمات السر، قفل محاولات الدخول، نسخ احتياطي مشفر، وبصمة سلامة للملفات", training_font(25), "#334155")
-        draw_rtl_text(draw, (1085, 1245), "تم إعداد هذا الكتيب للطباعة على ورق A4، ويشرح البرنامج من شاشة الدخول حتى إصدار الميزانية والقوائم الختامية.", training_font(26), "#475569")
+        draw_rtl_text(draw, (1110, 135), "كتيب إرشادات البرنامج", training_font(54), "white")
+        draw_rtl_text(draw, (1110, 230), "النسخة العربية", training_font(36), "#6ee7b7")
+        y = draw_rtl_wrapped_text(draw, 1085, 760, "برنامج تكامل الحسابات المالية والختامية", training_font(40), "#0f172a", 34, 58)
+        y = draw_rtl_wrapped_text(draw, 1085, y + 28, organization_name, training_font(28), "#047857", 48, 42)
+        y = draw_rtl_wrapped_text(draw, 1085, max(y + 70, 995), f"اسم المبرمج: {owner_name}", training_font(30), "#111827", 48, 42)
+        y = draw_rtl_wrapped_text(draw, 1085, y + 18, "لغة برمجة البرنامج: Python / FastAPI + React", training_font(24), "#334155", 56, 36)
+        y = draw_rtl_wrapped_text(draw, 1085, y + 18, "درجة الحماية: مرتفعة - تشفير كلمات السر، قفل محاولات الدخول، نسخ احتياطي مشفر، وبصمة سلامة للملفات", training_font(22), "#334155", 64, 35)
+        draw_rtl_wrapped_text(draw, 1085, y + 24, "تم إعداد هذا الكتيب للطباعة على ورق A4، ويشرح البرنامج من شاشة الدخول حتى إصدار الميزانية والقوائم الختامية.", training_font(23), "#475569", 62, 36)
         draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
         draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
         draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
     else:
-        draw_ltr_text(draw, (120, 135), "Application User Guide", latin_training_font(56), "white")
-        draw_ltr_text(draw, (120, 235), "English Edition", latin_training_font(38), "#6ee7b7")
-        draw_ltr_text(draw, (155, 770), "Financial & Final Accounts Integration Program", latin_training_font(42), "#0f172a")
-        draw_ltr_text(draw, (155, 870), organization_name, latin_training_font(25), "#047857")
-        draw_ltr_text(draw, (155, 995), f"Programmer: {owner_name}", latin_training_font(30), "#111827")
-        draw_ltr_text(draw, (155, 1075), "Programming stack: Python / FastAPI + React", latin_training_font(25), "#334155")
-        draw_ltr_text(draw, (155, 1145), "Protection level: High - password hashing, login lockout, encrypted backups, and file integrity fingerprinting", latin_training_font(22), "#334155")
-        draw_ltr_text(draw, (155, 1245), "Prepared for A4 printing and detailed end-to-end training from login to balance sheet issuance.", latin_training_font(23), "#475569")
+        draw_ltr_text(draw, (120, 135), "Application User Guide", latin_training_font(50), "white")
+        draw_ltr_text(draw, (120, 230), "English Edition", latin_training_font(34), "#6ee7b7")
+        y = draw_ltr_wrapped_text(draw, 155, 760, "Financial & Final Accounts Integration Program", latin_training_font(35), "#0f172a", 42, 50)
+        y = draw_ltr_wrapped_text(draw, 155, y + 28, organization_name, latin_training_font(24), "#047857", 56, 38)
+        y = draw_ltr_wrapped_text(draw, 155, max(y + 70, 995), f"Programmer: {owner_name}", latin_training_font(28), "#111827", 56, 40)
+        y = draw_ltr_wrapped_text(draw, 155, y + 18, "Programming stack: Python / FastAPI + React", latin_training_font(22), "#334155", 62, 34)
+        y = draw_ltr_wrapped_text(draw, 155, y + 18, "Protection level: High - password hashing, login lockout, encrypted backups, and file integrity fingerprinting", latin_training_font(20), "#334155", 78, 32)
+        draw_ltr_wrapped_text(draw, 155, y + 24, "Prepared for A4 printing and detailed end-to-end training from login to balance sheet issuance.", latin_training_font(21), "#475569", 78, 34)
         draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
         draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
         draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
@@ -6456,11 +6490,18 @@ async def generate_language_manual(current_user: Optional[dict], language: Liter
     owner = settings.get("intellectual_property_owner") or "يوسف عبد الغني احمد"
     fingerprint = intellectual_property_fingerprint(settings.get("intellectual_property_owner"), settings.get("system_name") or system_name, settings.get("intellectual_property_national_id"), settings.get("intellectual_property_fingerprint"))
     pages = enrich_manual_pages(pages)
-    images = [draw_manual_cover(language, system_name, organization_name, owner, fingerprint, source_integrity_digest()), draw_manual_index(language, system_name, pages, fingerprint)]
-    images.extend([draw_manual_content_page(language, page, index + 3, system_name, fingerprint) for index, page in enumerate(pages)])
+    display_system_name = system_name
+    display_organization_name = organization_name
+    display_owner = owner
+    if language == "en":
+        display_system_name = english_manual_label(system_name, "Accounting and Bank Deposit System")
+        display_organization_name = english_manual_label(organization_name, "Selected Organization")
+        display_owner = english_manual_label(owner, "Youssef Abdelghany Ahmed")
+    images = [draw_manual_cover(language, display_system_name, display_organization_name, display_owner, fingerprint, source_integrity_digest()), draw_manual_index(language, display_system_name, pages, fingerprint)]
+    images.extend([draw_manual_content_page(language, page, index + 3, display_system_name, fingerprint) for index, page in enumerate(pages)])
     filename = "دليل-استخدام-البرنامج-عربي.pdf" if language == "ar" else "Program-User-Guide-English.pdf"
     path = TRAINING_DIR / filename
-    images[0].save(path, save_all=True, append_images=images[1:])
+    images[0].save(path, "PDF", resolution=150.0, save_all=True, append_images=images[1:])
     return path
 
 
@@ -6486,7 +6527,8 @@ async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str,
     organization = await get_organization_document(organization_id)
     organization_name = organization.get("name") or public.organization_name or "الجهة المستخدمة للبرنامج"
     pages = [
-        {"title_ar": "صفحة تسجيل الدخول واختيار الجهة", "title_en": "Login and Organization Selection", "arabic": ["تبدأ الدورة التدريبية من شاشة تسجيل الدخول حيث يختار المستخدم الجهة التي يعمل عليها قبل إدخال اسم المستخدم وكلمة المرور.", "كل جهة لها بياناتها وصلاحياتها ووحداتها، لذلك يجب التأكد من اختيار الجهة الصحيحة قبل الدخول.", "إذا كانت خدمة Google Authenticator مفعلة لنوع الحساب، سيظهر حقل كود التحقق بعد قبول كلمة المرور.", "بعد أكثر من ٣ محاولات كلمة مرور خاطئة يتم تعطيل الدخول على الجهاز لمدة ٣ دقائق قبل السماح بالمحاولة مرة أخرى."], "english": ["Start by selecting the correct organization, then enter username and password.", "Each organization has isolated data, modules, and permissions.", "If Google Authenticator is enabled for the role, the OTP step appears after password validation.", "After more than three wrong password attempts, login is locked on the computer for three minutes."]},
+        {"title_ar": "صفحة تسجيل الدخول واختيار الجهة", "title_en": "Login and Organization Selection", "arabic": ["تبدأ الدورة التدريبية من شاشة تسجيل الدخول حيث يختار المستخدم الجهة التي يعمل عليها قبل إدخال اسم المستخدم وكلمة المرور.", "كل جهة لها بياناتها وصلاحياتها ووحداتها، لذلك يجب التأكد من اختيار الجهة الصحيحة قبل الدخول.", "بعد أكثر من ٣ محاولات كلمة مرور خاطئة يتم تعطيل الدخول على الجهاز لمدة ٣ دقائق قبل السماح بالمحاولة مرة أخرى."], "english": ["Start by selecting the correct organization, then enter username and password.", "Each organization has isolated data, modules, and permissions.", "After more than three wrong password attempts, login is locked on the computer for three minutes."]},
+        {"title_ar": "تشغيل البرنامج على الشبكة المحلية", "title_en": "Local Network Access", "arabic": ["يتم تثبيت البرنامج على جهاز رئيسي واحد فقط، ثم يتم تشغيله من الاختصار الموجود على هذا الجهاز.", "يعرض ملف التشغيل رابطاً محلياً للجهاز الرئيسي مثل http://localhost:8001 ورابط شبكة مثل http://192.168.1.10:8001.", "على أي جهاز آخر داخل نفس الشبكة المحلية، افتح المتصفح واكتب رابط الشبكة المعروض كما هو بدلاً من localhost.", "لا يلزم تثبيت البرنامج على الأجهزة الأخرى، لأنها تستخدم نفس قاعدة البيانات الموجودة على الجهاز الرئيسي."], "english": ["Install the application on one main computer only, then start it from that computer.", "The launcher shows the local URL and a LAN URL such as http://192.168.1.10:8001.", "On any other computer connected to the same local network, open a browser and use the LAN URL instead of localhost.", "Other computers do not need installation because they use the same database on the main computer."]},
         {"title_ar": "لوحة البرنامج الرئيسية والتنقل", "title_en": "Main Dashboard and Navigation", "arabic": ["بعد الدخول تظهر لوحة البرامج حسب الصلاحيات: البنوك، الودائع، الإيرادات، المصروفات، التسويات، العضوية، الأصول، العهد، الفواتير، التقارير والقوائم المالية.", "الصفحات غير المفعلة للجهة أو غير المصرح بها لا تظهر للمستخدم."], "english": ["The dashboard displays only allowed modules such as banks, deposits, revenues, expenses, reconciliations, memberships, assets, invoices, and reports.", "Unavailable or unauthorized modules are hidden to keep workflows clean."]},
         {"title_ar": "إدارة البنوك والأرصدة الافتتاحية", "title_en": "Banks and Opening Balances", "arabic": ["يتم إضافة البنك باسم واضح ورقم حساب ونوع الحساب والرصيد الافتتاحي.", "تستخدم هذه البيانات لاحقاً في الودائع والتسويات البنكية والتقارير."], "english": ["Create bank records with account details and opening balances.", "These balances support deposit tracking, reconciliations, and reports."]},
         {"title_ar": "إدارة الودائع واحتساب الفوائد", "title_en": "Deposits and Interest Calculation", "arabic": ["من صفحة الودائع يتم إدخال مبلغ الوديعة والبنك وتاريخ البداية والاستحقاق وسعر الفائدة.", "يقوم النظام بحساب الفوائد ومتابعة حالة الوديعة وربطها بالتقارير المالية حسب الجهة."], "english": ["Enter deposit amount, bank, start date, maturity date, and interest rate.", "The system calculates interest and tracks maturity status."]},

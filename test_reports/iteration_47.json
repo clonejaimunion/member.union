@@ -1,0 +1,49 @@
+{
+  "summary": "Completed targeted backend+frontend regression for public manuals, reconciliation print matched-balance placement, LAN/local installer scripts, setup download binary integrity, and auth playbook checks.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Public preflight still returns Access-Control-Allow-Origin=* and omits Access-Control-Allow-Credentials=true, breaking credentialed CORS expectation.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/auth/login (failed attempts)",
+        "issue": "Lockout is triggered before 5 failed attempts (received 429 on 4th/5th), while playbook/test_credentials require lockout after 5.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration47_manuals_reconciliation_lan_setup.py",
+    "/app/test_reports/pytest/pytest_results_iter47_backend.xml"
+  ],
+  "action_items": [
+    "Fix edge/ingress CORS policy precedence so credentialed auth preflight returns explicit origin + Access-Control-Allow-Credentials=true.",
+    "Align lockout implementation with documented policy (5 failed attempts) or update all playbook/docs/UI wording consistently.",
+    "Retest auth preflight and brute-force lockout scenarios on public URL after deployment changes."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py still hardcodes LOGIN_LOCKOUT_FAILED_ATTEMPTS = 3, conflicting with current test credential notes requiring 5 attempts.",
+    "backend/server.py remains very large (single-file architecture), increasing change risk and regression surface."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration47_manuals_reconciliation_lan_setup.py",
+    "/app/test_reports/iteration_47.json"
+  ],
+  "success_rate": {
+    "backend": "83%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Created matched reconciliation records with ITER47 prefixes via API/UI during validation.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest (iteration47): 12 tests => 10 passed, 2 failed (CORS preflight headers on public edge, lockout threshold mismatch). Verified pass: /api/admin/training/manual-ar.pdf and /api/admin/training/manual-en.pdf are public PDF responses with A4 media box (~595.2x841.92), reconciliation API matched payload (is_matched=true, status_text=\"الرصيد مطابق\", calculated_balance retained), /api/download/setup returns valid EXE (MZ) matching local dist size 16933164 bytes, api.js LAN fallback logic present, run_backend_server.bat uses --host 0.0.0.0, launcher shows Network URL + firewall rule. Frontend Playwright validated print-status-text renders and print-matched-balance-value appears below it for matched reconciliation.",
+  "rca of the issue": "RCA-1 (CORS): App has explicit preflight middleware + CORSMiddleware allow_credentials=true, but public OPTIONS response headers are served/overridden by upstream edge (Cloudflare) with wildcard origin and no credential header. RCA-2 (Lockout): ensure_login_not_locked/record_failed_login depend on LOGIN_LOCKOUT_FAILED_ATTEMPTS=3, so behavior conflicts with current playbook requirement of 5 attempts. MOCKED INTEGRATION: Electronic Invoice ETA submission remains MOCKED/BLOCKED pending official ETA SDK/credentials."
+}

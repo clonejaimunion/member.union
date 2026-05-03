@@ -566,7 +566,7 @@ export default function BankReconciliationPage() {
             {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
             {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
             <div className="flex justify-end pt-6 print:mt-auto print:justify-start" data-testid="print-status-wrapper">
-              <div className={`rounded-xl p-4 print:bg-transparent print:p-0 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xl font-extrabold" data-testid="print-status-text">{activeReconciliation.status_text}</p></div>
+              <div className={`rounded-xl p-4 text-center print:bg-transparent print:p-0 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xl font-extrabold" data-testid="print-status-text">{activeReconciliation.status_text}</p>{activeReconciliation.is_matched && <p className="mt-2 text-2xl font-black text-slate-950 print:mt-1" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p>}</div>
             </div>
           </section>
         )}
