@@ -6233,7 +6233,10 @@ def wrap_words(text: str, width: int) -> List[str]:
 
 
 def draw_rtl_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill: str, anchor: str = "ra"):
-    draw.text(xy, display_text(text), font=font, fill=fill, anchor=anchor)
+    if is_arabic_text(text):
+        draw.text(xy, arabic_reshaper.reshape(text), font=font, fill=fill, anchor=anchor, direction="rtl", language="ar")
+    else:
+        draw.text(xy, text, font=font, fill=fill, anchor=anchor)
 
 
 def draw_ltr_text(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill: str, anchor: str = "la"):
