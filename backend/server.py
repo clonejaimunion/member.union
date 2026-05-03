@@ -2694,6 +2694,23 @@ def financial_line_from_trial(row: TrialBalanceRow, amount: Optional[float] = No
     return FinancialStatementLine(code=row.account_code, name=row.account_name, amount=round(amount if amount is not None else normal_amount(row), 2), debit=row.balance_debit, credit=row.balance_credit)
 
 
+def is_bank_credit_asset_row(row: TrialBalanceRow) -> bool:
+    code = str(row.account_code or "")
+    name = str(row.account_name or "")
+    return row.account_type == "asset" and row.nature == "debit" and row.balance_credit > 0 and (code.startswith("11") or "بنك" in name)
+
+
+def bank_credit_liability_line(row: TrialBalanceRow) -> FinancialStatementLine:
+    return FinancialStatementLine(
+        code=row.account_code,
+        name=f"رصيد دائن بالبنك - {row.account_name}",
+        amount=round(float(row.balance_credit or 0), 2),
+        debit=row.balance_debit,
+        credit=row.balance_credit,
+        details="تم عرض رصيد البنك الدائن ضمن الالتزامات بدلاً من اعتباره خطأ محاسبي.",
+    )
+
+
 async def build_accounting_errors(organization_id: str, balance_report: TrialBalanceReport, income_report: TrialBalanceReport, balance_assets_total: float, balance_liability_equity_total: float) -> List[AccountingErrorItem]:
     errors: List[AccountingErrorItem] = []
     if not balance_report.is_balanced:
@@ -2712,9 +2729,11 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
             if float(line.get("debit") or 0) > 0 and float(line.get("credit") or 0) > 0:
                 errors.append(AccountingErrorItem(severity="critical", error_type="سطر مدين ودائن معاً", location=f"قيد رقم {entry.get('entry_number')} - سطر {index}", details="السطر يحتوي قيمة في المدين والدائن معاً", suggested_fix="اجعل السطر مديناً أو دائناً فقط."))
     for row in balance_report.rows:
-        if row.account_type in ["asset", "expense"] and row.balance_credit > 0:
+        if row.nature == "debit" and row.balance_credit > 0:
+            if is_bank_credit_asset_row(row):
+                continue
             errors.append(AccountingErrorItem(severity="warning", error_type="رصيد عكسي", location=f"حساب {row.account_code or '-'} - {row.account_name}", details=f"الحساب طبيعته مدينة لكن لديه رصيد دائن {row.balance_credit}", suggested_fix="راجع القيود المرتبطة بهذا الحساب."))
-        if row.account_type in ["liability", "equity", "revenue"] and row.balance_debit > 0:
+        if row.nature == "credit" and row.balance_debit > 0:
             errors.append(AccountingErrorItem(severity="warning", error_type="رصيد عكسي", location=f"حساب {row.account_code or '-'} - {row.account_name}", details=f"الحساب طبيعته دائنة لكن لديه رصيد مدين {row.balance_debit}", suggested_fix="راجع القيود المرتبطة بهذا الحساب."))
     fixed_assets = await db.fixed_assets.find(with_organization({}), {"_id": 0}).to_list(10000)
     for asset in fixed_assets:
@@ -2732,8 +2751,16 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     period_to = to_date or today_value
     balance_report = await calculate_trial_balance_report(organization_id=organization_id, to_date=period_to, non_zero_only=True)
     income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True)
-    asset_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "asset" and normal_amount(row) != 0]
-    liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0]
+    asset_lines = []
+    reclassified_bank_credit_lines = []
+    for row in balance_report.rows:
+        if row.account_type != "asset" or normal_amount(row) == 0:
+            continue
+        if is_bank_credit_asset_row(row):
+            reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
+            continue
+        asset_lines.append(financial_line_from_trial(row))
+    liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
     revenue_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "revenue" and normal_amount(row) != 0]
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
@@ -2746,6 +2773,16 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     liabilities_total = round(sum(line.amount for line in liability_lines), 2)
     equity_total = round(sum(line.amount for line in equity_with_result), 2)
     liability_equity_total = round(liabilities_total + equity_total, 2)
+    opening_balance_difference = round(assets_total - liability_equity_total, 2)
+    if balance_report.is_balanced and opening_balance_difference != 0:
+        equity_with_result.append(FinancialStatementLine(
+            code=None,
+            name="رصيد افتتاحي مرحل / صافي الأصول",
+            amount=opening_balance_difference,
+            details="تمت إضافته تلقائياً لمعادلة الميزانية عند وجود أرصدة افتتاحية أصول/بنوك بدون حساب حقوق ملكية مقابل.",
+        ))
+        equity_total = round(sum(line.amount for line in equity_with_result), 2)
+        liability_equity_total = round(liabilities_total + equity_total, 2)
     entries = await db.journal_entries.find(with_organization({"status": "approved", "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
     receipts = []
     payments = []
