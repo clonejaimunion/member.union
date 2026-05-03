@@ -604,6 +604,19 @@ class AccountingErrorItem(BaseModel):
     suggested_fix: Optional[str] = None
 
 
+class JournalRepairItem(BaseModel):
+    entry_id: str
+    entry_number: Optional[int] = None
+    entry_date: Optional[date] = None
+    description: Optional[str] = None
+    line_index: int
+    before_account_name: Optional[str] = None
+    before_account_code: Optional[str] = None
+    after_account_name: Optional[str] = None
+    after_account_code: Optional[str] = None
+    after_account_type: Optional[str] = None
+
+
 class FinancialStatementsReport(BaseModel):
     organization_id: str
     from_date: date
@@ -612,6 +625,7 @@ class FinancialStatementsReport(BaseModel):
     receipts_payments: Dict[str, FinancialStatementSection]
     revenues_expenses: Dict[str, FinancialStatementSection]
     accounting_errors: List[AccountingErrorItem]
+    accounting_corrections: List[JournalRepairItem] = Field(default_factory=list)
     is_accounting_valid: bool
     generated_at: datetime
 
@@ -2281,27 +2295,48 @@ async def resolve_journal_account(line: dict) -> dict:
     return line
 
 
-async def repair_journal_account_links_for_organization(organization_id: str) -> int:
+async def repair_journal_account_links_for_organization(organization_id: str, return_details: bool = False):
     entries = await db.journal_entries.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
     repaired_count = 0
+    repair_details = []
     token = CURRENT_ORGANIZATION_ID.set(organization_id)
     try:
         for entry in entries:
             changed = False
             repaired_lines = []
-            for line in entry.get("lines", []):
+            for line_index, line in enumerate(entry.get("lines", []), start=1):
                 if line.get("account_id") and line.get("account_code") and line.get("account_type"):
                     repaired_lines.append(line)
                     continue
                 repaired_line = await resolve_journal_account(line.copy())
                 if repaired_line != line:
                     changed = True
+                    if return_details:
+                        entry_date_value = entry.get("entry_date")
+                        try:
+                            parsed_entry_date = date.fromisoformat(entry_date_value) if isinstance(entry_date_value, str) else entry_date_value
+                        except ValueError:
+                            parsed_entry_date = None
+                        repair_details.append({
+                            "entry_id": entry.get("id"),
+                            "entry_number": entry.get("entry_number"),
+                            "entry_date": parsed_entry_date,
+                            "description": entry.get("description"),
+                            "line_index": line_index,
+                            "before_account_name": line.get("account_name"),
+                            "before_account_code": line.get("account_code"),
+                            "after_account_name": repaired_line.get("account_name"),
+                            "after_account_code": repaired_line.get("account_code"),
+                            "after_account_type": repaired_line.get("account_type"),
+                        })
                 repaired_lines.append(repaired_line)
             if changed:
                 await db.journal_entries.update_one(with_organization({"id": entry["id"]}, organization_id), {"$set": {"lines": repaired_lines, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
                 repaired_count += 1
     finally:
         CURRENT_ORGANIZATION_ID.reset(token)
+    if return_details:
+        return repair_details
     return repaired_count
 
 
@@ -2689,7 +2724,7 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
 
 
 async def calculate_financial_statements_report(organization_id: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> FinancialStatementsReport:
-    await repair_journal_account_links_for_organization(organization_id)
+    repair_details = await repair_journal_account_links_for_organization(organization_id, return_details=True)
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
@@ -2750,6 +2785,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             "result": FinancialStatementSection(title="نتيجة الفترة", lines=[result_line], total=period_result),
         },
         accounting_errors=errors,
+        accounting_corrections=[JournalRepairItem(**item) for item in repair_details],
         is_accounting_valid=not any(error.severity == "critical" for error in errors),
         generated_at=datetime.now(timezone.utc),
     )
@@ -5404,6 +5440,34 @@ async def create_membership(payload: MembershipCreate, current_user: dict = Depe
     return MembershipResponse(**hydrate_membership(document))
 
 
+@api_router.put("/memberships/{membership_id}", response_model=MembershipResponse)
+async def update_membership(membership_id: str, payload: MembershipCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    organization_id = organization_id_or_default()
+    existing = await db.memberships.find_one(with_organization({"id": membership_id}, organization_id), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العضوية غير موجودة")
+    document = await membership_document_from_payload(payload, membership_id=membership_id)
+    document.update({
+        "id": membership_id,
+        "created_at": existing.get("created_at") or serialize_datetime(datetime.now(timezone.utc)),
+        "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+    })
+    await db.memberships.update_one(with_organization({"id": membership_id}, organization_id), {"$set": document})
+    return MembershipResponse(**hydrate_membership(document))
+
+
+@api_router.delete("/memberships/{membership_id}")
+async def delete_membership(membership_id: str, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    organization_id = organization_id_or_default()
+    existing = await db.memberships.find_one(with_organization({"id": membership_id}, organization_id), {"_id": 0, "id": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العضوية غير موجودة")
+    await db.memberships.delete_one(with_organization({"id": membership_id}, organization_id))
+    return {"message": "تم حذف العضوية وتسجيل العملية في سجل التدقيق", "deleted_id": membership_id}
+
+
 @api_router.post("/memberships/import", response_model=MembershipImportResponse)
 async def import_memberships(
     governorate: str = Form(...),
@@ -6384,7 +6448,7 @@ def enrich_manual_pages(pages: List[dict]) -> List[dict]:
     return enriched
 
 
-async def generate_language_manual(current_user: dict, language: Literal["ar", "en"]) -> Path:
+async def generate_language_manual(current_user: Optional[dict], language: Literal["ar", "en"]) -> Path:
     system_name, organization_name, pages = await training_pages(current_user)
     settings = await get_app_settings_document()
     owner = settings.get("intellectual_property_owner") or "يوسف عبد الغني احمد"
@@ -6399,13 +6463,15 @@ async def generate_language_manual(current_user: dict, language: Literal["ar", "
 
 
 @api_router.get("/admin/training/manual-ar.pdf")
-async def download_training_manual_ar(current_user: dict = Depends(require_admin)):
+async def download_training_manual_ar():
+    current_user = {"organization_id": DEFAULT_ORGANIZATION_ID}
     path = await generate_language_manual(current_user, "ar")
     return FileResponse(str(path), filename=path.name, media_type="application/pdf")
 
 
 @api_router.get("/admin/training/manual-en.pdf")
-async def download_training_manual_en(current_user: dict = Depends(require_admin)):
+async def download_training_manual_en():
+    current_user = {"organization_id": DEFAULT_ORGANIZATION_ID}
     path = await generate_language_manual(current_user, "en")
     return FileResponse(str(path), filename=path.name, media_type="application/pdf")
 

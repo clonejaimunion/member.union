@@ -1,0 +1,49 @@
+{
+  "summary": "Executed backend and frontend regression for manual PDF public links, social-solidarity admin login, membership CRUD+audit, annual report exports, and financial statements accounting corrections review.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Public preflight response still returns Access-Control-Allow-Origin=* and misses Access-Control-Allow-Credentials=true for credentialed auth flow.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/auth/login (failed attempts)",
+        "issue": "Lockout is triggered after 3 failed attempts (401,401,401,429...) while auth playbook/test-credentials state lockout after 5 attempts.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration46_membership_manual_financial_review.py",
+    "/app/test_reports/pytest/pytest_results_iter46_backend.xml"
+  ],
+  "action_items": [
+    "Fix edge/ingress CORS handling so credentialed preflight returns explicit requesting origin and Access-Control-Allow-Credentials=true.",
+    "Align lockout policy implementation with documented requirement (5 failed attempts) or update playbook/docs and UI copy consistently.",
+    "Re-run auth + membership + financial-statements regression on public URL after CORS/lockout fixes."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is still very large (6k+ lines), increasing regression risk; split into feature routers/services.",
+    "Lockout threshold is hardcoded to 3 attempts in record_failed_login while docs and credentials notes specify 5 attempts."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration46_membership_manual_financial_review.py",
+    "/app/test_reports/iteration_46.json"
+  ],
+  "success_rate": {
+    "backend": "85%",
+    "frontend": "95%"
+  },
+  "seed_data_creation": "Created one UI test membership (prefix ui_iter46_) during row-action check; deletion was not completed in same UI run due locator mismatch.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest run: 13 total => 11 passed, 2 failed (CORS preflight credentials header/origin, lockout threshold mismatch). Verified pass: public manuals AR/EN without auth and application/pdf, admin login social-solidarity with HttpOnly cookie, memberships create/update/delete, audit logs for PUT/DELETE membership via middleware, annual-report endpoint, financial-statements includes accounting_corrections, bcrypt $2b$, seed_admin update logic present. Frontend Playwright pass validated /membership sections + annual export buttons and /financial-statements accounting corrections review ordering before print sections.",
+  "rca of the issue": "RCA-1 (CORS): Backend code sets allow_credentials=True and explicit origin logic, but public OPTIONS response headers show wildcard policy from upstream edge/proxy (Cloudflare), overriding app-level CORS headers. RCA-2 (Lockout): ensure_login_not_locked/record_failed_login currently lock at count>=3 with 3-minute duration, conflicting with documented rule of lockout after 5 failed attempts. MOCKED INTEGRATION: Electronic Invoice ETA external submission remains MOCKED/BLOCKED pending official ETA SDK/credentials."
+}

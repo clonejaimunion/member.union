@@ -147,6 +147,29 @@ function AccountingErrorsPrint({ report }) {
   );
 }
 
+function AccountingCorrectionsReview({ corrections = [] }) {
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 print:hidden" data-testid="accounting-corrections-review-section">
+      <div className="mb-4 flex items-center gap-3" data-testid="accounting-corrections-review-heading">
+        <AlertTriangle className="h-6 w-6 text-amber-700" />
+        <div data-testid="accounting-corrections-review-title-block">
+          <h2 className="text-2xl font-extrabold" data-testid="accounting-corrections-review-title">مراجعة القيود التي تم تصحيح ربطها تلقائياً</h2>
+          <p className="text-sm font-bold text-amber-800" data-testid="accounting-corrections-review-subtitle">راجع هذه السطور قبل الطباعة النهائية للقوائم المالية.</p>
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-amber-200 bg-white" data-testid="accounting-corrections-review-table-wrapper">
+        <Table data-testid="accounting-corrections-review-table">
+          <TableHeader className="bg-amber-900"><TableRow className="hover:bg-amber-900"><TableHead className="text-right text-white">رقم القيد</TableHead><TableHead className="text-right text-white">التاريخ</TableHead><TableHead className="text-right text-white">البيان</TableHead><TableHead className="text-right text-white">قبل التصحيح</TableHead><TableHead className="text-right text-white">بعد التصحيح</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {corrections.length === 0 && <TableRow data-testid="accounting-corrections-review-empty-row"><TableCell colSpan={5} className="py-6 text-center font-extrabold text-emerald-700">لا توجد قيود احتاجت تصحيح ربط قبل الطباعة</TableCell></TableRow>}
+            {corrections.map((item, index) => <TableRow key={`${item.entry_id}-${item.line_index}-${index}`} data-testid={`accounting-corrections-review-row-${index}`}><TableCell className="font-extrabold" data-testid={`accounting-corrections-review-row-${index}-entry-number`}>{item.entry_number || "-"}</TableCell><TableCell data-testid={`accounting-corrections-review-row-${index}-entry-date`}>{item.entry_date || "-"}</TableCell><TableCell data-testid={`accounting-corrections-review-row-${index}-description`}>{item.description || "-"}</TableCell><TableCell data-testid={`accounting-corrections-review-row-${index}-before`}>{item.before_account_name || "غير مرتبط"} {item.before_account_code ? `(${item.before_account_code})` : ""}</TableCell><TableCell className="font-extrabold text-emerald-700" data-testid={`accounting-corrections-review-row-${index}-after`}>{item.after_account_name || "-"} {item.after_account_code ? `(${item.after_account_code})` : ""}</TableCell></TableRow>)}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
+}
+
 export default function FinancialStatementsPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -188,6 +211,7 @@ export default function FinancialStatementsPage() {
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="financial-statements-content">
         <section className="financial-report-actions rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="financial-statements-year-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-2xl font-extrabold" data-testid="financial-statements-year-title">تقارير سنوية فقط</h2><p className="text-sm font-bold text-slate-500" data-testid="financial-statements-year-subtitle">كل الحسابات الختامية تطبع في نهاية السنة المختارة بنفس شكل النماذج.</p></div><ExportReportButtons title={`الحسابات الختامية في ${year}`} fileName={`الحسابات-الختامية-${year}`} selectors={["[data-testid='balance-sheet-print-section']", "[data-testid='income-expense-print-section']", "[data-testid='receipts-payments-print-section']", "[data-testid='accounting-errors-print-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-financial-statements-button" excelTestId="export-financial-statements-excel-button" wordTestId="export-financial-statements-word-button" /></div><div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_auto]" data-testid="financial-statements-year-controls"><select value={year} onChange={(event) => setYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-year-select">{years.map((item) => <option key={item} value={item} label={String(item)} />)}</select><Button type="button" onClick={loadReports} className="h-11 bg-slate-950 text-white" data-testid="generate-financial-statements-button"><FileSpreadsheet className="h-4 w-4" /> توليد تلقائي</Button><Button type="button" onClick={() => window.print()} variant="outline" className="h-11 bg-white" data-testid="print-annual-financial-statements-button"><Printer className="h-4 w-4" /> طباعة الحسابات الختامية</Button></div></section>
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4 print:hidden" data-testid="financial-statements-kpi-grid"><div className="rounded-xl bg-slate-950 p-4 text-white"><p className="text-xs font-bold text-slate-300">حالة القوائم</p><p className="text-xl font-extrabold" data-testid="financial-statements-valid-value">{report?.is_accounting_valid ? "سليمة" : "بها أخطاء"}</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs font-bold text-emerald-700">إجمالي الأصول</p><p className="text-xl font-extrabold" data-testid="financial-statements-assets-value">{formatCurrency(report?.balance_sheet?.assets?.total || 0)}</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs font-bold text-amber-700">نتيجة السنة</p><p className="text-xl font-extrabold" data-testid="financial-statements-result-value">{formatCurrency(report?.revenues_expenses?.result?.total || 0)}</p></div><div className="rounded-xl bg-red-50 p-4"><p className="text-xs font-bold text-red-700">الأخطاء المكتشفة</p><p className="text-xl font-extrabold" data-testid="financial-statements-errors-value">{report?.accounting_errors?.length || 0}</p></div></section>
+        <AccountingCorrectionsReview corrections={report?.accounting_corrections || []} />
         <BalanceSheetPrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
         <IncomeExpensePrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
         <ReceiptsPaymentsPrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
