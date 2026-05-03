@@ -52,6 +52,8 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
+LOGIN_LOCKOUT_FAILED_ATTEMPTS = 3
+LOGIN_LOCKOUT_MINUTES = 3
 ADMIN_USERNAME = os.environ['ADMIN_USERNAME']
 ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
 CORS_ORIGINS = [origin.strip() for origin in os.environ['CORS_ORIGINS'].split(',') if origin.strip()]
@@ -3519,8 +3521,8 @@ async def record_failed_login(username: str, organization_id: str):
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"count": 0}
     count = int(attempt.get("count", 0)) + 1
     update = {"identifier": identifier, "username": username.strip(), "organization_id": organization_id, "count": count, "updated_at": serialize_datetime(now)}
-    if count >= 3:
-        update["locked_until"] = serialize_datetime(now + timedelta(minutes=3))
+    if count >= LOGIN_LOCKOUT_FAILED_ATTEMPTS:
+        update["locked_until"] = serialize_datetime(now + timedelta(minutes=LOGIN_LOCKOUT_MINUTES))
     await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"created_at": serialize_datetime(now)}}, upsert=True)
 
 

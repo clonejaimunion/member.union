@@ -276,7 +276,7 @@ def test_auth_cors_preflight_has_credentials_header():
     assert response.headers.get("access-control-allow-origin") == origin
 
 
-def test_lockout_happens_after_5_failed_attempts_per_playbook():
+def test_lockout_happens_after_3_failed_attempts_per_user_policy():
     username = f"TEST_iter46_lockout_{str(uuid.uuid4())[:8]}"
     payload = {
         "username": username,
@@ -284,11 +284,11 @@ def test_lockout_happens_after_5_failed_attempts_per_playbook():
         "organization_id": "social-solidarity",
     }
     statuses = []
-    for _ in range(6):
+    for _ in range(4):
         response = requests.post(_api("/auth/login"), json=payload, timeout=25)
         statuses.append(response.status_code)
-    assert statuses[:5] == [401, 401, 401, 401, 401]
-    assert statuses[5] == 429
+    assert statuses[:3] == [401, 401, 401]
+    assert statuses[3] == 429
 
 
 def test_seed_admin_update_logic_present():

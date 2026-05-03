@@ -52,6 +52,8 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
+LOGIN_LOCKOUT_FAILED_ATTEMPTS = 3
+LOGIN_LOCKOUT_MINUTES = 3
 ADMIN_USERNAME = os.environ['ADMIN_USERNAME']
 ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
 CORS_ORIGINS = [origin.strip() for origin in os.environ['CORS_ORIGINS'].split(',') if origin.strip()]
@@ -604,6 +606,19 @@ class AccountingErrorItem(BaseModel):
     suggested_fix: Optional[str] = None
 
 
+class JournalRepairItem(BaseModel):
+    entry_id: str
+    entry_number: Optional[int] = None
+    entry_date: Optional[date] = None
+    description: Optional[str] = None
+    line_index: int
+    before_account_name: Optional[str] = None
+    before_account_code: Optional[str] = None
+    after_account_name: Optional[str] = None
+    after_account_code: Optional[str] = None
+    after_account_type: Optional[str] = None
+
+
 class FinancialStatementsReport(BaseModel):
     organization_id: str
     from_date: date
@@ -612,6 +627,7 @@ class FinancialStatementsReport(BaseModel):
     receipts_payments: Dict[str, FinancialStatementSection]
     revenues_expenses: Dict[str, FinancialStatementSection]
     accounting_errors: List[AccountingErrorItem]
+    accounting_corrections: List[JournalRepairItem] = Field(default_factory=list)
     is_accounting_valid: bool
     generated_at: datetime
 
@@ -2281,27 +2297,48 @@ async def resolve_journal_account(line: dict) -> dict:
     return line
 
 
-async def repair_journal_account_links_for_organization(organization_id: str) -> int:
+async def repair_journal_account_links_for_organization(organization_id: str, return_details: bool = False):
     entries = await db.journal_entries.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
     repaired_count = 0
+    repair_details = []
     token = CURRENT_ORGANIZATION_ID.set(organization_id)
     try:
         for entry in entries:
             changed = False
             repaired_lines = []
-            for line in entry.get("lines", []):
+            for line_index, line in enumerate(entry.get("lines", []), start=1):
                 if line.get("account_id") and line.get("account_code") and line.get("account_type"):
                     repaired_lines.append(line)
                     continue
                 repaired_line = await resolve_journal_account(line.copy())
                 if repaired_line != line:
                     changed = True
+                    if return_details:
+                        entry_date_value = entry.get("entry_date")
+                        try:
+                            parsed_entry_date = date.fromisoformat(entry_date_value) if isinstance(entry_date_value, str) else entry_date_value
+                        except ValueError:
+                            parsed_entry_date = None
+                        repair_details.append({
+                            "entry_id": entry.get("id"),
+                            "entry_number": entry.get("entry_number"),
+                            "entry_date": parsed_entry_date,
+                            "description": entry.get("description"),
+                            "line_index": line_index,
+                            "before_account_name": line.get("account_name"),
+                            "before_account_code": line.get("account_code"),
+                            "after_account_name": repaired_line.get("account_name"),
+                            "after_account_code": repaired_line.get("account_code"),
+                            "after_account_type": repaired_line.get("account_type"),
+                        })
                 repaired_lines.append(repaired_line)
             if changed:
                 await db.journal_entries.update_one(with_organization({"id": entry["id"]}, organization_id), {"$set": {"lines": repaired_lines, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
                 repaired_count += 1
     finally:
         CURRENT_ORGANIZATION_ID.reset(token)
+    if return_details:
+        return repair_details
     return repaired_count
 
 
@@ -2689,7 +2726,7 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
 
 
 async def calculate_financial_statements_report(organization_id: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> FinancialStatementsReport:
-    await repair_journal_account_links_for_organization(organization_id)
+    repair_details = await repair_journal_account_links_for_organization(organization_id, return_details=True)
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
@@ -2750,6 +2787,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             "result": FinancialStatementSection(title="نتيجة الفترة", lines=[result_line], total=period_result),
         },
         accounting_errors=errors,
+        accounting_corrections=[JournalRepairItem(**item) for item in repair_details],
         is_accounting_valid=not any(error.severity == "critical" for error in errors),
         generated_at=datetime.now(timezone.utc),
     )
@@ -3483,8 +3521,8 @@ async def record_failed_login(username: str, organization_id: str):
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0}) or {"count": 0}
     count = int(attempt.get("count", 0)) + 1
     update = {"identifier": identifier, "username": username.strip(), "organization_id": organization_id, "count": count, "updated_at": serialize_datetime(now)}
-    if count >= 3:
-        update["locked_until"] = serialize_datetime(now + timedelta(minutes=3))
+    if count >= LOGIN_LOCKOUT_FAILED_ATTEMPTS:
+        update["locked_until"] = serialize_datetime(now + timedelta(minutes=LOGIN_LOCKOUT_MINUTES))
     await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"created_at": serialize_datetime(now)}}, upsert=True)
 
 
@@ -5404,6 +5442,34 @@ async def create_membership(payload: MembershipCreate, current_user: dict = Depe
     return MembershipResponse(**hydrate_membership(document))
 
 
+@api_router.put("/memberships/{membership_id}", response_model=MembershipResponse)
+async def update_membership(membership_id: str, payload: MembershipCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    organization_id = organization_id_or_default()
+    existing = await db.memberships.find_one(with_organization({"id": membership_id}, organization_id), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العضوية غير موجودة")
+    document = await membership_document_from_payload(payload, membership_id=membership_id)
+    document.update({
+        "id": membership_id,
+        "created_at": existing.get("created_at") or serialize_datetime(datetime.now(timezone.utc)),
+        "updated_at": serialize_datetime(datetime.now(timezone.utc)),
+    })
+    await db.memberships.update_one(with_organization({"id": membership_id}, organization_id), {"$set": document})
+    return MembershipResponse(**hydrate_membership(document))
+
+
+@api_router.delete("/memberships/{membership_id}")
+async def delete_membership(membership_id: str, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    organization_id = organization_id_or_default()
+    existing = await db.memberships.find_one(with_organization({"id": membership_id}, organization_id), {"_id": 0, "id": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="العضوية غير موجودة")
+    await db.memberships.delete_one(with_organization({"id": membership_id}, organization_id))
+    return {"message": "تم حذف العضوية وتسجيل العملية في سجل التدقيق", "deleted_id": membership_id}
+
+
 @api_router.post("/memberships/import", response_model=MembershipImportResponse)
 async def import_memberships(
     governorate: str = Form(...),
@@ -6243,6 +6309,173 @@ def draw_training_page(page: dict, page_no: int, system_name: str) -> Image.Imag
         y += 10
     draw_rtl_text(draw, (620, 1690), f"صفحة {page_no}", training_font(22), "#64748b", anchor="mm")
     return image
+
+
+def ip_page_seal(page_no: int, fingerprint: Optional[str]) -> str:
+    seed = f"{fingerprint or 'IP-NOT-SET'}|PAGE|{page_no}|BANK-DEPOSIT-SYSTEM".encode()
+    return hashlib.sha256(seed).hexdigest().upper()[:40]
+
+
+def draw_manual_cover(language: Literal["ar", "en"], system_name: str, organization_name: str, owner_name: str, fingerprint: str, source_digest: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "#f8fafc")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 1754], fill="#f8fafc")
+    draw.rectangle([0, 0, 1240, 520], fill="#0f172a")
+    draw.polygon([(0, 520), (1240, 360), (1240, 620), (0, 770)], fill="#065f46")
+    draw.rectangle([78, 650, 1162, 1580], fill="white", outline="#99f6e4", width=5)
+    if language == "ar":
+        draw_rtl_text(draw, (1110, 135), "كتيب إرشادات البرنامج", training_font(62), "white")
+        draw_rtl_text(draw, (1110, 235), "النسخة العربية", training_font(40), "#6ee7b7")
+        draw_rtl_text(draw, (1085, 770), "برنامج تكامل الحسابات المالية والختامية", training_font(54), "#0f172a")
+        draw_rtl_text(draw, (1085, 870), organization_name, training_font(30), "#047857")
+        draw_rtl_text(draw, (1085, 995), f"اسم المبرمج: {owner_name}", training_font(32), "#111827")
+        draw_rtl_text(draw, (1085, 1075), "لغة برمجة البرنامج: Python / FastAPI + React", training_font(27), "#334155")
+        draw_rtl_text(draw, (1085, 1145), "درجة الحماية: مرتفعة - تشفير كلمات السر، قفل محاولات الدخول، نسخ احتياطي مشفر، وبصمة سلامة للملفات", training_font(25), "#334155")
+        draw_rtl_text(draw, (1085, 1245), "تم إعداد هذا الكتيب للطباعة على ورق A4، ويشرح البرنامج من شاشة الدخول حتى إصدار الميزانية والقوائم الختامية.", training_font(26), "#475569")
+        draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
+        draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
+        draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
+    else:
+        draw_ltr_text(draw, (120, 135), "Application User Guide", latin_training_font(56), "white")
+        draw_ltr_text(draw, (120, 235), "English Edition", latin_training_font(38), "#6ee7b7")
+        draw_ltr_text(draw, (155, 770), "Financial & Final Accounts Integration Program", latin_training_font(42), "#0f172a")
+        draw_ltr_text(draw, (155, 870), organization_name, latin_training_font(25), "#047857")
+        draw_ltr_text(draw, (155, 995), f"Programmer: {owner_name}", latin_training_font(30), "#111827")
+        draw_ltr_text(draw, (155, 1075), "Programming stack: Python / FastAPI + React", latin_training_font(25), "#334155")
+        draw_ltr_text(draw, (155, 1145), "Protection level: High - password hashing, login lockout, encrypted backups, and file integrity fingerprinting", latin_training_font(22), "#334155")
+        draw_ltr_text(draw, (155, 1245), "Prepared for A4 printing and detailed end-to-end training from login to balance sheet issuance.", latin_training_font(23), "#475569")
+        draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
+        draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
+        draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
+    return image
+
+
+def manual_page_footer(draw: ImageDraw.ImageDraw, page_no: int, fingerprint: str, language: Literal["ar", "en"]):
+    seal = ip_page_seal(page_no, fingerprint)
+    draw.line([80, 1645, 1160, 1645], fill="#d1fae5", width=3)
+    if language == "ar":
+        draw_rtl_text(draw, (1160, 1685), f"صفحة {page_no} | كود حماية الملكية المشفر: {seal}", training_font(19), "#64748b")
+    else:
+        draw_ltr_text(draw, (80, 1685), f"Page {page_no} | Encrypted IP protection code: {seal}", latin_training_font(17), "#64748b")
+
+
+def draw_manual_index(language: Literal["ar", "en"], system_name: str, pages: List[dict], fingerprint: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 165], fill="#0f172a")
+    if language == "ar":
+        draw_rtl_text(draw, (1130, 65), system_name, training_font(31), "white")
+        draw_rtl_text(draw, (1130, 128), "فهرس المحتويات التفصيلي", training_font(39), "#6ee7b7")
+        y = 230
+        for index, page in enumerate(pages, start=3):
+            draw_rtl_text(draw, (1090, y), f"{index - 2}. {page['title_ar']}", training_font(25), "#111827")
+            draw_rtl_text(draw, (1090, y + 34), "تحتوي على: " + "، ".join(page.get("contents_ar", [])[:4]), training_font(18), "#475569")
+            draw_ltr_text(draw, (100, y), str(index), latin_training_font(20), "#047857")
+            y += 76
+            if y > 1580:
+                break
+    else:
+        draw_ltr_text(draw, (85, 65), system_name, latin_training_font(30), "white")
+        draw_ltr_text(draw, (85, 128), "Detailed Table of Contents", latin_training_font(38), "#6ee7b7")
+        y = 230
+        for index, page in enumerate(pages, start=3):
+            draw_ltr_text(draw, (120, y), f"{index - 2}. {page['title_en']}", latin_training_font(24), "#111827")
+            draw_ltr_text(draw, (120, y + 34), "Includes: " + ", ".join(page.get("contents_en", [])[:4]), latin_training_font(18), "#475569")
+            draw_ltr_text(draw, (1085, y), str(index), latin_training_font(20), "#047857")
+            y += 76
+            if y > 1580:
+                break
+    manual_page_footer(draw, 2, fingerprint, language)
+    return image
+
+
+def draw_manual_content_page(language: Literal["ar", "en"], page: dict, page_no: int, system_name: str, fingerprint: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 150], fill="#0f172a")
+    draw.rectangle([80, 190, 1160, 1585], outline="#ccfbf1", width=3)
+    y = 215
+    if language == "ar":
+        draw_rtl_text(draw, (1130, 58), system_name, training_font(27), "white")
+        draw_rtl_text(draw, (1130, 118), page["title_ar"], training_font(36), "#6ee7b7")
+        draw_rtl_text(draw, (1110, y), "ما تحتويه هذه الصفحة", training_font(28), "#064e3b")
+        y += 52
+        for item in page.get("contents_ar", []):
+            draw_rtl_text(draw, (1100, y), f"• {item}", training_font(22), "#111827")
+            y += 38
+        y += 20
+        draw_rtl_text(draw, (1110, y), "الشرح وطريقة الاستخدام", training_font(28), "#064e3b")
+        y += 52
+        for paragraph in page.get("arabic", []):
+            for wrapped in wrap_words(paragraph, 74):
+                draw_rtl_text(draw, (1100, y), wrapped, training_font(23), "#1f2937")
+                y += 39
+            y += 12
+    else:
+        draw_ltr_text(draw, (90, 58), system_name, latin_training_font(27), "white")
+        draw_ltr_text(draw, (90, 118), page["title_en"], latin_training_font(33), "#6ee7b7")
+        draw_ltr_text(draw, (115, y), "What this page contains", latin_training_font(27), "#064e3b")
+        y += 50
+        for item in page.get("contents_en", []):
+            draw_ltr_text(draw, (130, y), f"• {item}", latin_training_font(21), "#111827")
+            y += 36
+        y += 20
+        draw_ltr_text(draw, (115, y), "Detailed usage instructions", latin_training_font(27), "#064e3b")
+        y += 50
+        for paragraph in page.get("english", []):
+            for wrapped in wrap_words(paragraph, 92):
+                draw_ltr_text(draw, (130, y), wrapped, latin_training_font(20), "#1f2937")
+                y += 33
+            y += 10
+    manual_page_footer(draw, page_no, fingerprint, language)
+    return image
+
+
+def enrich_manual_pages(pages: List[dict]) -> List[dict]:
+    enriched = []
+    for page in pages:
+        arabic_extra = [
+            "اتبع ترتيب الحقول من أعلى الصفحة إلى أسفلها، ولا تعتمد على الطباعة أو الاعتماد قبل التأكد من صحة التاريخ والجهة والمبلغ والوصف.",
+            "أي بيانات يتم إدخالها في هذه الصفحة تظهر لاحقاً في التقارير المرتبطة بها حسب الصلاحيات وحسب الجهة المختارة عند الدخول.",
+            "عند وجود زر حفظ أو اعتماد، راجع الرسائل التي تظهر بعد الحفظ للتأكد من نجاح العملية وعدم وجود خطأ في الربط أو البيانات.",
+        ]
+        english_extra = [
+            "Follow the fields from top to bottom and confirm organization, date, amount, and description before saving, printing, or approval.",
+            "Data entered on this page flows to related reports according to user permissions and the selected organization.",
+            "After saving or approving, read the confirmation or validation message to ensure the transaction is linked correctly.",
+        ]
+        contents_ar = [page["title_ar"], "الحقول الأساسية", "الأزرار والوظائف", "الأثر على التقارير"]
+        contents_en = [page["title_en"], "Main fields", "Buttons and actions", "Reporting impact"]
+        enriched.append({**page, "contents_ar": contents_ar, "contents_en": contents_en, "arabic": page.get("arabic", []) + arabic_extra, "english": page.get("english", []) + english_extra})
+    return enriched
+
+
+async def generate_language_manual(current_user: Optional[dict], language: Literal["ar", "en"]) -> Path:
+    system_name, organization_name, pages = await training_pages(current_user)
+    settings = await get_app_settings_document()
+    owner = settings.get("intellectual_property_owner") or "يوسف عبد الغني احمد"
+    fingerprint = intellectual_property_fingerprint(settings.get("intellectual_property_owner"), settings.get("system_name") or system_name, settings.get("intellectual_property_national_id"), settings.get("intellectual_property_fingerprint"))
+    pages = enrich_manual_pages(pages)
+    images = [draw_manual_cover(language, system_name, organization_name, owner, fingerprint, source_integrity_digest()), draw_manual_index(language, system_name, pages, fingerprint)]
+    images.extend([draw_manual_content_page(language, page, index + 3, system_name, fingerprint) for index, page in enumerate(pages)])
+    filename = "دليل-استخدام-البرنامج-عربي.pdf" if language == "ar" else "Program-User-Guide-English.pdf"
+    path = TRAINING_DIR / filename
+    images[0].save(path, save_all=True, append_images=images[1:])
+    return path
+
+
+@api_router.get("/admin/training/manual-ar.pdf")
+async def download_training_manual_ar():
+    current_user = {"organization_id": DEFAULT_ORGANIZATION_ID}
+    path = await generate_language_manual(current_user, "ar")
+    return FileResponse(str(path), filename=path.name, media_type="application/pdf")
+
+
+@api_router.get("/admin/training/manual-en.pdf")
+async def download_training_manual_en():
+    current_user = {"organization_id": DEFAULT_ORGANIZATION_ID}
+    path = await generate_language_manual(current_user, "en")
+    return FileResponse(str(path), filename=path.name, media_type="application/pdf")
 
 
 async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str, List[dict]]:
