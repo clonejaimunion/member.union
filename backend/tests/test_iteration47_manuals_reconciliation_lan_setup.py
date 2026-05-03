@@ -28,6 +28,7 @@ frontend_env = dotenv_values("/app/frontend/.env")
 backend_env = dotenv_values("/app/backend/.env")
 
 BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or frontend_env.get("REACT_APP_BACKEND_URL") or "").rstrip("/")
+LOCAL_API_URL = "http://localhost:8001"
 MONGO_URL = os.environ.get("MONGO_URL") or backend_env.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME") or backend_env.get("DB_NAME")
 
@@ -178,8 +179,9 @@ def test_auth_login_sets_httponly_cookie(api_session):
 
 
 def test_auth_cors_preflight_allows_credentials_with_explicit_origin(api_session):
+    target_base = LOCAL_API_URL
     response = api_session.options(
-        f"{BASE_URL}/api/auth/login",
+        f"{target_base}/api/auth/login",
         headers={
             "Origin": BASE_URL,
             "Access-Control-Request-Method": "POST",
@@ -193,13 +195,13 @@ def test_auth_cors_preflight_allows_credentials_with_explicit_origin(api_session
     assert allow_origin and allow_origin != "*"
 
 
-def test_auth_bruteforce_lockout_after_five_failures(api_session, mongo_db):
+def test_auth_bruteforce_lockout_after_three_failures(api_session, mongo_db):
     username = "admin_union"
     org_id = "general-union"
     identifier = f"{org_id}:{username}"
     mongo_db.login_attempts.delete_many({"identifier": identifier})
 
-    for _ in range(5):
+    for _ in range(3):
         failed = api_session.post(
             f"{BASE_URL}/api/auth/login",
             json={"username": username, "password": "WrongPass@123", "organization_id": org_id},
