@@ -48,6 +48,9 @@ const analysisCategories = [
   { key: "maintenance", label: "قطع غيار وصيانة", keywords: ["قطع غيار", "صيانة", "صيانه"] },
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
   { key: "death_benefits", label: "إعانات الوفاة", keywords: ["اعانات الوفاه", "اعانات الوفاة", "إعانات الوفاة", "اعانة وفاة", "إعانة وفاة"], expenseCategory: "death_benefits" },
+  { key: "hajj_umrah", label: "حج وعمرة", keywords: ["حج", "عمرة", "عمره"], expenseCategory: "hajj_umrah" },
+  { key: "meat_installment", label: "قسط لحوم", keywords: ["قسط لحوم", "لحوم"], expenseCategory: "meat_installment" },
+  { key: "union_committee", label: "لجنة نقابية", keywords: ["لجنة نقابية", "لجنه نقابيه", "اللجنة النقابية"], expenseCategory: "union_committee" },
 ];
 
 const escapeHtml = (value) => String(value ?? "")
@@ -75,8 +78,9 @@ const triggerDownload = (content, filename, type) => {
 };
 
 const classifyExpense = (expense) => {
-  if (expense.expense_category === "death_benefits") {
-    return analysisCategories.filter((category) => category.expenseCategory === "death_benefits");
+  if (expense.expense_category && expense.expense_category !== "general_expenses") {
+    const directCategories = analysisCategories.filter((category) => category.expenseCategory === expense.expense_category);
+    if (directCategories.length > 0) return directCategories;
   }
   const searchText = normalizeArabic([
     expense.gross_statement,

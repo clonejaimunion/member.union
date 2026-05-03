@@ -1,0 +1,57 @@
+{
+  "summary": "Executed backend+frontend regression on public URL for deposit/expense rules engine, ledger sourcing, UI options, setup download, and auth playbook checks. Core requested accounting features passed; two auth regressions remain.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "OPTIONS /api/auth/login",
+        "issue": "Preflight response on public endpoint does not include Access-Control-Allow-Credentials=true and returns missing credentialed CORS headers.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "POST /api/auth/login (failed attempts)",
+        "issue": "Lockout is enforced before 5 failed attempts (received 429 during first five attempts), conflicting with documented lockout-after-5 requirement.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Ledger account select",
+        "issue": "Browser console logs React hydration warning: invalid markup (<span> inside <option>) while rendering account options.",
+        "selector": "[data-testid='ledger-account-select']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration49_rules_engine_ledgers.py",
+    "/app/test_reports/pytest/pytest_results_iter49_backend.xml"
+  ],
+  "action_items": [
+    "Fix auth preflight headers on public edge so credentialed CORS returns explicit origin + Access-Control-Allow-Credentials=true.",
+    "Align login lockout threshold with playbook/test_credentials policy (5 failed attempts) or update docs and UX copy consistently.",
+    "Fix invalid DOM rendering in ledger account <option> tree to remove hydration warning.",
+    "Keep iteration49 regression test in CI for deposit/expense-to-ledger mapping coverage."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py remains very large and monolithic (>700 lines), increasing regression risk for accounting rule changes.",
+    "Lockout constants and error message text are hardcoded around 3 attempts, diverging from current playbook expectations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration49_rules_engine_ledgers.py",
+    "/app/test_reports/iteration_49.json"
+  ],
+  "success_rate": {
+    "backend": "80%",
+    "frontend": "90%"
+  },
+  "seed_data_creation": "Created temporary ITER49 deposits and expenses via API during tests; cleanup performed in test teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Requested business scope passed on public endpoint: deposit creates deposit+deposit_interest journals, deleting deposit removes both journals, expense categories hajj_umrah/meat_installment/union_committee map to 5104/5105/5106, /api/ledger account_code 1250 and 5104/5105/5106 validated from journal_entries, expenses UI shows new category options, ledger UI shows chart accounts list and export buttons render, /api/download/setup returns valid MZ EXE matching /app/dist size. Remaining failures are auth CORS + lockout threshold mismatch.",
+  "rca of the issue": "RCA-1 CORS: app code sets credentialed CORS, but public OPTIONS response headers are missing required credential flags, indicating ingress/edge override or middleware order mismatch in deployed path. RCA-2 lockout: LOGIN_LOCKOUT_FAILED_ATTEMPTS is set to 3 in backend/server.py, so runtime behavior contradicts current test_credentials/playbook text expecting lockout after 5 attempts. MOCKED INTEGRATION: Electronic Invoice external ETA submission remains MOCKED/BLOCKED pending official ETA SDK/credentials."
+}

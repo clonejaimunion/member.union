@@ -554,6 +554,30 @@ class ChartAccountResponse(ChartAccountBase):
     updated_at: datetime
 
 
+class GeneralLedgerLine(BaseModel):
+    serial: int
+    entry_id: str
+    entry_number: int
+    entry_date: date
+    source_type: str
+    reference: Optional[str] = None
+    description: str
+    debit: float
+    credit: float
+    balance: float
+
+
+class GeneralLedgerReport(BaseModel):
+    account: ChartAccountResponse
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+    opening_balance: float
+    total_debit: float
+    total_credit: float
+    closing_balance: float
+    rows: List[GeneralLedgerLine]
+
+
 class TrialBalanceRow(BaseModel):
     account_id: Optional[str] = None
     account_code: Optional[str] = None
@@ -859,7 +883,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -939,7 +963,7 @@ class ExpenseDeduction(BaseModel):
 class ExpenseBase(BaseModel):
     expense_number: str = Field(..., min_length=1)
     organization_scope: Literal["general_union", "social_solidarity_project"] = "social_solidarity_project"
-    expense_category: Literal["general_expenses", "death_benefits"] = "general_expenses"
+    expense_category: Literal["general_expenses", "death_benefits", "hajj_umrah", "meat_installment", "union_committee"] = "general_expenses"
     payment_method: Literal["cash", "check", "bank_transfer"]
     payee_name: Optional[str] = None
     check_number: Optional[str] = None
@@ -2190,6 +2214,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "1000", "name": "الأصول", "account_type": "asset", "nature": "debit", "is_postable": False, "system_key": "assets"},
         {"code": "1100", "name": "البنوك", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "banks"},
         {"code": "1200", "name": "شيكات تحت التحصيل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "checks_under_collection"},
+        {"code": "1250", "name": "ودائع لأجل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "term_deposits"},
         {"code": "1300", "name": "عوائد ودائع مستحقة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "accrued_deposit_interest"},
         {"code": "1400", "name": "الأصول الثابتة", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "fixed_assets_parent"},
         {"code": "1490", "name": "مجمع إهلاك الأصول الثابتة", "account_type": "asset", "nature": "credit", "is_postable": False, "parent_code": "1000", "system_key": "accumulated_depreciation_parent"},
@@ -2204,6 +2229,9 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
         {"code": "5103", "name": "تسوية العهد والسلف", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "custody_advance_expense"},
+        {"code": "5104", "name": "حج وعمرة", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_hajj_umrah"},
+        {"code": "5105", "name": "قسط لحوم", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_meat_installment"},
+        {"code": "5106", "name": "لجنة نقابية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_union_committee"},
         {"code": "5200", "name": "إهلاك الأصول الثابتة", "account_type": "expense", "nature": "debit", "is_postable": False, "parent_code": "5000", "system_key": "depreciation_expense_parent"},
     ]
     for category in FIXED_ASSET_CATEGORIES:
@@ -2282,10 +2310,14 @@ async def resolve_journal_account(line: dict) -> dict:
         "الإيرادات": "revenue_general",
         "المصروفات": "expense_general",
         "المصروفات البنكية": "bank_expenses",
+        "ودائع لأجل": "term_deposits",
         "شيكات تحت التحصيل": "checks_under_collection",
         "شيكات صادرة": "issued_checks",
         "عوائد ودائع مستحقة": "accrued_deposit_interest",
         "إيرادات فوائد ودائع": "deposit_interest_revenue",
+        "حج وعمرة": "expense_hajj_umrah",
+        "قسط لحوم": "expense_meat_installment",
+        "لجنة نقابية": "expense_union_committee",
     }
     system_key = line.get("system_key") or system_key_map.get(account_name)
     account = await account_for_system_key(system_key, account_name) if system_key else await db.chart_accounts.find_one(with_organization({"name": account_name, "is_active": True, "is_postable": True}), {"_id": 0})
@@ -2404,6 +2436,36 @@ async def delete_journal_for_source(source_type: str, source_id: str):
     await db.journal_entries.delete_many(with_organization({"source_type": source_type, "source_id": source_id}))
 
 
+EXPENSE_RULE_ACCOUNT_MAP = {
+    "general_expenses": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "مصروفات عمومية"},
+    "death_benefits": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "إعانات وفاة"},
+    "hajj_umrah": {"account_name": "حج وعمرة", "system_key": "expense_hajj_umrah", "analysis_type": "حج وعمرة"},
+    "meat_installment": {"account_name": "قسط لحوم", "system_key": "expense_meat_installment", "analysis_type": "قسط لحوم"},
+    "union_committee": {"account_name": "لجنة نقابية", "system_key": "expense_union_committee", "analysis_type": "لجنة نقابية"},
+}
+
+
+async def journal_for_deposit_principal(deposit: dict, current_user: Optional[dict] = None):
+    amount = round(float(deposit.get("amount") or 0), 2)
+    if amount <= 0:
+        return
+    created_value = deposit.get("creation_datetime")
+    entry_date = created_value.date() if isinstance(created_value, datetime) else datetime.fromisoformat(str(created_value)).date()
+    await save_journal_entry_document(
+        entry_date=entry_date,
+        description=f"قيد تلقائي لربط وديعة رقم {deposit.get('deposit_number')}",
+        reference=deposit.get("deposit_number"),
+        source_type="deposit",
+        source_id=deposit.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=[
+            {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": amount, "credit": 0, "notes": "محرك القواعد: DepositEvent"},
+            {"account_name": "البنك", "bank_id": deposit.get("bank_id"), "debit": 0, "credit": amount, "notes": "محرك القواعد: DepositEvent"},
+        ],
+    )
+
+
 async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None):
     amount = round(float(revenue.get("amount") or 0), 2)
     if amount <= 0:
@@ -2426,6 +2488,7 @@ async def journal_for_expense(expense: dict, current_user: Optional[dict] = None
     if amount <= 0:
         return
     credit_account = "البنك" if (expense.get("bank_payment_status") or "not_presented") == "paid" else "شيكات صادرة"
+    expense_rule = EXPENSE_RULE_ACCOUNT_MAP.get(expense.get("expense_category") or "general_expenses", EXPENSE_RULE_ACCOUNT_MAP["general_expenses"])
     await save_journal_entry_document(
         entry_date=expense.get("issued_at") if isinstance(expense.get("issued_at"), date) else date.fromisoformat(str(expense.get("issued_at"))),
         description=f"قيد تلقائي لمصروف رقم {expense.get('expense_number')}",
@@ -2434,7 +2497,10 @@ async def journal_for_expense(expense: dict, current_user: Optional[dict] = None
         source_id=expense.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": "المصروفات", "debit": amount, "credit": 0}, {"account_name": credit_account, "bank_id": expense.get("bank_id"), "debit": 0, "credit": amount}],
+        lines=[
+            {"account_name": expense_rule["account_name"], "system_key": expense_rule["system_key"], "debit": amount, "credit": 0, "notes": f"تحليل: {expense_rule['analysis_type']} | مركز تكلفة: {expense.get('organization_scope') or organization_id_or_default()}"},
+            {"account_name": credit_account, "bank_id": expense.get("bank_id"), "debit": 0, "credit": amount, "notes": "محرك القواعد: ExpenseEvent"},
+        ],
     )
 
 
@@ -4615,6 +4681,7 @@ async def create_deposit(
         document[field_name] = serialize_datetime(document[field_name])
 
     await db.deposits.insert_one(document)
+    await journal_for_deposit_principal(document, current_user)
     await journal_for_deposit_interest(document, current_user)
     return deposit
 
@@ -4658,6 +4725,7 @@ async def update_deposit(
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
     updated = await db.deposits.find_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"_id": 0})
+    await journal_for_deposit_principal(updated, current_user)
     await journal_for_deposit_interest(updated, current_user)
     return Deposit(**hydrate_deposit(updated))
 
@@ -4675,6 +4743,7 @@ async def delete_deposit(
     result = await db.deposits.delete_one(with_organization({"id": deposit_id, "bank_id": bank_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
+    await delete_journal_for_source("deposit", deposit_id)
     await delete_journal_for_source("deposit_interest", deposit_id)
     return {"message": "تم حذف الوديعة بالكامل", "deleted_deposit_id": deposit_id}
 
@@ -5739,6 +5808,68 @@ async def list_chart_accounts(_: dict = Depends(require_any_permission(["enter_d
 async def sync_chart_accounts(_: dict = Depends(require_admin)):
     documents = await sync_chart_accounts_for_organization(organization_id_or_default())
     return [ChartAccountResponse(**hydrate_chart_account(document)) for document in documents]
+
+
+@api_router.get("/ledger", response_model=GeneralLedgerReport)
+async def get_general_ledger(
+    account_id: Optional[str] = Query(default=None),
+    account_code: Optional[str] = Query(default=None),
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    organization_id = organization_id_or_default()
+    await sync_chart_accounts_for_organization(organization_id)
+    account_query = {"id": account_id} if account_id else {"code": account_code} if account_code else {"is_postable": True}
+    account = await db.chart_accounts.find_one(with_organization(account_query, organization_id), {"_id": 0})
+    if not account:
+        raise HTTPException(status_code=404, detail="الحساب غير موجود")
+    entries = await db.journal_entries.find(with_organization({}, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+    opening_balance = round(float(account.get("opening_balance") or 0), 2)
+    running_balance = opening_balance
+    rows = []
+    total_debit = 0.0
+    total_credit = 0.0
+    serial = 1
+    for entry in entries:
+        entry_date = date.fromisoformat(str(entry.get("entry_date")))
+        for line in entry.get("lines", []):
+            if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
+                continue
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            direction_value = debit - credit if account.get("nature") == "debit" else credit - debit
+            if from_date and entry_date < from_date:
+                running_balance = round(running_balance + direction_value, 2)
+                continue
+            if to_date and entry_date > to_date:
+                continue
+            running_balance = round(running_balance + direction_value, 2)
+            total_debit = round(total_debit + debit, 2)
+            total_credit = round(total_credit + credit, 2)
+            rows.append(GeneralLedgerLine(
+                serial=serial,
+                entry_id=entry.get("id"),
+                entry_number=int(entry.get("entry_number") or 0),
+                entry_date=entry_date,
+                source_type=entry.get("source_type") or "manual",
+                reference=entry.get("reference"),
+                description=entry.get("description") or line.get("notes") or "-",
+                debit=debit,
+                credit=credit,
+                balance=running_balance,
+            ))
+            serial += 1
+    return GeneralLedgerReport(
+        account=ChartAccountResponse(**hydrate_chart_account(account)),
+        from_date=from_date,
+        to_date=to_date,
+        opening_balance=opening_balance,
+        total_debit=total_debit,
+        total_credit=total_credit,
+        closing_balance=running_balance,
+        rows=rows,
+    )
 
 
 @api_router.post("/chart-accounts", response_model=ChartAccountResponse)
