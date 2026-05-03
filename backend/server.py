@@ -6245,6 +6245,171 @@ def draw_training_page(page: dict, page_no: int, system_name: str) -> Image.Imag
     return image
 
 
+def ip_page_seal(page_no: int, fingerprint: Optional[str]) -> str:
+    seed = f"{fingerprint or 'IP-NOT-SET'}|PAGE|{page_no}|BANK-DEPOSIT-SYSTEM".encode()
+    return hashlib.sha256(seed).hexdigest().upper()[:40]
+
+
+def draw_manual_cover(language: Literal["ar", "en"], system_name: str, organization_name: str, owner_name: str, fingerprint: str, source_digest: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "#f8fafc")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 1754], fill="#f8fafc")
+    draw.rectangle([0, 0, 1240, 520], fill="#0f172a")
+    draw.polygon([(0, 520), (1240, 360), (1240, 620), (0, 770)], fill="#065f46")
+    draw.rectangle([78, 650, 1162, 1580], fill="white", outline="#99f6e4", width=5)
+    if language == "ar":
+        draw_rtl_text(draw, (1110, 135), "كتيب إرشادات البرنامج", training_font(62), "white")
+        draw_rtl_text(draw, (1110, 235), "النسخة العربية", training_font(40), "#6ee7b7")
+        draw_rtl_text(draw, (1085, 770), "برنامج تكامل الحسابات المالية والختامية", training_font(54), "#0f172a")
+        draw_rtl_text(draw, (1085, 870), organization_name, training_font(30), "#047857")
+        draw_rtl_text(draw, (1085, 995), f"اسم المبرمج: {owner_name}", training_font(32), "#111827")
+        draw_rtl_text(draw, (1085, 1075), "لغة برمجة البرنامج: Python / FastAPI + React", training_font(27), "#334155")
+        draw_rtl_text(draw, (1085, 1145), "درجة الحماية: مرتفعة - تشفير كلمات السر، قفل محاولات الدخول، نسخ احتياطي مشفر، وبصمة سلامة للملفات", training_font(25), "#334155")
+        draw_rtl_text(draw, (1085, 1245), "تم إعداد هذا الكتيب للطباعة على ورق A4، ويشرح البرنامج من شاشة الدخول حتى إصدار الميزانية والقوائم الختامية.", training_font(26), "#475569")
+        draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
+        draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
+        draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
+    else:
+        draw_ltr_text(draw, (120, 135), "Application User Guide", latin_training_font(56), "white")
+        draw_ltr_text(draw, (120, 235), "English Edition", latin_training_font(38), "#6ee7b7")
+        draw_ltr_text(draw, (155, 770), "Financial & Final Accounts Integration Program", latin_training_font(42), "#0f172a")
+        draw_ltr_text(draw, (155, 870), organization_name, latin_training_font(25), "#047857")
+        draw_ltr_text(draw, (155, 995), f"Programmer: {owner_name}", latin_training_font(30), "#111827")
+        draw_ltr_text(draw, (155, 1075), "Programming stack: Python / FastAPI + React", latin_training_font(25), "#334155")
+        draw_ltr_text(draw, (155, 1145), "Protection level: High - password hashing, login lockout, encrypted backups, and file integrity fingerprinting", latin_training_font(22), "#334155")
+        draw_ltr_text(draw, (155, 1245), "Prepared for A4 printing and detailed end-to-end training from login to balance sheet issuance.", latin_training_font(23), "#475569")
+        draw_ltr_text(draw, (155, 1445), f"IP Code: {fingerprint}", latin_training_font(20), "#0f766e")
+        draw_ltr_text(draw, (155, 1495), f"Encrypted Page Seal: {ip_page_seal(1, fingerprint)}", latin_training_font(18), "#64748b")
+        draw_ltr_text(draw, (155, 1540), f"Source Integrity: {source_digest[:48]}", latin_training_font(17), "#64748b")
+    return image
+
+
+def manual_page_footer(draw: ImageDraw.ImageDraw, page_no: int, fingerprint: str, language: Literal["ar", "en"]):
+    seal = ip_page_seal(page_no, fingerprint)
+    draw.line([80, 1645, 1160, 1645], fill="#d1fae5", width=3)
+    if language == "ar":
+        draw_rtl_text(draw, (1160, 1685), f"صفحة {page_no} | كود حماية الملكية المشفر: {seal}", training_font(19), "#64748b")
+    else:
+        draw_ltr_text(draw, (80, 1685), f"Page {page_no} | Encrypted IP protection code: {seal}", latin_training_font(17), "#64748b")
+
+
+def draw_manual_index(language: Literal["ar", "en"], system_name: str, pages: List[dict], fingerprint: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 165], fill="#0f172a")
+    if language == "ar":
+        draw_rtl_text(draw, (1130, 65), system_name, training_font(31), "white")
+        draw_rtl_text(draw, (1130, 128), "فهرس المحتويات التفصيلي", training_font(39), "#6ee7b7")
+        y = 230
+        for index, page in enumerate(pages, start=3):
+            draw_rtl_text(draw, (1090, y), f"{index - 2}. {page['title_ar']}", training_font(25), "#111827")
+            draw_rtl_text(draw, (1090, y + 34), "تحتوي على: " + "، ".join(page.get("contents_ar", [])[:4]), training_font(18), "#475569")
+            draw_ltr_text(draw, (100, y), str(index), latin_training_font(20), "#047857")
+            y += 76
+            if y > 1580:
+                break
+    else:
+        draw_ltr_text(draw, (85, 65), system_name, latin_training_font(30), "white")
+        draw_ltr_text(draw, (85, 128), "Detailed Table of Contents", latin_training_font(38), "#6ee7b7")
+        y = 230
+        for index, page in enumerate(pages, start=3):
+            draw_ltr_text(draw, (120, y), f"{index - 2}. {page['title_en']}", latin_training_font(24), "#111827")
+            draw_ltr_text(draw, (120, y + 34), "Includes: " + ", ".join(page.get("contents_en", [])[:4]), latin_training_font(18), "#475569")
+            draw_ltr_text(draw, (1085, y), str(index), latin_training_font(20), "#047857")
+            y += 76
+            if y > 1580:
+                break
+    manual_page_footer(draw, 2, fingerprint, language)
+    return image
+
+
+def draw_manual_content_page(language: Literal["ar", "en"], page: dict, page_no: int, system_name: str, fingerprint: str) -> Image.Image:
+    image = Image.new("RGB", (1240, 1754), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 1240, 150], fill="#0f172a")
+    draw.rectangle([80, 190, 1160, 1585], outline="#ccfbf1", width=3)
+    y = 215
+    if language == "ar":
+        draw_rtl_text(draw, (1130, 58), system_name, training_font(27), "white")
+        draw_rtl_text(draw, (1130, 118), page["title_ar"], training_font(36), "#6ee7b7")
+        draw_rtl_text(draw, (1110, y), "ما تحتويه هذه الصفحة", training_font(28), "#064e3b")
+        y += 52
+        for item in page.get("contents_ar", []):
+            draw_rtl_text(draw, (1100, y), f"• {item}", training_font(22), "#111827")
+            y += 38
+        y += 20
+        draw_rtl_text(draw, (1110, y), "الشرح وطريقة الاستخدام", training_font(28), "#064e3b")
+        y += 52
+        for paragraph in page.get("arabic", []):
+            for wrapped in wrap_words(paragraph, 74):
+                draw_rtl_text(draw, (1100, y), wrapped, training_font(23), "#1f2937")
+                y += 39
+            y += 12
+    else:
+        draw_ltr_text(draw, (90, 58), system_name, latin_training_font(27), "white")
+        draw_ltr_text(draw, (90, 118), page["title_en"], latin_training_font(33), "#6ee7b7")
+        draw_ltr_text(draw, (115, y), "What this page contains", latin_training_font(27), "#064e3b")
+        y += 50
+        for item in page.get("contents_en", []):
+            draw_ltr_text(draw, (130, y), f"• {item}", latin_training_font(21), "#111827")
+            y += 36
+        y += 20
+        draw_ltr_text(draw, (115, y), "Detailed usage instructions", latin_training_font(27), "#064e3b")
+        y += 50
+        for paragraph in page.get("english", []):
+            for wrapped in wrap_words(paragraph, 92):
+                draw_ltr_text(draw, (130, y), wrapped, latin_training_font(20), "#1f2937")
+                y += 33
+            y += 10
+    manual_page_footer(draw, page_no, fingerprint, language)
+    return image
+
+
+def enrich_manual_pages(pages: List[dict]) -> List[dict]:
+    enriched = []
+    for page in pages:
+        arabic_extra = [
+            "اتبع ترتيب الحقول من أعلى الصفحة إلى أسفلها، ولا تعتمد على الطباعة أو الاعتماد قبل التأكد من صحة التاريخ والجهة والمبلغ والوصف.",
+            "أي بيانات يتم إدخالها في هذه الصفحة تظهر لاحقاً في التقارير المرتبطة بها حسب الصلاحيات وحسب الجهة المختارة عند الدخول.",
+            "عند وجود زر حفظ أو اعتماد، راجع الرسائل التي تظهر بعد الحفظ للتأكد من نجاح العملية وعدم وجود خطأ في الربط أو البيانات.",
+        ]
+        english_extra = [
+            "Follow the fields from top to bottom and confirm organization, date, amount, and description before saving, printing, or approval.",
+            "Data entered on this page flows to related reports according to user permissions and the selected organization.",
+            "After saving or approving, read the confirmation or validation message to ensure the transaction is linked correctly.",
+        ]
+        contents_ar = [page["title_ar"], "الحقول الأساسية", "الأزرار والوظائف", "الأثر على التقارير"]
+        contents_en = [page["title_en"], "Main fields", "Buttons and actions", "Reporting impact"]
+        enriched.append({**page, "contents_ar": contents_ar, "contents_en": contents_en, "arabic": page.get("arabic", []) + arabic_extra, "english": page.get("english", []) + english_extra})
+    return enriched
+
+
+async def generate_language_manual(current_user: dict, language: Literal["ar", "en"]) -> Path:
+    system_name, organization_name, pages = await training_pages(current_user)
+    settings = await get_app_settings_document()
+    owner = settings.get("intellectual_property_owner") or "يوسف عبد الغني احمد"
+    fingerprint = intellectual_property_fingerprint(settings.get("intellectual_property_owner"), settings.get("system_name") or system_name, settings.get("intellectual_property_national_id"), settings.get("intellectual_property_fingerprint"))
+    pages = enrich_manual_pages(pages)
+    images = [draw_manual_cover(language, system_name, organization_name, owner, fingerprint, source_integrity_digest()), draw_manual_index(language, system_name, pages, fingerprint)]
+    images.extend([draw_manual_content_page(language, page, index + 3, system_name, fingerprint) for index, page in enumerate(pages)])
+    filename = "دليل-استخدام-البرنامج-عربي.pdf" if language == "ar" else "Program-User-Guide-English.pdf"
+    path = TRAINING_DIR / filename
+    images[0].save(path, save_all=True, append_images=images[1:])
+    return path
+
+
+@api_router.get("/admin/training/manual-ar.pdf")
+async def download_training_manual_ar(current_user: dict = Depends(require_admin)):
+    path = await generate_language_manual(current_user, "ar")
+    return FileResponse(str(path), filename=path.name, media_type="application/pdf")
+
+
+@api_router.get("/admin/training/manual-en.pdf")
+async def download_training_manual_en(current_user: dict = Depends(require_admin)):
+    path = await generate_language_manual(current_user, "en")
+    return FileResponse(str(path), filename=path.name, media_type="application/pdf")
+
+
 async def training_pages(current_user: Optional[dict] = None) -> tuple[str, str, List[dict]]:
     settings = await get_app_settings_document()
     public = await build_app_settings_response(settings)
