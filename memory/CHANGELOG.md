@@ -62,6 +62,17 @@
 - الاختبارات: lint ناجح، pytest iteration51 بعد الإصلاح نجح 9/9، Testing agent Iteration 52 أكد نجاح Backend 100% وعدم وجود مشاكل UI مؤكدة، وتم تنظيف مصروفات الاختبار المؤقتة.
 - المثبّت المحدث: `/app/dist/BankDepositSystemSetup.exe` بحجم 16,940,352 bytes.
 
+## تحديث — 2026-05-04 — تعديل Rule Engine UI وReverse Entries بدل Delete
+- تحويل حقول Rule Engine إلى قوائم منسدلة مقيدة: نوع الحدث، النوع الفرعي، طريقة الدفع، الحساب المدين، الحساب الدائن.
+- تثبيت طرق الدفع في Rule Engine إلى: شيك، نقدي برقم إيصال استلام نقدية، تحويل بنكي، أمر دفع إلكتروني.
+- الحسابات في إعداد القواعد أصبحت من حسابات البرنامج مع حسابات ديناميكية مثل `البنك`، ولا تظهر في العمليات اليومية للمستخدم.
+- إخفاء Priority من المستخدم واستبداله بحساب تلقائي بنظام `Scoring + Specificity`.
+- إضافة تعديل القواعد الحالية عبر زر تعديل و endpoint `PUT /api/rules-engine/rules/{rule_id}`.
+- تطبيق Reverse Entries: حذف القيد اليدوي أو حذف مصدر قيود مثل الوديعة ينشئ قيوداً عكسية منفصلة ويربط الأصل بـ `reversal_entry_id` بدلاً من الحذف أو overwrite.
+- إصلاح خطأ Iteration 53: قيد عكس الوديعة كان يكتب فوق القيد الأصلي بسبب upsert على source_id؛ تمت إضافة `force_new=True` لمسار القيود العكسية.
+- الاختبارات: pytest iteration51 + iteration53 نجحت 17/17، ثم Testing agent Iteration 54 أكد 100% Backend/Frontend وأظهر نجاح اختبار integrity لعكس الوديعة والقيد اليدوي.
+- المثبّت النهائي: `/app/dist/BankDepositSystemSetup.exe` بحجم 16,945,637 bytes.
+
 # PRD — نظام حساب عوائد الودائع البنكية
 
 ## أصل الطلب
