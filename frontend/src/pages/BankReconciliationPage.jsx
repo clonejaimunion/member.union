@@ -31,9 +31,10 @@ export default function BankReconciliationPage() {
   const { settings } = useAppSettings();
   const unionFullName = settings.organizations?.["general-union"]?.name || "النقابة العامة للعاملين بالزراعة والري";
   const socialName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
+  const currentAdministrationName = user?.organization_id === "social-solidarity" ? socialName : unionFullName;
   const [banks, setBanks] = useState(fallbackBanks);
   const [periodLabel, setPeriodLabel] = useState("");
-  const [administration, setAdministration] = useState(unionFullName);
+  const [administration, setAdministration] = useState(currentAdministrationName);
   const [bookBalance, setBookBalance] = useState("");
   const [bankStatementBalance, setBankStatementBalance] = useState("");
   const [outstandingChecks, setOutstandingChecks] = useState([emptyCheck()]);
@@ -175,10 +176,14 @@ export default function BankReconciliationPage() {
   }, [bankId, rowsFromExpenseChecks, rowsFromRevenueChecks]);
 
   useEffect(() => {
-    api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
+    api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks([]));
     loadReconciliations();
     loadBookBalance();
   }, [bankId, loadReconciliations, loadBookBalance]);
+
+  useEffect(() => {
+    if (!editingReconciliationId) setAdministration(currentAdministrationName);
+  }, [currentAdministrationName, editingReconciliationId]);
 
   useEffect(() => {
     if (canEditReconciliation && !editingReconciliationId) syncChecksFromRecords("both", true);
@@ -266,14 +271,14 @@ export default function BankReconciliationPage() {
     setEditingReconciliationId(item.id);
     setActiveReconciliation(item);
     setPeriodLabel(item.period_label || "");
-    setAdministration(item.administration || unionFullName);
+    setAdministration(currentAdministrationName);
     setBookBalance(String(item.book_balance ?? ""));
     setBankStatementBalance(String(item.bank_statement_balance ?? ""));
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: item.period_label || "",
-      administration: item.administration || unionFullName,
+      administration: currentAdministrationName,
       bookBalance: String(item.book_balance ?? ""),
       bankStatementBalance: String(item.bank_statement_balance ?? ""),
       outstandingChecks: nextOutstandingChecks,
@@ -287,14 +292,14 @@ export default function BankReconciliationPage() {
     const nextCollectionChecks = [emptyCheck()];
     setEditingReconciliationId(null);
     setPeriodLabel("");
-    setAdministration(unionFullName);
+    setAdministration(currentAdministrationName);
     loadBookBalance();
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: "",
-      administration: unionFullName,
+      administration: currentAdministrationName,
       bookBalance: "",
       bankStatementBalance: "",
       outstandingChecks: nextOutstandingChecks,
@@ -468,8 +473,7 @@ export default function BankReconciliationPage() {
             <div className="space-y-2" data-testid="reconciliation-administration-wrapper">
               <Label data-testid="reconciliation-administration-label">الإدارة</Label>
               <select value={administration} onChange={(event) => setAdministration(event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900" data-testid="reconciliation-administration-select">
-                <option value={unionFullName} data-testid="reconciliation-administration-option-union">{unionFullName}</option>
-                <option value={socialName} data-testid="reconciliation-administration-option-social">{socialName}</option>
+                <option value={currentAdministrationName} data-testid={`reconciliation-administration-option-${user?.organization_id || "general-union"}`}>{currentAdministrationName}</option>
               </select>
             </div>
             <div className="space-y-2" data-testid="reconciliation-period-wrapper">

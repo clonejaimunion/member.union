@@ -159,6 +159,7 @@ class Bank(BaseModel):
     logo_url: Optional[str] = None
     color: Optional[str] = None
     opening_balance: float = 0
+    opening_balance_date: Optional[date] = None
 
 
 class BankCreate(BaseModel):
@@ -168,10 +169,12 @@ class BankCreate(BaseModel):
     logo_url: Optional[str] = None
     color: Optional[str] = "#0f172a"
     opening_balance: float = 0
+    opening_balance_date: date
 
 
 class BankOpeningBalanceUpdate(BaseModel):
     opening_balance: float = 0
+    opening_balance_date: date
 
 
 class BankingTariffRules(BaseModel):
@@ -1429,6 +1432,7 @@ async def get_all_banks() -> List[dict]:
     deleted_ids = {document["id"] for document in deleted_documents}
     settings_documents = await db.bank_settings.find(with_organization({}, organization_id), {"_id": 0}).to_list(500)
     opening_balances = {document["bank_id"]: float(document.get("opening_balance", 0) or 0) for document in settings_documents}
+    opening_balance_dates = {document["bank_id"]: document.get("opening_balance_date") for document in settings_documents if document.get("opening_balance_date")}
     custom_banks = await db.banks.find(with_organization({}, organization_id), {"_id": 0}).sort("created_at", 1).to_list(500)
     merged = list(BANKS.values()) + custom_banks
     seen = set()
@@ -1438,6 +1442,7 @@ async def get_all_banks() -> List[dict]:
             seen.add(bank["id"])
             clean_bank = dict(bank)
             clean_bank["opening_balance"] = opening_balances.get(bank["id"], float(bank.get("opening_balance", 0) or 0))
+            clean_bank["opening_balance_date"] = opening_balance_dates.get(bank["id"], bank.get("opening_balance_date"))
             result.append(clean_bank)
     return result
 
@@ -1452,13 +1457,24 @@ async def ensure_bank_async(bank_id: str) -> dict:
         setting = await db.bank_settings.find_one(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0})
         clean_bank = dict(bank)
         clean_bank["opening_balance"] = float(setting.get("opening_balance", 0) or 0) if setting else 0
+        clean_bank["opening_balance_date"] = setting.get("opening_balance_date") if setting else None
         return clean_bank
     custom_bank = await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0})
     if not custom_bank:
         raise HTTPException(status_code=404, detail="البنك غير موجود")
     setting = await db.bank_settings.find_one(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0})
     custom_bank["opening_balance"] = float(setting.get("opening_balance", custom_bank.get("opening_balance", 0)) or 0) if setting else float(custom_bank.get("opening_balance", 0) or 0)
+    custom_bank["opening_balance_date"] = setting.get("opening_balance_date", custom_bank.get("opening_balance_date")) if setting else custom_bank.get("opening_balance_date")
     return custom_bank
+
+
+async def ensure_bank_transaction_date_allowed(bank_id: Optional[str], target_date: date):
+    if not bank_id or not target_date:
+        return
+    bank = await ensure_bank_async(bank_id)
+    opening_date = parse_date_field(bank.get("opening_balance_date"))
+    if opening_date and target_date < opening_date:
+        raise HTTPException(status_code=400, detail="No financial transaction is allowed before the Opening Balance Date. لا يمكن تسجيل أي عملية مالية قبل تاريخ الرصيد الافتتاحي للبنك.")
 
 
 def default_tariff_rules(bank_id: str) -> BankingTariffRules:
@@ -2692,6 +2708,8 @@ async def next_journal_entry_number(organization_id: str) -> int:
 
 async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None, force_new: bool = False) -> dict:
     organization_id = organization_id_or_default()
+    for line in lines:
+        await ensure_bank_transaction_date_allowed(line.get("bank_id"), entry_date)
     normalized_lines, total_debit, total_credit = await normalize_journal_lines(lines)
     if round(total_debit, 2) != round(total_credit, 2):
         raise HTTPException(status_code=422, detail="تم منع الترحيل: القيد غير متوازن، ولا يسمح النظام بترحيل ناقص.")
@@ -2986,6 +3004,7 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
 async def journal_for_bank_opening_balance(bank: dict, opening_balance: float, current_user: Optional[dict] = None):
     amount = round(float(opening_balance or 0), 2)
     bank_id = bank.get("id")
+    opening_balance_date = parse_date_field(bank.get("opening_balance_date")) or date.today()
     if not bank_id:
         return
     if amount == 0:
@@ -2998,7 +3017,7 @@ async def journal_for_bank_opening_balance(bank: dict, opening_balance: float, c
         {"account_name": "رصيد افتتاحي", "system_key": "opening_balance_equity", "debit": 0 if debit_bank else absolute_amount, "credit": absolute_amount if debit_bank else 0, "notes": "القيد المقابل للرصيد الافتتاحي"},
     ]
     await save_journal_entry_document(
-        entry_date=date(datetime.now(timezone.utc).year, 1, 1),
+        entry_date=opening_balance_date,
         description=f"قيد تلقائي للرصيد الافتتاحي - {bank.get('name') or bank_id}",
         reference=f"OB-{bank_id}",
         source_type="opening_balance",
@@ -3945,6 +3964,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_revenue_unique(payload, revenue_id)
     await ensure_period_is_open(payload.issued_at)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.issued_at)
     method = payload.collection_method
     return {
         "receipt_number": normalize_digit_text(payload.receipt_number),
@@ -4006,6 +4026,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_expense_unique(payload, expense_id)
     await ensure_period_is_open(payload.issued_at)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.issued_at)
     deductions = [
         {"amount": round(float(item.amount), 2), "statement": item.statement.strip()}
         for item in payload.deductions
@@ -4044,6 +4065,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
 async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_period_is_open(payload.purchase_date)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.purchase_date)
     organization_id = organization_id_or_default()
     category = await fixed_asset_category_with_rate(payload.category_code, organization_id)
     normalized_name = payload.asset_name.strip()
@@ -4124,6 +4146,7 @@ async def membership_document_from_payload(payload: MembershipCreate, membership
 async def custody_advance_document_from_payload(payload: CustodyAdvanceCreate, document_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_period_is_open(payload.issue_date)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.issue_date)
     organization_id = organization_id_or_default()
     if payload.due_date and payload.due_date < payload.issue_date:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق لا يمكن أن يسبق تاريخ الصرف")
@@ -5114,6 +5137,7 @@ async def create_bank(payload: BankCreate, current_user: dict = Depends(require_
         "logo_url": payload.logo_url.strip() if payload.logo_url else None,
         "color": payload.color or "#0f172a",
         "opening_balance": round(float(payload.opening_balance or 0), 2),
+        "opening_balance_date": serialize_date(payload.opening_balance_date),
         "created_at": serialize_datetime(now),
         "updated_at": serialize_datetime(now),
     }
@@ -5134,15 +5158,17 @@ async def update_bank_opening_balance(bank_id: str, payload: BankOpeningBalanceU
     organization_id = organization_id_or_default()
     bank = await ensure_bank_async(bank_id)
     opening_balance = round(float(payload.opening_balance or 0), 2)
+    opening_balance_date = payload.opening_balance_date
     now = datetime.now(timezone.utc)
     await db.bank_settings.update_one(
         with_organization({"bank_id": bank_id}, organization_id),
-        {"$set": {"bank_id": bank_id, "organization_id": organization_id, "opening_balance": opening_balance, "updated_at": serialize_datetime(now)}},
+        {"$set": {"bank_id": bank_id, "organization_id": organization_id, "opening_balance": opening_balance, "opening_balance_date": serialize_date(opening_balance_date), "updated_at": serialize_datetime(now)}},
         upsert=True,
     )
     if await db.banks.find_one(with_organization({"id": bank_id}, organization_id), {"_id": 0}):
-        await db.banks.update_one(with_organization({"id": bank_id}, organization_id), {"$set": {"opening_balance": opening_balance, "updated_at": serialize_datetime(now)}})
+        await db.banks.update_one(with_organization({"id": bank_id}, organization_id), {"$set": {"opening_balance": opening_balance, "opening_balance_date": serialize_date(opening_balance_date), "updated_at": serialize_datetime(now)}})
     bank["opening_balance"] = opening_balance
+    bank["opening_balance_date"] = serialize_date(opening_balance_date)
     await journal_for_bank_opening_balance(bank, opening_balance, current_user)
     return Bank(**{key: value for key, value in bank.items() if key not in {"created_at", "updated_at"}})
 
@@ -5290,6 +5316,7 @@ async def create_deposit(
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
     await ensure_period_is_open(creation_datetime.date())
+    await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
 
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
@@ -5341,6 +5368,7 @@ async def update_deposit(
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
     await ensure_period_is_open(creation_datetime.date())
+    await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
 
@@ -5565,6 +5593,7 @@ async def create_bank_reconciliation(
 ):
     await ensure_bank_async(bank_id)
     now = datetime.now(timezone.utc)
+    await ensure_bank_transaction_date_allowed(bank_id, now.date())
     gl_book_balance = await calculate_bank_book_balance(bank_id, now.date())
     payload = payload.model_copy(update={"book_balance": gl_book_balance})
     computed = calculate_reconciliation(payload)
@@ -5631,7 +5660,9 @@ async def update_bank_reconciliation(
     if not existing:
         raise HTTPException(status_code=404, detail="مذكرة التسوية غير موجودة")
 
-    gl_book_balance = await calculate_bank_book_balance(bank_id, datetime.now(timezone.utc).date())
+    now = datetime.now(timezone.utc)
+    await ensure_bank_transaction_date_allowed(bank_id, now.date())
+    gl_book_balance = await calculate_bank_book_balance(bank_id, now.date())
     payload = payload.model_copy(update={"book_balance": gl_book_balance})
     computed = calculate_reconciliation(payload)
     updates = payload.model_dump()
@@ -5921,6 +5952,7 @@ async def save_banking_manual_charges(
 ):
     bank = await ensure_bank_async(payload.bank_id)
     now = datetime.now(timezone.utc)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, date(int(payload.year), int(payload.month), 1))
     clean_items = []
     for item in payload.items:
       statement = str(item.get("statement") or "").strip()
@@ -6418,6 +6450,7 @@ async def get_membership_current_size(
 async def create_membership_batch_payment(payload: MembershipBatchPaymentCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
     require_social_solidarity_membership(current_user)
     bank = await ensure_bank_async(payload.bank_id)
+    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.payment_date)
     clean_governorate = normalize_member_text(payload.governorate)
     clean_committee = normalize_member_text(payload.union_committee)
     members = await db.memberships.find(with_organization({"governorate": clean_governorate, "union_committee": clean_committee}), {"_id": 0}).sort("membership_number", 1).to_list(10000)
