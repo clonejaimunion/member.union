@@ -75,6 +75,13 @@ const defaultAuthorityLogoSettings = [
   { name: "وزارة الاتصالات وتكنولوجيا المعلومات", enabled: true, src: "" },
 ];
 
+const managerEventOptions = [
+  ["Income", "إيراد"], ["Expense", "مصروف"], ["BankFee", "مصروف بنكي"], ["Deposit", "وديعة"], ["Interest", "فائدة"], ["OpeningBalance", "رصيد افتتاحي"], ["MembershipBatchPayment", "إذن عضوية جماعي"], ["AssetPurchase", "شراء أصل"], ["AssetDepreciation", "إهلاك"], ["Loan", "سلفة"], ["Custody", "عهدة"],
+];
+const managerEventLabels = Object.fromEntries(managerEventOptions);
+const managerSubTypeOptions = ["General", "administrative", "banking", "operating", "Principal", "Accrued", "Received", "Annual", "Bank", "Committee", "Employee Loan", "Employee Custody"];
+const managerPaymentOptions = ["bank_transfer", "cash_receipt", "cheque", "electronic_payment_order", ""];
+
 const adminSections = [
   { id: "general-settings", title: "الإعدادات العامة", subtitle: "اسم النظام والجهة وشعار الاختصار", icon: FileImage },
   { id: "program-security", title: "أمان البرنامج", subtitle: "البصمة والدليل وحماية الملفات", icon: ShieldCheck },
@@ -88,12 +95,13 @@ const adminSections = [
   { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
   { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
   { id: "security-review", title: "المراجعة الأمنية", subtitle: "ضوابط الاقتراب من الاعتماد", icon: ShieldCheck },
+  { id: "data-flow-rules-manager", title: "Data Flow & Rules Manager", subtitle: "مراقبة التدفق وإدارة القواعد", icon: Workflow },
   { id: "data-flows", title: "تدفقات البيانات", subtitle: "فحص محاسبي وعضوية شامل", icon: Workflow },
   { id: "data-purge", title: "تفريغ البيانات", subtitle: "حذف نهائي لبيانات المستخدم", icon: DatabaseZap },
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration", "data-purge"]);
+const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration", "data-flow-rules-manager", "data-purge"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -151,6 +159,11 @@ export default function AdminPage() {
   const [etaConnection, setEtaConnection] = useState(null);
   const [dataFlowReport, setDataFlowReport] = useState(null);
   const [dataFlowLoading, setDataFlowLoading] = useState(false);
+  const [managerOrganizationId, setManagerOrganizationId] = useState(user?.organization_id || "social-solidarity");
+  const [managerData, setManagerData] = useState(null);
+  const [managerLoading, setManagerLoading] = useState(false);
+  const [managerEditingRuleId, setManagerEditingRuleId] = useState(null);
+  const [managerRuleForm, setManagerRuleForm] = useState({ event_type: "Income", sub_type: "General", payment_method: "bank_transfer", debit_account: "البنك", credit_account: "الإيرادات", is_active: true, notes: "" });
   const [purgeForm, setPurgeForm] = useState({ scope: "current_organization", confirmation_phrase: "", include_banks: false, include_users: false });
   const [purgeResult, setPurgeResult] = useState(null);
   const [twoFactorSetup, setTwoFactorSetup] = useState(null);
@@ -297,6 +310,9 @@ export default function AdminPage() {
     }
     if (isSuperAdmin && activeAdminSection === "program-security") {
       loadProgramSecurity();
+    }
+    if (isSuperAdmin && activeAdminSection === "data-flow-rules-manager") {
+      loadDataFlowRulesManager();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAdminSection, isSuperAdmin]);
@@ -572,6 +588,51 @@ export default function AdminPage() {
       toast.error(error?.response?.data?.detail || "تعذر تشغيل فحص تدفقات البيانات");
     } finally {
       setDataFlowLoading(false);
+    }
+  };
+
+  const loadDataFlowRulesManager = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    setManagerLoading(true);
+    try {
+      const response = await api.get(`/admin/data-flow-rules-manager?organization_id=${encodeURIComponent(managerOrganizationId || user?.organization_id || "social-solidarity")}`);
+      setManagerData(response.data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تحميل Data Flow & Rules Manager");
+    } finally {
+      setManagerLoading(false);
+    }
+  }, [isSuperAdmin, managerOrganizationId, user?.organization_id]);
+
+  const startManagerRuleEdit = (rule) => {
+    setManagerEditingRuleId(rule.id);
+    setManagerRuleForm({ event_type: rule.event_type, sub_type: rule.sub_type || "General", payment_method: rule.payment_method || "", debit_account: rule.debit_account, credit_account: rule.credit_account, is_active: rule.is_active, notes: rule.notes || "" });
+  };
+
+  const resetManagerRuleEdit = () => {
+    setManagerEditingRuleId(null);
+    setManagerRuleForm({ event_type: "Income", sub_type: "General", payment_method: "bank_transfer", debit_account: "البنك", credit_account: "الإيرادات", is_active: true, notes: "" });
+  };
+
+  const saveManagerRule = async () => {
+    if (!managerEditingRuleId) return toast.error("اختر قاعدة أولاً");
+    try {
+      await api.put(`/admin/data-flow-rules-manager/rules/${managerEditingRuleId}?organization_id=${encodeURIComponent(managerOrganizationId)}`, managerRuleForm);
+      toast.success("تم تعديل القاعدة وتسجيل قبل/بعد في سجل التدقيق");
+      resetManagerRuleEdit();
+      await loadDataFlowRulesManager();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تعديل القاعدة");
+    }
+  };
+
+  const toggleManagerRule = async (rule) => {
+    try {
+      await api.put(`/admin/data-flow-rules-manager/rules/${rule.id}?organization_id=${encodeURIComponent(managerOrganizationId)}`, { event_type: rule.event_type, sub_type: rule.sub_type || null, payment_method: rule.payment_method || null, debit_account: rule.debit_account, credit_account: rule.credit_account, is_active: !rule.is_active, notes: rule.notes || null });
+      toast.success(!rule.is_active ? "تم تشغيل القاعدة" : "تم إيقاف القاعدة");
+      await loadDataFlowRulesManager();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تغيير حالة القاعدة");
     }
   };
 
@@ -907,6 +968,29 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+          </section>}
+
+          {isSuperAdmin && activeAdminSection === "data-flow-rules-manager" && <section className="space-y-6" data-testid="data-flow-rules-manager-page">
+            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="data-flow-rules-manager-header-section">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" data-testid="data-flow-rules-manager-header">
+                <div data-testid="data-flow-rules-manager-title-block"><p className="text-sm font-extrabold text-emerald-700" data-testid="data-flow-rules-manager-eyebrow">Super Admin Only</p><h2 className="text-3xl font-extrabold" data-testid="data-flow-rules-manager-title">Data Flow & Rules Manager</h2><p className="mt-1 text-sm font-bold text-slate-500" data-testid="data-flow-rules-manager-subtitle">مراقبة مسار البيانات والتحكم الإداري في القواعد فقط بدون تعديل القيود المحاسبية.</p></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[260px_auto]" data-testid="data-flow-rules-manager-toolbar"><select value={managerOrganizationId} onChange={(event) => setManagerOrganizationId(event.target.value)} className="h-11 rounded-lg border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="data-flow-rules-manager-organization-select">{organizations.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}</select><Button type="button" onClick={loadDataFlowRulesManager} disabled={managerLoading} className="h-11 bg-slate-950 text-white" data-testid="data-flow-rules-manager-refresh-button"><Workflow className="h-4 w-4" /> تحديث التدفق</Button></div>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="flow-monitor-section">
+              <div className="mb-5 flex items-center justify-between gap-3" data-testid="flow-monitor-heading"><h3 className="text-2xl font-extrabold" data-testid="flow-monitor-title">Flow Monitor</h3><Badge className={managerData?.accounting_validation?.is_valid ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"} data-testid="flow-monitor-status-badge">{managerData ? (managerData.accounting_validation?.is_valid ? "Active" : "Review") : "—"}</Badge></div>
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-4" data-testid="flow-monitor-stages-grid">{(managerData?.flow_monitor || []).map((stage, index) => <div key={stage.stage_key} className="relative rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`flow-monitor-stage-${stage.stage_key}`}><div className="flex items-start justify-between gap-3" data-testid={`flow-monitor-stage-${stage.stage_key}-heading`}><p className="font-extrabold" data-testid={`flow-monitor-stage-${stage.stage_key}-name`}>{stage.stage_name}</p><Badge className={stage.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} data-testid={`flow-monitor-stage-${stage.stage_key}-status`}>{stage.status}</Badge></div><div className="mt-3 space-y-2 text-xs font-bold text-slate-600" data-testid={`flow-monitor-stage-${stage.stage_key}-metrics`}><p data-testid={`flow-monitor-stage-${stage.stage_key}-count`}>عدد العمليات: {stage.operations_count}</p><p data-testid={`flow-monitor-stage-${stage.stage_key}-last-run`}>آخر تشغيل: {stage.last_run ? new Date(stage.last_run).toLocaleString("ar-EG") : "—"}</p><p className={stage.errors_count ? "text-red-700" : "text-emerald-700"} data-testid={`flow-monitor-stage-${stage.stage_key}-errors`}>الأخطاء: {stage.errors_count}</p></div>{index < (managerData?.flow_monitor?.length || 0) - 1 && <div className="mt-3 text-center text-xl font-extrabold text-slate-400" data-testid={`flow-monitor-stage-${stage.stage_key}-arrow`}>↓</div>}</div>)}</div>
+              {!managerData && <p className="rounded-lg bg-slate-50 p-4 text-center font-bold text-slate-500" data-testid="flow-monitor-empty-state">اضغط تحديث التدفق لعرض المسار من الإدخال حتى القوائم المالية.</p>}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="manager-rules-engine-section">
+              <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between" data-testid="manager-rules-engine-heading"><div data-testid="manager-rules-engine-title-block"><h3 className="text-2xl font-extrabold" data-testid="manager-rules-engine-title">Rules Engine</h3><p className="text-sm font-bold text-slate-500" data-testid="manager-rules-engine-subtitle">التعديل على القواعد فقط — لا يوجد تعديل على القيود المحاسبية نفسها.</p></div><Badge className="bg-slate-950 text-white" data-testid="manager-rules-engine-count-badge">{managerData?.rules?.length || 0} قاعدة</Badge></div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200" data-testid="manager-rules-table-wrapper"><table className="w-full min-w-[920px] text-right text-sm" data-testid="manager-rules-table"><thead className="bg-slate-950 text-white" data-testid="manager-rules-table-head"><tr><th className="p-3" data-testid="manager-rules-head-event">الحدث</th><th className="p-3" data-testid="manager-rules-head-type">النوع</th><th className="p-3" data-testid="manager-rules-head-debit">الحساب المدين</th><th className="p-3" data-testid="manager-rules-head-credit">الحساب الدائن</th><th className="p-3" data-testid="manager-rules-head-status">الحالة</th><th className="p-3" data-testid="manager-rules-head-actions">إجراءات</th></tr></thead><tbody data-testid="manager-rules-table-body">{(managerData?.rules || []).map((rule) => <tr key={rule.id} className="border-t border-slate-200" data-testid={`manager-rule-row-${rule.id}`}><td className="p-3 font-extrabold" data-testid={`manager-rule-${rule.id}-event`}>{managerEventLabels[rule.event_type] || rule.event_type}</td><td className="p-3" data-testid={`manager-rule-${rule.id}-type`}>{rule.sub_type || "—"}</td><td className="p-3" data-testid={`manager-rule-${rule.id}-debit`}>{rule.debit_account}</td><td className="p-3" data-testid={`manager-rule-${rule.id}-credit`}>{rule.credit_account}</td><td className="p-3" data-testid={`manager-rule-${rule.id}-status`}><Badge className={rule.is_active ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}>{rule.is_active ? "فعال" : "غير فعال"}</Badge></td><td className="p-3" data-testid={`manager-rule-${rule.id}-actions`}><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => startManagerRuleEdit(rule)} variant="outline" className="h-9 bg-white" data-testid={`manager-rule-${rule.id}-edit-button`}>تعديل</Button><Button type="button" onClick={() => toggleManagerRule(rule)} variant="outline" className="h-9 bg-white" data-testid={`manager-rule-${rule.id}-toggle-button`}>{rule.is_active ? "إيقاف" : "تشغيل"}</Button></div></td></tr>)}{managerData && managerData.rules?.length === 0 && <tr data-testid="manager-rules-empty-row"><td colSpan={6} className="p-6 text-center font-bold text-slate-500">لا توجد قواعد</td></tr>}</tbody></table></div>
+              {managerEditingRuleId && <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4" data-testid="manager-rule-editor"><div className="mb-4 flex items-center justify-between gap-3" data-testid="manager-rule-editor-heading"><h4 className="font-extrabold" data-testid="manager-rule-editor-title">تعديل قاعدة محاسبية</h4><Button type="button" onClick={resetManagerRuleEdit} variant="outline" className="h-9 bg-white" data-testid="manager-rule-editor-cancel-button">إلغاء</Button></div><div className="grid grid-cols-1 gap-3 lg:grid-cols-3" data-testid="manager-rule-editor-grid"><select value={managerRuleForm.event_type} onChange={(event) => setManagerRuleForm((current) => ({ ...current, event_type: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="manager-rule-editor-event-select">{managerEventOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select value={managerRuleForm.sub_type || ""} onChange={(event) => setManagerRuleForm((current) => ({ ...current, sub_type: event.target.value || null }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="manager-rule-editor-subtype-select">{managerSubTypeOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select><select value={managerRuleForm.payment_method || ""} onChange={(event) => setManagerRuleForm((current) => ({ ...current, payment_method: event.target.value || null }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="manager-rule-editor-payment-select">{managerPaymentOptions.map((item) => <option key={item || "none"} value={item}>{item || "بدون"}</option>)}</select><select value={managerRuleForm.debit_account} onChange={(event) => setManagerRuleForm((current) => ({ ...current, debit_account: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="manager-rule-editor-debit-select">{(managerData?.available_accounts || []).map((account) => <option key={`debit-${account.name}`} value={account.name}>{account.code} - {account.name}</option>)}</select><select value={managerRuleForm.credit_account} onChange={(event) => setManagerRuleForm((current) => ({ ...current, credit_account: event.target.value }))} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="manager-rule-editor-credit-select">{(managerData?.available_accounts || []).map((account) => <option key={`credit-${account.name}`} value={account.name}>{account.code} - {account.name}</option>)}</select><button type="button" onClick={() => setManagerRuleForm((current) => ({ ...current, is_active: !current.is_active }))} className={`h-11 rounded-lg border px-3 font-extrabold ${managerRuleForm.is_active ? "border-emerald-300 bg-white text-emerald-700" : "border-red-300 bg-white text-red-700"}`} data-testid="manager-rule-editor-active-toggle">{managerRuleForm.is_active ? "فعال" : "غير فعال"}</button><Input value={managerRuleForm.notes || ""} onChange={(event) => setManagerRuleForm((current) => ({ ...current, notes: event.target.value }))} className="h-11 bg-white text-right lg:col-span-2" placeholder="ملاحظات القاعدة" data-testid="manager-rule-editor-notes-input" /><Button type="button" onClick={saveManagerRule} className="h-11 bg-slate-950 text-white" data-testid="manager-rule-editor-save-button"><Save className="h-4 w-4" /> حفظ القاعدة</Button></div></div>}
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="manager-validation-section"><div className="mb-5 flex items-center justify-between gap-3" data-testid="manager-validation-heading"><h3 className="text-2xl font-extrabold" data-testid="manager-validation-title">Validation</h3><Badge className={managerData?.validation_tests?.every((item) => item.status === "ناجح") ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"} data-testid="manager-validation-status-badge">{managerData?.validation_tests?.every((item) => item.status === "ناجح") ? "كل الاختبارات ناجحة" : "اختبر الآن"}</Badge></div><div className="grid grid-cols-1 gap-3 md:grid-cols-5" data-testid="manager-validation-tests-grid">{(managerData?.validation_tests || []).map((test) => <div key={test.test_key} className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`manager-validation-test-${test.test_key}`}><p className="font-extrabold" data-testid={`manager-validation-test-${test.test_key}-name`}>{test.test_name}</p><p className={test.status === "ناجح" ? "mt-2 font-extrabold text-emerald-700" : "mt-2 font-extrabold text-red-700"} data-testid={`manager-validation-test-${test.test_key}-status`}>{test.status}</p><p className="mt-1 text-xs font-bold text-slate-500" data-testid={`manager-validation-test-${test.test_key}-errors`}>الأخطاء: {test.errors_count}</p></div>)}</div></section>
           </section>}
 
           {activeAdminSection === "data-flows" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="data-flow-validation-section">

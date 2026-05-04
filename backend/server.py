@@ -3466,6 +3466,51 @@ async def validate_membership_data_flow(organization_id: str) -> dict:
     return {"organization_id": organization_id, "is_applicable": True, "as_of_date": as_of.isoformat(), "members_count": len(documents), "status_counts": status_counts, "total_due": total_due, "total_collected": total_collected, "remaining_balance": total_remaining, "batch_payments_count": len(batches), "allocated_amount": allocation_total, "issues": issues, "is_valid": not issues}
 
 
+async def latest_created_at_for_collections(organization_id: str, collection_names: list[str]) -> Optional[str]:
+    latest_value = None
+    for collection_name in collection_names:
+        document = await db[collection_name].find_one(with_organization({}, organization_id), {"_id": 0, "created_at": 1, "updated_at": 1}, sort=[("updated_at", -1), ("created_at", -1)])
+        value = (document or {}).get("updated_at") or (document or {}).get("created_at")
+        if value and (latest_value is None or str(value) > str(latest_value)):
+            latest_value = str(value)
+    return latest_value
+
+
+async def flow_monitor_for_organization(organization_id: str, accounting_validation: dict, membership_validation: dict) -> list[dict]:
+    input_collections = ["deposits", "revenues", "expenses", "fixed_assets", "custody_advances", "memberships", "membership_batch_payments", "reconciliations"]
+    input_count = 0
+    for collection_name in input_collections:
+        input_count += await db[collection_name].count_documents(with_organization({}, organization_id))
+    rules = await list_accounting_rules_for_organization(organization_id)
+    active_rules = [rule for rule in rules if rule.get("is_active", True)]
+    entries_count = int(accounting_validation.get("journal_entries_count") or 0)
+    mismatch_count = len(accounting_validation.get("ledger_trial_mismatches") or [])
+    missing_count = len(accounting_validation.get("missing_orphan_entries") or [])
+    critical_count = len(accounting_validation.get("critical_accounting_errors") or [])
+    balance_error = 0 if float(accounting_validation.get("balance_sheet", {}).get("check") or 0) == 0 else 1
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    return [
+        {"stage_key": "input", "stage_name": "إدخال العملية", "status": "مفعلة", "is_active": True, "operations_count": input_count, "last_run": await latest_created_at_for_collections(organization_id, input_collections), "errors_count": 0},
+        {"stage_key": "auto_validation", "stage_name": "فحص آلي", "status": "مفعلة", "is_active": True, "operations_count": entries_count + input_count, "last_run": now_iso, "errors_count": missing_count + mismatch_count + critical_count + len(membership_validation.get("issues") or [])},
+        {"stage_key": "journal_creation", "stage_name": "إنشاء قيد محاسبي", "status": "مفعلة", "is_active": True, "operations_count": entries_count, "last_run": await latest_created_at_for_collections(organization_id, ["journal_entries"]), "errors_count": missing_count},
+        {"stage_key": "journal", "stage_name": "دفتر اليومية", "status": "مفعلة", "is_active": True, "operations_count": entries_count, "last_run": await latest_created_at_for_collections(organization_id, ["journal_entries"]), "errors_count": missing_count},
+        {"stage_key": "ledger", "stage_name": "الأستاذ العام", "status": "مفعلة", "is_active": True, "operations_count": int(accounting_validation.get("ledger_accounts_checked") or 0), "last_run": now_iso, "errors_count": mismatch_count},
+        {"stage_key": "trial_balance", "stage_name": "ميزان المراجعة", "status": "مفعلة", "is_active": bool(accounting_validation.get("trial_balance", {}).get("is_balanced")), "operations_count": entries_count, "last_run": now_iso, "errors_count": 0 if accounting_validation.get("trial_balance", {}).get("is_balanced") else 1},
+        {"stage_key": "financial_statements", "stage_name": "القوائم المالية", "status": "مفعلة", "is_active": accounting_validation.get("is_valid", False), "operations_count": entries_count, "last_run": now_iso, "errors_count": critical_count + balance_error},
+        {"stage_key": "rules_engine", "stage_name": "Rules Engine", "status": "مفعلة" if active_rules else "غير مفعلة", "is_active": bool(active_rules), "operations_count": len(active_rules), "last_run": await latest_created_at_for_collections(organization_id, ["accounting_rules"]), "errors_count": 0 if active_rules else 1},
+    ]
+
+
+def validation_tests_from_flow(accounting_validation: dict, membership_validation: dict) -> list[dict]:
+    return [
+        {"test_key": "journal_balance", "test_name": "فحص اتزان القيود", "status": "ناجح" if not accounting_validation.get("missing_orphan_entries") else "فشل", "errors_count": len(accounting_validation.get("missing_orphan_entries") or [])},
+        {"test_key": "ledger", "test_name": "فحص الأستاذ العام", "status": "ناجح" if not accounting_validation.get("ledger_trial_mismatches") else "فشل", "errors_count": len(accounting_validation.get("ledger_trial_mismatches") or [])},
+        {"test_key": "trial_balance", "test_name": "فحص ميزان المراجعة", "status": "ناجح" if accounting_validation.get("trial_balance", {}).get("is_balanced") else "فشل", "errors_count": 0 if accounting_validation.get("trial_balance", {}).get("is_balanced") else 1},
+        {"test_key": "balance_sheet", "test_name": "فحص الميزانية", "status": "ناجح" if float(accounting_validation.get("balance_sheet", {}).get("check") or 0) == 0 else "فشل", "errors_count": 0 if float(accounting_validation.get("balance_sheet", {}).get("check") or 0) == 0 else 1},
+        {"test_key": "membership", "test_name": "فحص العضوية", "status": "ناجح" if membership_validation.get("is_valid") else "فشل", "errors_count": len(membership_validation.get("issues") or [])},
+    ]
+
+
 def hydrate_reconciliation(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
     for field_name in ["created_at", "updated_at"]:
@@ -7646,6 +7691,56 @@ async def get_admin_data_flow_validation(current_user: dict = Depends(require_ad
     }
 
 
+@api_router.get("/admin/data-flow-rules-manager")
+async def get_data_flow_rules_manager(organization_id: Optional[str] = Query(default=None), current_user: dict = Depends(require_super_admin)):
+    target_organization_id = organization_id or current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    if target_organization_id not in ORGANIZATIONS:
+        await get_organization_document(target_organization_id)
+    CURRENT_ORGANIZATION_ID.set(target_organization_id)
+    accounting_validation = await validate_accounting_data_flow(target_organization_id)
+    membership_validation = await validate_membership_data_flow(target_organization_id)
+    rules = await list_accounting_rules_for_organization(target_organization_id)
+    accounts = await db.chart_accounts.find(with_organization({"is_active": True, "is_postable": True}, target_organization_id), {"_id": 0, "name": 1, "code": 1, "nature": 1}).sort("code", 1).to_list(1000)
+    dynamic_accounts = ["البنك", "الإيرادات", "المصروفات", "المصروفات البنكية", "ودائع لأجل", "عوائد ودائع مستحقة", "إيرادات فوائد ودائع", "رصيد افتتاحي", "إيرادات اشتراكات العضوية", "إهلاك الأصول الثابتة", "مجمع إهلاك الأصول الثابتة", "سلف الموظفين", "عهد الموظفين"]
+    return {
+        "organization_id": target_organization_id,
+        "organization_name": (await get_organization_document(target_organization_id))["name"],
+        "generated_at": serialize_datetime(datetime.now(timezone.utc)),
+        "flow_monitor": await flow_monitor_for_organization(target_organization_id, accounting_validation, membership_validation),
+        "rules": [AccountingRuleResponse(**rule).model_dump(mode="json") for rule in rules],
+        "available_accounts": [{"name": item, "code": "AUTO", "nature": "auto", "is_dynamic": True} for item in dynamic_accounts] + accounts,
+        "validation_tests": validation_tests_from_flow(accounting_validation, membership_validation),
+        "accounting_validation": accounting_validation,
+        "membership_validation": membership_validation,
+    }
+
+
+@api_router.put("/admin/data-flow-rules-manager/rules/{rule_id}", response_model=AccountingRuleResponse)
+async def update_data_flow_rules_manager_rule(rule_id: str, payload: AccountingRuleUpdate, organization_id: Optional[str] = Query(default=None), current_user: dict = Depends(require_super_admin)):
+    target_organization_id = organization_id or current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    CURRENT_ORGANIZATION_ID.set(target_organization_id)
+    rules = await list_accounting_rules_for_organization(target_organization_id)
+    existing = next((rule for rule in rules if rule.get("id") == rule_id), None)
+    if not existing:
+        raise HTTPException(status_code=404, detail="القاعدة غير موجودة")
+    payload_data = payload.model_dump()
+    payload_data["priority"] = calculate_rule_priority(payload_data)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {
+        **existing,
+        **payload_data,
+        "id": rule_id,
+        "organization_id": target_organization_id,
+        "is_system": False,
+        "updated_by": current_user.get("id"),
+        "updated_by_name": real_name_for_user(current_user),
+        "updated_at": now_iso,
+        "created_at": existing.get("created_at") or now_iso,
+    }
+    await db.accounting_rules.update_one(with_organization({"id": rule_id}, target_organization_id), {"$set": document}, upsert=True)
+    return AccountingRuleResponse(**document)
+
+
 @api_router.post("/admin/program-data/purge", response_model=ProgramPurgeResponse)
 async def purge_program_user_data(payload: ProgramPurgeRequest, current_user: dict = Depends(require_super_admin)):
     if normalize_member_text(payload.confirmation_phrase) != "تفريغ البيانات نهائيا":
@@ -7896,6 +7991,8 @@ def audit_snapshot_target(path: str) -> tuple[Optional[str], Optional[str]]:
         return None, None
     if parts[1] == "rules-engine" and len(parts) >= 4 and parts[2] == "rules":
         return "accounting_rules", parts[3]
+    if parts[1] == "admin" and len(parts) >= 5 and parts[2] == "data-flow-rules-manager" and parts[3] == "rules":
+        return "accounting_rules", parts[4]
     collection = AUDIT_SNAPSHOT_ROUTES.get(parts[1])
     return collection, parts[2] if collection and len(parts) >= 3 else None
 
@@ -7907,15 +8004,18 @@ async def audit_document_snapshot(request: Request) -> Optional[dict]:
     collection_names = await db.list_collection_names()
     if collection_name not in collection_names:
         return None
-    organization_id = DEFAULT_ORGANIZATION_ID
+    query_organization_id = request.query_params.get("organization_id")
+    organization_id = query_organization_id or DEFAULT_ORGANIZATION_ID
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
             payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            organization_id = payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
+            organization_id = query_organization_id or payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
         except Exception:
             organization_id = DEFAULT_ORGANIZATION_ID
     document = await db[collection_name].find_one(with_organization({"id": document_id}, organization_id), {"_id": 0})
+    if not document and collection_name == "accounting_rules":
+        document = next((rule for rule in default_accounting_rules(organization_id) if rule.get("id") == document_id), None)
     return sanitize_audit_body(document) if document else None
 
 
