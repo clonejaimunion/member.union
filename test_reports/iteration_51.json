@@ -1,0 +1,59 @@
+{
+  "summary": "Executed backend+frontend verification for requested scope: organizations visibility, login organizations, expenses categories, expenses-analysis classification, rules engine simulation UI/API, fail-safe journal behavior, audit before/after snapshots, and setup EXE download integrity.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/journal-entries",
+        "issue": "Fail-Safe status code mismatch: unbalanced journal create returns 400 instead of required 422.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "PUT /api/journal-entries/{entry_id}",
+        "issue": "Fail-Safe status code mismatch: unbalanced journal update returns 400 instead of required 422.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Expenses Analysis classification for deduction statements (حج/عمرة، قسط لحوم، لجنة نقابية)",
+        "issue": "Analysis table classifies keywords correctly but assigns gross_amount to each matched category column instead of deduction amounts, inflating analysis totals.",
+        "affected_selectors": [
+          "[data-testid^='expenses-analysis-row-']",
+          "[data-testid='expenses-analysis-header-hajj_umrah']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration51_requested_scope.py",
+    "/app/test_reports/pytest/pytest_results_iter51_backend.xml"
+  ],
+  "action_items": [
+    "Update fail-safe validation path so unbalanced journal create/update returns HTTP 422 consistently (not 400) and keep non-posting behavior.",
+    "Adjust ExpensesAnalysis computation to use deduction amounts (or explicit deduction-mapping logic) for جمعية الحج والعمرة/قسط لحوم/لجنة نقابية instead of gross expense amount.",
+    "Add deterministic test fixture for conflicting accounting rules, then verify Rule Engine conflict warning UI with an actual conflict scenario."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is monolithic (>700 lines), increasing change-risk for accounting/audit workflows.",
+    "Fail-safe rule is implemented in two layers with inconsistent status behavior (normalize_journal_lines raises 400 before save_journal_entry_document 422 guard).",
+    "ExpensesAnalysis classifyExpense/categoryAmounts currently ties category allocation to gross_amount, causing duplicated totals when multiple deduction keywords match one expense."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration51_requested_scope.py",
+    "/app/test_reports/iteration_51.json"
+  ],
+  "success_rate": {
+    "backend": "78%",
+    "frontend": "88%"
+  },
+  "seed_data_creation": "Created temporary manual journal entries (ITER51-*) via API and one UI expense record with deduction statements (حج وعمرة/قسط لحوم/لجنة نقابية) for analysis verification.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Passed checks: /api/organizations/public returns official orgs only; login page shows exactly two organizations; /expenses category dropdown only has مصروفات عمومية + إعانات وفاة; /api/rules-engine/simulate returns simulation_only=true and does not create journal entries; audit logs for PUT chart-account and PUT journal-entry include before_document + after_document; /api/download/setup returns valid MZ EXE with matching /app/dist size. Unresolved: fail-safe status code mismatch (400 vs required 422) and expenses-analysis amount allocation logic inflation.",
+  "rca of the issue": "RCA-1 Fail-Safe status mismatch: normalize_journal_lines() raises HTTP 400 for imbalance before save_journal_entry_document() 422 guard executes, so manual create/update paths emit 400. Mitigation: centralize imbalance exception mapping to 422 in both create/update flows. RCA-2 Expenses Analysis inflation: categoryAmounts sets each matched category to expense.gross_amount, so one expense with multiple deduction-keyword matches duplicates the full value across columns. Mitigation: map deduction statement amounts per category (or split allocation model) instead of gross total. MOCKED API: Electronic Invoice external ETA submission remains MOCKED/BLOCKED pending official ETA SDK/credentials."
+}

@@ -963,7 +963,7 @@ class ExpenseDeduction(BaseModel):
 class ExpenseBase(BaseModel):
     expense_number: str = Field(..., min_length=1)
     organization_scope: Literal["general_union", "social_solidarity_project"] = "social_solidarity_project"
-    expense_category: Literal["general_expenses", "death_benefits", "hajj_umrah", "meat_installment", "union_committee"] = "general_expenses"
+    expense_category: Literal["general_expenses", "death_benefits"] = "general_expenses"
     payment_method: Literal["cash", "check", "bank_transfer"]
     payee_name: Optional[str] = None
     check_number: Optional[str] = None
@@ -1242,8 +1242,54 @@ class AuditLogResponse(BaseModel):
     arabic_description: Optional[str] = None
     status_code: int
     request_body: Optional[dict] = None
+    before_document: Optional[dict] = None
+    after_document: Optional[dict] = None
     ip_address: Optional[str] = None
     created_at: datetime
+
+
+class AccountingRuleBase(BaseModel):
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "Loan", "Custody"]
+    sub_type: Optional[str] = None
+    payment_method: Optional[str] = None
+    debit_account: str
+    credit_account: str
+    priority: int = Field(default=5, ge=1, le=10)
+    is_active: bool = True
+    notes: Optional[str] = None
+
+
+class AccountingRuleCreate(AccountingRuleBase):
+    pass
+
+
+class AccountingRuleResponse(AccountingRuleBase):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    is_system: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class RuleSimulationRequest(BaseModel):
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "Loan", "Custody"]
+    sub_type: Optional[str] = None
+    payment_method: Optional[str] = None
+    amount: float = Field(..., gt=0)
+    bank_id: Optional[str] = None
+
+
+class RuleSimulationResponse(BaseModel):
+    matched_rule: Optional[AccountingRuleResponse] = None
+    conflicts: List[AccountingRuleResponse] = Field(default_factory=list)
+    preview_lines: List[JournalLine] = Field(default_factory=list)
+    is_valid: bool
+    errors: List[str] = Field(default_factory=list)
+    total_debit: float = 0
+    total_credit: float = 0
+    simulation_only: bool = True
 
 
 class ExpenseCreate(ExpenseBase):
@@ -1508,6 +1554,15 @@ def attach_organization(document: dict, organization_id: Optional[str] = None) -
     return document
 
 
+def is_internal_test_organization_id(value: Optional[str]) -> bool:
+    text = (value or "").lower()
+    return text.startswith(("iter", "test-", "pytest", "accounting-fix-test", "opening-balance-fix-test")) or " iter" in text or "iter" in text
+
+
+def normalize_arabic_key(value: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower().replace("إ", "ا").replace("أ", "ا").replace("آ", "ا").replace("ة", "ه").replace("ى", "ي"))
+
+
 async def get_organization_document(organization_id: Optional[str] = None) -> dict:
     org_id = organization_id or organization_id_or_default()
     base = ORGANIZATIONS.get(org_id)
@@ -1528,6 +1583,8 @@ async def list_organization_documents() -> List[dict]:
         seen.add(org_id)
     custom_orgs = await db.organizations.find({"id": {"$nin": list(seen)}, "is_active": {"$ne": False}}, {"_id": 0}).sort("created_at", 1).to_list(1000)
     for custom in custom_orgs:
+        if is_internal_test_organization_id(custom.get("id")) or is_internal_test_organization_id(custom.get("login_label")) or is_internal_test_organization_id(custom.get("name")):
+            continue
         custom["modules"] = normalize_modules(custom["id"], custom.get("modules"))
         result.append(custom)
     return result
@@ -2229,9 +2286,6 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
         {"code": "5103", "name": "تسوية العهد والسلف", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "custody_advance_expense"},
-        {"code": "5104", "name": "حج وعمرة", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_hajj_umrah"},
-        {"code": "5105", "name": "قسط لحوم", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_meat_installment"},
-        {"code": "5106", "name": "لجنة نقابية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_union_committee"},
         {"code": "5200", "name": "إهلاك الأصول الثابتة", "account_type": "expense", "nature": "debit", "is_postable": False, "parent_code": "5000", "system_key": "depreciation_expense_parent"},
     ]
     for category in FIXED_ASSET_CATEGORIES:
@@ -2315,9 +2369,6 @@ async def resolve_journal_account(line: dict) -> dict:
         "شيكات صادرة": "issued_checks",
         "عوائد ودائع مستحقة": "accrued_deposit_interest",
         "إيرادات فوائد ودائع": "deposit_interest_revenue",
-        "حج وعمرة": "expense_hajj_umrah",
-        "قسط لحوم": "expense_meat_installment",
-        "لجنة نقابية": "expense_union_committee",
     }
     system_key = line.get("system_key") or system_key_map.get(account_name)
     account = await account_for_system_key(system_key, account_name) if system_key else await db.chart_accounts.find_one(with_organization({"name": account_name, "is_active": True, "is_postable": True}), {"_id": 0})
@@ -2405,6 +2456,8 @@ async def next_journal_entry_number(organization_id: str) -> int:
 async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None) -> dict:
     organization_id = organization_id_or_default()
     normalized_lines, total_debit, total_credit = await normalize_journal_lines(lines)
+    if round(total_debit, 2) != round(total_credit, 2):
+        raise HTTPException(status_code=422, detail="تم منع الترحيل: القيد غير متوازن، ولا يسمح النظام بترحيل ناقص.")
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     query = with_organization({"source_type": source_type, "source_id": source_id}, organization_id) if source_id else None
     existing = await db.journal_entries.find_one(query, {"_id": 0}) if query else None
@@ -2439,10 +2492,92 @@ async def delete_journal_for_source(source_type: str, source_id: str):
 EXPENSE_RULE_ACCOUNT_MAP = {
     "general_expenses": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "مصروفات عمومية"},
     "death_benefits": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "إعانات وفاة"},
-    "hajj_umrah": {"account_name": "حج وعمرة", "system_key": "expense_hajj_umrah", "analysis_type": "حج وعمرة"},
-    "meat_installment": {"account_name": "قسط لحوم", "system_key": "expense_meat_installment", "analysis_type": "قسط لحوم"},
-    "union_committee": {"account_name": "لجنة نقابية", "system_key": "expense_union_committee", "analysis_type": "لجنة نقابية"},
 }
+
+
+def default_accounting_rules(organization_id: str) -> List[dict]:
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    defaults = [
+        ("rule-income-bank", "Income", "General", "bank", "البنك", "الإيرادات", 5, "إيراد عادي محصل بالبنك"),
+        ("rule-expense-general", "Expense", "General", "bank", "المصروفات", "البنك", 5, "مصروف عادي مدفوع من البنك"),
+        ("rule-bank-fee", "BankFee", "Bank Fee", "bank", "المصروفات البنكية", "البنك", 1, "عمولة أو مصروف بنكي"),
+        ("rule-deposit", "Deposit", "Principal", "bank", "ودائع لأجل", "البنك", 1, "ربط وديعة لأجل"),
+        ("rule-interest-accrued", "Interest", "Accrued", "accrual", "عوائد ودائع مستحقة", "إيرادات فوائد ودائع", 1, "فائدة مستحقة غير محصلة"),
+        ("rule-interest-received", "Interest", "Received", "bank", "البنك", "عوائد ودائع مستحقة", 1, "تحصيل فائدة سبق إثباتها"),
+        ("rule-loan", "Loan", "Employee Loan", "bank", "سلف الموظفين", "البنك", 2, "صرف سلفة موظف"),
+        ("rule-custody", "Custody", "Employee Custody", "bank", "عهد الموظفين", "البنك", 2, "صرف عهدة موظف"),
+    ]
+    return [{
+        "id": rule_id,
+        "organization_id": organization_id,
+        "event_type": event_type,
+        "sub_type": sub_type,
+        "payment_method": payment_method,
+        "debit_account": debit,
+        "credit_account": credit,
+        "priority": priority,
+        "is_active": True,
+        "is_system": True,
+        "notes": notes,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    } for rule_id, event_type, sub_type, payment_method, debit, credit, priority, notes in defaults]
+
+
+async def list_accounting_rules_for_organization(organization_id: str) -> List[dict]:
+    custom_rules = await db.accounting_rules.find(with_organization({}, organization_id), {"_id": 0}).to_list(1000)
+    custom_by_id = {item["id"]: item for item in custom_rules}
+    merged = []
+    for default in default_accounting_rules(organization_id):
+        merged.append({**default, **custom_by_id.pop(default["id"], {})})
+    merged.extend(custom_by_id.values())
+    return sorted(merged, key=lambda item: (int(item.get("priority", 5)), item.get("event_type", ""), item.get("sub_type") or ""))
+
+
+def rule_matches(rule: dict, payload: RuleSimulationRequest) -> bool:
+    if not rule.get("is_active", True):
+        return False
+    if rule.get("event_type") != payload.event_type:
+        return False
+    if rule.get("sub_type") and payload.sub_type and normalize_arabic_key(rule.get("sub_type")) != normalize_arabic_key(payload.sub_type):
+        return False
+    if rule.get("payment_method") and payload.payment_method and normalize_arabic_key(rule.get("payment_method")) != normalize_arabic_key(payload.payment_method):
+        return False
+    return True
+
+
+async def simulate_accounting_rule(payload: RuleSimulationRequest) -> RuleSimulationResponse:
+    organization_id = organization_id_or_default()
+    await sync_chart_accounts_for_organization(organization_id)
+    rules = await list_accounting_rules_for_organization(organization_id)
+    matches = [rule for rule in rules if rule_matches(rule, payload)]
+    errors = []
+    if not matches:
+        return RuleSimulationResponse(is_valid=False, errors=["لا توجد قاعدة مطابقة؛ سيتم منع الترحيل حسب Fail-Safe Layer."])
+    selected = sorted(matches, key=lambda item: int(item.get("priority", 5)))[0]
+    conflict_rules = [rule for rule in matches if rule.get("id") != selected.get("id") and int(rule.get("priority", 5)) == int(selected.get("priority", 5))]
+    raw_lines = [
+        {"account_name": selected.get("debit_account"), "bank_id": payload.bank_id, "debit": round(payload.amount, 2), "credit": 0, "notes": "Simulation Mode - لا يوجد ترحيل"},
+        {"account_name": selected.get("credit_account"), "bank_id": payload.bank_id, "debit": 0, "credit": round(payload.amount, 2), "notes": "Simulation Mode - لا يوجد ترحيل"},
+    ]
+    try:
+        normalized, total_debit, total_credit = await normalize_journal_lines(raw_lines)
+    except HTTPException as exc:
+        return RuleSimulationResponse(matched_rule=AccountingRuleResponse(**selected), conflicts=[AccountingRuleResponse(**item) for item in conflict_rules], is_valid=False, errors=[str(exc.detail)], simulation_only=True)
+    if round(total_debit, 2) != round(total_credit, 2):
+        errors.append("القيد غير متوازن؛ تم منع الترحيل.")
+    if conflict_rules:
+        errors.append("يوجد تعارض قواعد بنفس الأولوية؛ راجع Conflict detection قبل التفعيل.")
+    return RuleSimulationResponse(
+        matched_rule=AccountingRuleResponse(**selected),
+        conflicts=[AccountingRuleResponse(**item) for item in conflict_rules],
+        preview_lines=[JournalLine(**line) for line in normalized],
+        is_valid=not errors,
+        errors=errors,
+        total_debit=total_debit,
+        total_credit=total_credit,
+        simulation_only=True,
+    )
 
 
 async def journal_for_deposit_principal(deposit: dict, current_user: Optional[dict] = None):
@@ -5872,6 +6007,37 @@ async def get_general_ledger(
     )
 
 
+@api_router.get("/rules-engine/rules", response_model=List[AccountingRuleResponse])
+async def list_rules_engine_rules(_: dict = Depends(require_any_permission(["view_reports", "manage_expenses", "manage_revenues"]))) :
+    organization_id = organization_id_or_default()
+    rules = await list_accounting_rules_for_organization(organization_id)
+    return [AccountingRuleResponse(**rule) for rule in rules]
+
+
+@api_router.post("/rules-engine/rules", response_model=AccountingRuleResponse)
+async def save_rules_engine_rule(payload: AccountingRuleCreate, current_user: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    rule_id = f"rule-{payload.event_type.lower()}-{uuid.uuid4().hex[:8]}"
+    document = {
+        **payload.model_dump(),
+        "id": rule_id,
+        "organization_id": organization_id,
+        "is_system": False,
+        "created_by": current_user.get("id"),
+        "created_by_name": real_name_for_user(current_user),
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await db.accounting_rules.insert_one(document.copy())
+    return AccountingRuleResponse(**document)
+
+
+@api_router.post("/rules-engine/simulate", response_model=RuleSimulationResponse)
+async def simulate_rules_engine(payload: RuleSimulationRequest, _: dict = Depends(require_any_permission(["view_reports", "manage_expenses", "manage_revenues"]))) :
+    return await simulate_accounting_rule(payload)
+
+
 @api_router.post("/chart-accounts", response_model=ChartAccountResponse)
 async def create_chart_account(payload: ChartAccountCreate, _: dict = Depends(require_admin)):
     organization_id = organization_id_or_default()
@@ -6975,7 +7141,46 @@ def arabic_audit_description(method: str, path: str, status_code: int, body: Opt
     return f"قام {actor} بـ{action} داخل {area} على المسار {path}، وكانت النتيجة {result} بكود {status_code}{detail_text}."
 
 
-async def audit_event(request: Request, status_code: int, body: Optional[dict] = None):
+AUDIT_SNAPSHOT_ROUTES = {
+    "journal-entries": "journal_entries",
+    "expenses": "expenses",
+    "revenues": "revenues",
+    "memberships": "memberships",
+    "chart-accounts": "chart_accounts",
+    "rules-engine": "accounting_rules",
+}
+
+
+def audit_snapshot_target(path: str) -> tuple[Optional[str], Optional[str]]:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 3 or parts[0] != "api":
+        return None, None
+    if parts[1] == "rules-engine" and len(parts) >= 4 and parts[2] == "rules":
+        return "accounting_rules", parts[3]
+    collection = AUDIT_SNAPSHOT_ROUTES.get(parts[1])
+    return collection, parts[2] if collection and len(parts) >= 3 else None
+
+
+async def audit_document_snapshot(request: Request) -> Optional[dict]:
+    collection_name, document_id = audit_snapshot_target(request.url.path)
+    if not collection_name or not document_id:
+        return None
+    collection_names = await db.list_collection_names()
+    if collection_name not in collection_names:
+        return None
+    organization_id = DEFAULT_ORGANIZATION_ID
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            payload = jwt.decode(auth_header[7:], JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            organization_id = payload.get("organization_id") or DEFAULT_ORGANIZATION_ID
+        except Exception:
+            organization_id = DEFAULT_ORGANIZATION_ID
+    document = await db[collection_name].find_one(with_organization({"id": document_id}, organization_id), {"_id": 0})
+    return sanitize_audit_body(document) if document else None
+
+
+async def audit_event(request: Request, status_code: int, body: Optional[dict] = None, before_document: Optional[dict] = None, after_document: Optional[dict] = None):
     if request.url.path.startswith("/api/admin/security/audit-logs"):
         return
     user_id = None
@@ -7006,6 +7211,8 @@ async def audit_event(request: Request, status_code: int, body: Optional[dict] =
         "arabic_description": arabic_audit_description(request.method, request.url.path, status_code, sanitize_audit_body(body), actor_full_name),
         "status_code": status_code,
         "request_body": sanitize_audit_body(body),
+        "before_document": before_document,
+        "after_document": after_document,
         "ip_address": request.client.host if request.client else None,
         "created_at": serialize_datetime(datetime.now(timezone.utc)),
     })
@@ -7025,9 +7232,15 @@ async def audit_log_middleware(request: Request, call_next):
         return {"type": "http.request", "body": raw_body, "more_body": False}
 
     request = Request(request.scope, receive)
+    before_document = None
+    if request.url.path.startswith("/api") and request.method in {"PUT", "PATCH", "DELETE"}:
+        before_document = await audit_document_snapshot(request)
     response = await call_next(request)
+    after_document = None
+    if request.url.path.startswith("/api") and request.method in {"PUT", "PATCH"} and response.status_code < 400:
+        after_document = await audit_document_snapshot(request)
     if request.url.path.startswith("/api") and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        await audit_event(request, response.status_code, parsed_body)
+        await audit_event(request, response.status_code, parsed_body, before_document, after_document)
     return response
 
 

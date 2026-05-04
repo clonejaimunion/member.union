@@ -26,13 +26,10 @@ const officialEmailOrEmpty = (email) => {
   if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
   return value;
 };
-const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة", hajj_umrah: "حج وعمرة", meat_installment: "قسط لحوم", union_committee: "لجنة نقابية" };
+const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة" };
 const categoryOptions = [
   ["general_expenses", "مصروفات عمومية"],
   ["death_benefits", "إعانات وفاة"],
-  ["hajj_umrah", "حج وعمرة"],
-  ["meat_installment", "قسط لحوم"],
-  ["union_committee", "لجنة نقابية"],
 ];
 const monthLabels = { "01": "يناير", "02": "فبراير", "03": "مارس", "04": "أبريل", "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس", "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر" };
 const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
