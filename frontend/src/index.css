@@ -255,6 +255,77 @@ html {
         display: none !important;
     }
 
+    [data-testid="membership-content"] {
+        display: block !important;
+        max-width: none !important;
+        padding: 0 !important;
+    }
+
+    .membership-print-sheet {
+        display: block !important;
+        break-after: page !important;
+        page-break-after: always !important;
+        width: 190mm !important;
+        max-width: 190mm !important;
+        min-height: 270mm !important;
+        margin: 0 auto !important;
+        padding: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        color: #000000 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .membership-print-sheet:last-of-type {
+        break-after: auto !important;
+        page-break-after: auto !important;
+    }
+
+    .membership-print-sheet * {
+        color: #000000 !important;
+        border-color: #000000 !important;
+        opacity: 1 !important;
+    }
+
+    [data-testid="membership-batch-history-wrapper"],
+    [data-testid="membership-search-results-wrapper"],
+    [data-testid="membership-retirement-table-wrapper"],
+    [data-testid="membership-collection-report-table-wrapper"],
+    [data-testid="membership-annual-report-table-wrapper"] {
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    [data-testid="membership-batch-history-table"],
+    [data-testid="membership-search-results-table"],
+    [data-testid="membership-retirement-table"],
+    [data-testid="membership-collection-report-table"],
+    [data-testid="membership-annual-report-table"] {
+        width: 100% !important;
+        table-layout: fixed !important;
+        font-size: 9px !important;
+        line-height: 1.25 !important;
+    }
+
+    [data-testid="membership-batch-history-table"] th,
+    [data-testid="membership-batch-history-table"] td,
+    [data-testid="membership-search-results-table"] th,
+    [data-testid="membership-search-results-table"] td,
+    [data-testid="membership-retirement-table"] th,
+    [data-testid="membership-retirement-table"] td,
+    [data-testid="membership-collection-report-table"] th,
+    [data-testid="membership-collection-report-table"] td,
+    [data-testid="membership-annual-report-table"] th,
+    [data-testid="membership-annual-report-table"] td {
+        padding: 4px 3px !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+        vertical-align: top !important;
+    }
+
     .rounded-xl,
     .rounded-lg {
         border-radius: 0.25rem !important;

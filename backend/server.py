@@ -848,6 +848,9 @@ class MembershipImportAcceptedRow(BaseModel):
     birth_date: date
     address: str
     death_beneficiary: str
+    status: MembershipStatus = "active"
+    status_label: str = "فعال"
+    status_effective_date: Optional[date] = None
     retirement_age: int
     retirement_date: date
 
@@ -2226,9 +2229,11 @@ def normalize_import_membership_payload(payload: dict, governorate: str, union_c
     return required_payload
 
 
-async def build_membership_import_preview_document(governorate: str, union_committee: str, filename: str, content: bytes) -> dict:
+async def build_membership_import_preview_document(governorate: str, union_committee: str, filename: str, content: bytes, default_status: MembershipStatus = "active", default_status_effective_date: Optional[date] = None) -> dict:
     clean_governorate = normalize_member_text(governorate)
     clean_committee = normalize_member_text(union_committee)
+    selected_status = default_status or "active"
+    selected_status_effective_date = default_status_effective_date if selected_status in NON_ACTIVE_MEMBERSHIP_STATUSES else None
     if not clean_governorate or not clean_committee:
         raise HTTPException(status_code=400, detail="اختر المحافظة واسم اللجنة قبل الاستيراد")
     if not content:
@@ -2261,6 +2266,8 @@ async def build_membership_import_preview_document(governorate: str, union_commi
             continue
         seen_membership_numbers.add(normalized_payload["membership_number"])
         seen_national_ids.add(normalized_payload["national_id"])
+        normalized_payload["status"] = selected_status
+        normalized_payload["status_effective_date"] = selected_status_effective_date
         try:
             payload = MembershipCreate(**normalized_payload)
             await membership_document_from_payload(payload)
@@ -2275,10 +2282,12 @@ async def build_membership_import_preview_document(governorate: str, union_commi
             "row_number": index,
             **normalized_payload,
             "birth_date": serialize_date(payload.birth_date),
+            "status_label": MEMBERSHIP_STATUS_LABELS.get(selected_status, "فعال"),
+            "status_effective_date": serialize_date(selected_status_effective_date) if selected_status_effective_date else None,
             "retirement_age": retirement["retirement_age"],
             "retirement_date": retirement["retirement_date"],
         })
-        accepted_payloads.append({"row_number": index, **normalized_payload, "birth_date": serialize_date(payload.birth_date)})
+        accepted_payloads.append({"row_number": index, **normalized_payload, "birth_date": serialize_date(payload.birth_date), "status_effective_date": serialize_date(selected_status_effective_date) if selected_status_effective_date else None})
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     return {
         "id": str(uuid.uuid4()),
@@ -6127,12 +6136,14 @@ async def delete_membership(membership_id: str, current_user: dict = Depends(req
 async def import_memberships(
     governorate: str = Form(...),
     union_committee: str = Form(...),
+    status: MembershipStatus = Form("active"),
+    status_effective_date: Optional[date] = Form(default=None),
     file: UploadFile = File(...),
     current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
 ):
     require_social_solidarity_membership(current_user)
     content = await file.read()
-    preview = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", content)
+    preview = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", content, status, status_effective_date)
     imported_documents = []
     skipped_rows = [MembershipImportSkippedRow(**row) for row in preview.get("skipped_rows", [])]
     for item in preview.get("accepted_payloads", []):
@@ -6160,11 +6171,13 @@ async def import_memberships(
 async def preview_membership_import(
     governorate: str = Form(...),
     union_committee: str = Form(...),
+    status: MembershipStatus = Form("active"),
+    status_effective_date: Optional[date] = Form(default=None),
     file: UploadFile = File(...),
     current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
 ):
     require_social_solidarity_membership(current_user)
-    document = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", await file.read())
+    document = await build_membership_import_preview_document(governorate, union_committee, file.filename or "", await file.read(), status, status_effective_date)
     await db.membership_import_previews.insert_one(document.copy())
     return membership_import_preview_response(document)
 
