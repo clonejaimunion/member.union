@@ -715,7 +715,7 @@ class FixedAssetResponse(FixedAssetBase):
 
 class FixedAssetDepreciationRun(BaseModel):
     year: int = Field(..., ge=1900, le=2200)
-    month: int = Field(..., ge=1, le=12)
+    month: int = Field(default=12, ge=1, le=12)
 
 
 class FixedAssetDepreciationResponse(BaseModel):
@@ -1249,7 +1249,7 @@ class AuditLogResponse(BaseModel):
 
 
 class AccountingRuleBase(BaseModel):
-    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "Loan", "Custody"]
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
     sub_type: Optional[str] = None
     payment_method: Optional[str] = None
     debit_account: str
@@ -1278,7 +1278,7 @@ class AccountingRuleResponse(AccountingRuleBase):
 
 
 class RuleSimulationRequest(BaseModel):
-    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "Loan", "Custody"]
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
     sub_type: Optional[str] = None
     payment_method: Optional[str] = None
     amount: float = Field(..., gt=0)
@@ -1823,6 +1823,10 @@ def months_between_inclusive(start_date: date, end_date: date) -> int:
 
 def fixed_asset_monthly_depreciation(purchase_cost: float, annual_rate: float) -> float:
     return round(float(purchase_cost or 0) * float(annual_rate or 0) / 100 / 12, 2)
+
+
+def fixed_asset_annual_depreciation(purchase_cost: float, annual_rate: float) -> float:
+    return round(float(purchase_cost or 0) * float(annual_rate or 0) / 100, 2)
 
 
 def fixed_asset_disposal_date(purchase_date: date, purchase_cost: float, annual_rate: float) -> Optional[date]:
@@ -2540,6 +2544,7 @@ def default_accounting_rules(organization_id: str) -> List[dict]:
         ("rule-deposit", "Deposit", "Principal", "bank_transfer", "ودائع لأجل", "البنك", "ربط وديعة لأجل"),
         ("rule-interest-accrued", "Interest", "Accrued", None, "عوائد ودائع مستحقة", "إيرادات فوائد ودائع", "فائدة مستحقة غير محصلة"),
         ("rule-interest-received", "Interest", "Received", "bank_transfer", "البنك", "عوائد ودائع مستحقة", "تحصيل فائدة سبق إثباتها"),
+        ("rule-asset-depreciation", "AssetDepreciation", "Annual", None, "إهلاك الأصول الثابتة", "مجمع إهلاك الأصول الثابتة", "إهلاك سنوي تلقائي للأصول"),
         ("rule-loan", "Loan", "Employee Loan", "bank_transfer", "سلف الموظفين", "البنك", "صرف سلفة موظف"),
         ("rule-custody", "Custody", "Employee Custody", "bank_transfer", "عهد الموظفين", "البنك", "صرف عهدة موظف"),
     ]
@@ -2775,7 +2780,7 @@ async def journal_for_asset_depreciation(depreciation: dict, current_user: Optio
     entry_date = depreciation_date_value if isinstance(depreciation_date_value, date) else date.fromisoformat(str(depreciation_date_value))
     await save_journal_entry_document(
         entry_date=entry_date,
-        description=f"قيد تلقائي لإهلاك {depreciation.get('asset_name')} عن {depreciation.get('month')}/{depreciation.get('year')}",
+        description=f"قيد تلقائي للإهلاك السنوي {depreciation.get('asset_name')} عن سنة {depreciation.get('year')}",
         reference=depreciation.get("asset_code"),
         source_type="asset_depreciation",
         source_id=depreciation.get("id"),
@@ -3001,6 +3006,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
+    await auto_run_annual_depreciation_for_year(organization_id, period_to.year, None)
     balance_report = await calculate_trial_balance_report(organization_id=organization_id, to_date=period_to, non_zero_only=True)
     income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True)
     asset_lines = []
@@ -5634,16 +5640,74 @@ async def build_depreciation_record(asset: dict, year: int, month: int, current_
     return document
 
 
+async def build_annual_depreciation_record(asset: dict, year: int, current_user: Optional[dict] = None) -> Optional[dict]:
+    purchase_date_value = asset.get("purchase_date") if isinstance(asset.get("purchase_date"), date) else date.fromisoformat(str(asset.get("purchase_date")))
+    depreciation_date = date(year, 12, 31)
+    if depreciation_date < purchase_date_value:
+        return None
+    category = fixed_asset_category(asset.get("category_code"))
+    annual_rate = float(asset.get("annual_depreciation_rate") if asset.get("annual_depreciation_rate") is not None else category["annual_depreciation_rate"])
+    annual_amount = fixed_asset_annual_depreciation(asset.get("purchase_cost"), annual_rate)
+    if annual_amount <= 0:
+        return None
+    record_id = f"{asset['id']}-{year}-annual"
+    old_year_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset["id"], "year": year, "id": {"$ne": record_id}}), {"_id": 0}).to_list(1000)
+    for old_record in old_year_records:
+        await delete_journal_for_source("asset_depreciation", old_record["id"])
+        await db.fixed_asset_depreciations.delete_one(with_organization({"id": old_record["id"]}))
+    previous_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset["id"], "id": {"$ne": record_id}}), {"_id": 0, "amount": 1}).to_list(1000)
+    accumulated_before = round(sum(float(item.get("amount") or 0) for item in previous_records), 2)
+    remaining = round(float(asset.get("purchase_cost") or 0) - accumulated_before, 2)
+    amount = round(min(annual_amount, remaining), 2)
+    if amount <= 0:
+        await db.fixed_asset_depreciations.delete_one(with_organization({"id": record_id}))
+        await delete_journal_for_source("asset_depreciation", record_id)
+        return None
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    existing = await db.fixed_asset_depreciations.find_one(with_organization({"id": record_id}), {"_id": 0})
+    document = {
+        "id": record_id,
+        "organization_id": organization_id_or_default(),
+        "asset_id": asset["id"],
+        "asset_code": asset.get("asset_code"),
+        "asset_name": asset.get("asset_name"),
+        "category_code": category["code"],
+        "category_name": category["name"],
+        "year": year,
+        "month": 12,
+        "period_type": "annual",
+        "depreciation_date": serialize_date(depreciation_date),
+        "amount": amount,
+        "annual_rate": annual_rate,
+        "accumulated_after": round(accumulated_before + amount, 2),
+        "net_book_value_after": round(max(float(asset.get("purchase_cost") or 0) - accumulated_before - amount, 0), 2),
+        "created_at": existing.get("created_at") if existing else now_iso,
+        "updated_at": now_iso,
+    }
+    await db.fixed_asset_depreciations.update_one(with_organization({"id": record_id}), {"$set": document}, upsert=True)
+    await journal_for_asset_depreciation(document, current_user)
+    return document
+
+
+async def auto_run_annual_depreciation_for_year(organization_id: str, year: int, current_user: Optional[dict] = None) -> List[dict]:
+    token = CURRENT_ORGANIZATION_ID.set(organization_id)
+    try:
+        await sync_chart_accounts_for_organization(organization_id)
+        assets = await db.fixed_assets.find(with_organization({"is_active": True}, organization_id), {"_id": 0}).sort("asset_code", 1).to_list(5000)
+        generated = []
+        for asset in assets:
+            document = await build_annual_depreciation_record(asset, year, current_user)
+            if document:
+                generated.append(document)
+        return generated
+    finally:
+        CURRENT_ORGANIZATION_ID.reset(token)
+
+
 @api_router.post("/fixed-assets/depreciation/run", response_model=List[FixedAssetDepreciationResponse])
 async def run_fixed_asset_depreciation(payload: FixedAssetDepreciationRun, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
-    await ensure_period_is_open(month_end_date(payload.year, payload.month))
-    await sync_chart_accounts_for_organization(organization_id_or_default())
-    assets = await db.fixed_assets.find(with_organization({"is_active": True}), {"_id": 0}).sort("asset_code", 1).to_list(5000)
-    generated = []
-    for asset in assets:
-        document = await build_depreciation_record(asset, payload.year, payload.month, current_user)
-        if document:
-            generated.append(document)
+    await ensure_period_is_open(date(payload.year, 12, 31))
+    generated = await auto_run_annual_depreciation_for_year(organization_id_or_default(), payload.year, current_user)
     return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in generated]
 
 
