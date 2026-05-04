@@ -967,6 +967,10 @@ class JournalEntryResponse(BaseModel):
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
+    is_reversal: bool = False
+    reversal_of_entry_id: Optional[str] = None
+    reversal_entry_id: Optional[str] = None
+    reversal_reason: Optional[str] = None
     lines: List[JournalLine]
     total_debit: float
     total_credit: float
@@ -1326,6 +1330,21 @@ class AuditLogResponse(BaseModel):
     after_document: Optional[dict] = None
     ip_address: Optional[str] = None
     created_at: datetime
+
+
+class ProgramPurgeRequest(BaseModel):
+    scope: Literal["current_organization", "all_organizations"] = "current_organization"
+    confirmation_phrase: str
+    include_banks: bool = False
+    include_users: bool = False
+
+
+class ProgramPurgeResponse(BaseModel):
+    scope: str
+    organization_id: Optional[str] = None
+    deleted_counts: Dict[str, int]
+    reset_counters: List[str]
+    message: str
 
 
 class AccountingRuleBase(BaseModel):
@@ -2435,7 +2454,7 @@ def membership_due_periods(member: dict, as_of_date: date, paid_periods: Optiona
 
 
 async def membership_paid_allocations_map(as_of_date: Optional[date] = None) -> dict[str, dict[str, float]]:
-    query = with_organization({})
+    query = with_organization({"is_reversal": {"$ne": True}})
     if as_of_date:
         query["payment_date"] = {"$lte": as_of_date.isoformat()}
     documents = await db.membership_batch_payments.find(query, {"_id": 0, "allocations": 1}).to_list(100000)
@@ -2691,6 +2710,7 @@ async def save_journal_entry_document(*, entry_date: date, description: str, lin
         "source_id": source_id,
         "status": "approved",
         "is_auto": is_auto,
+        "is_reversal": existing.get("is_reversal", False) if existing else False,
         "lines": normalized_lines,
         "total_debit": total_debit,
         "total_credit": total_credit,
@@ -2952,6 +2972,7 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
     query = with_organization({"status": "approved"}, organization_id)
     if as_of_date:
         query["entry_date"] = {"$lte": as_of_date.isoformat()}
+    query["is_reversal"] = {"$ne": True}
     entries = await db.journal_entries.find(query, {"_id": 0, "lines": 1}).to_list(100000)
     balance = round(float(account.get("opening_balance") or 0), 2)
     for entry in entries:
@@ -3153,7 +3174,7 @@ async def calculate_trial_balance_report(
             "balance_debit": 0.0,
             "balance_credit": 0.0,
         }
-    entry_query = with_organization({"status": "approved"}, organization_id)
+    entry_query = with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id)
     if from_date or to_date:
         entry_query["entry_date"] = {}
         if from_date:
@@ -3252,7 +3273,7 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
         errors.append(AccountingErrorItem(severity="critical", error_type="ميزان غير متوازن", location="ميزان المراجعة", details=f"إجمالي المدين {balance_report.total_debit} لا يساوي إجمالي الدائن {balance_report.total_credit}", suggested_fix="راجع القيود اليومية غير المتوازنة أو الحسابات غير المرتبطة."))
     if round(balance_assets_total - balance_liability_equity_total, 2) != 0:
         errors.append(AccountingErrorItem(severity="critical", error_type="الميزانية غير متوازنة", location="قائمة الميزانية", details=f"إجمالي الأصول {balance_assets_total} لا يساوي إجمالي الالتزامات وحقوق الملكية {balance_liability_equity_total}", suggested_fix="راجع أرصدة الحسابات ونتيجة الفترة والحسابات ذات الطبيعة العكسية."))
-    bad_entries = await db.journal_entries.find(with_organization({"status": "approved"}, organization_id), {"_id": 0, "id": 1, "entry_number": 1, "entry_date": 1, "description": 1, "total_debit": 1, "total_credit": 1, "lines": 1}).to_list(100000)
+    bad_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id), {"_id": 0, "id": 1, "entry_number": 1, "entry_date": 1, "description": 1, "total_debit": 1, "total_credit": 1, "lines": 1}).to_list(100000)
     for entry in bad_entries:
         total_debit = round(float(entry.get("total_debit") or 0), 2)
         total_credit = round(float(entry.get("total_credit") or 0), 2)
@@ -3319,7 +3340,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         ))
         equity_total = round(sum(line.amount for line in equity_with_result), 2)
         liability_equity_total = round(liabilities_total + equity_total, 2)
-    entries = await db.journal_entries.find(with_organization({"status": "approved", "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
     receipts = []
     payments = []
     for entry in entries:
@@ -3364,6 +3385,85 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         is_accounting_valid=not any(error.severity == "critical" for error in errors),
         generated_at=datetime.now(timezone.utc),
     )
+
+
+async def validate_accounting_data_flow(organization_id: str) -> dict:
+    CURRENT_ORGANIZATION_ID.set(organization_id)
+    period_from = date(1900, 1, 1)
+    period_to = date(2099, 12, 31)
+    await sync_chart_accounts_for_organization(organization_id)
+    trial = await calculate_trial_balance_report(organization_id, period_from, period_to, non_zero_only=True)
+    statements = await calculate_financial_statements_report(organization_id, period_from, period_to)
+    accounts = await db.chart_accounts.find(with_organization({}, organization_id), {"_id": 0}).to_list(10000)
+    accounts_by_id = {item.get("id"): item for item in accounts if item.get("id")}
+    accounts_by_code = {item.get("code"): item for item in accounts if item.get("code")}
+    accounts_by_name = {item.get("name"): item for item in accounts if item.get("name")}
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).to_list(100000)
+    reversal_count = await db.journal_entries.count_documents(with_organization({"is_reversal": True}, organization_id))
+    missing_lines = []
+    ledger_totals: dict[str, dict] = {}
+    for entry in entries:
+        for index, line in enumerate(entry.get("lines", []), 1):
+            account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code")) or accounts_by_name.get(line.get("account_name"))
+            if not account:
+                missing_lines.append({"entry_number": entry.get("entry_number"), "line_index": index, "account_name": line.get("account_name")})
+                continue
+            key = account.get("id")
+            ledger_totals.setdefault(key, {"debit": 0.0, "credit": 0.0, "name": account.get("name")})
+            ledger_totals[key]["debit"] = round(ledger_totals[key]["debit"] + float(line.get("debit") or 0), 2)
+            ledger_totals[key]["credit"] = round(ledger_totals[key]["credit"] + float(line.get("credit") or 0), 2)
+    trial_mismatches = []
+    for row in trial.rows:
+        if not row.account_id:
+            continue
+        ledger = ledger_totals.get(row.account_id, {"debit": 0.0, "credit": 0.0, "name": row.account_name})
+        if round(float(row.total_debit) - ledger["debit"], 2) != 0 or round(float(row.total_credit) - ledger["credit"], 2) != 0:
+            trial_mismatches.append({"account_code": row.account_code, "account_name": row.account_name, "trial_debit": row.total_debit, "ledger_debit": ledger["debit"], "trial_credit": row.total_credit, "ledger_credit": ledger["credit"]})
+    balance_check = round(float(statements.balance_sheet["check"].total or 0), 2)
+    critical_errors = [error.model_dump(mode="json") for error in statements.accounting_errors if error.severity == "critical"]
+    return {
+        "organization_id": organization_id,
+        "period_from": period_from.isoformat(),
+        "period_to": period_to.isoformat(),
+        "journal_entries_count": len(entries),
+        "hidden_reversal_entries_count": reversal_count,
+        "ledger_accounts_checked": len(ledger_totals),
+        "trial_balance": {"total_debit": trial.total_debit, "total_credit": trial.total_credit, "is_balanced": trial.is_balanced, "total_balance_debit": trial.total_balance_debit, "total_balance_credit": trial.total_balance_credit},
+        "income_statement": {"revenues": statements.revenues_expenses["revenues"].total, "expenses": statements.revenues_expenses["expenses"].total, "result": statements.revenues_expenses["result"].total},
+        "cash_in_out": {"receipts": statements.receipts_payments["receipts"].total, "payments": statements.receipts_payments["payments"].total, "net": statements.receipts_payments["net_cash_flow"].total},
+        "balance_sheet": {"assets": statements.balance_sheet["assets"].total, "liabilities": statements.balance_sheet["liabilities"].total, "equity": statements.balance_sheet["equity"].total, "check": balance_check},
+        "missing_orphan_entries": missing_lines,
+        "ledger_trial_mismatches": trial_mismatches,
+        "critical_accounting_errors": critical_errors,
+        "is_valid": (not missing_lines and not trial_mismatches and trial.is_balanced and balance_check == 0 and not critical_errors),
+    }
+
+
+async def validate_membership_data_flow(organization_id: str) -> dict:
+    CURRENT_ORGANIZATION_ID.set(organization_id)
+    if organization_id != "social-solidarity":
+        return {"organization_id": organization_id, "is_applicable": False, "is_valid": True, "message": "نظام العضوية خاص بمشروع التكافل الاجتماعي"}
+    as_of = date.today()
+    documents = await db.memberships.find(with_organization({}, organization_id), {"_id": 0}).to_list(10000)
+    paid_map = await membership_paid_allocations_map(as_of)
+    status_counts = {key: 0 for key in MEMBERSHIP_STATUS_LABELS}
+    issues = []
+    total_due = total_collected = total_remaining = 0.0
+    for document in documents:
+        status = document.get("status") or "active"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        enriched = await enrich_membership_financials(document, as_of, paid_map)
+        total_due = round(total_due + float(enriched.get("current_due") or 0), 2)
+        total_collected = round(total_collected + float(enriched.get("total_collected") or 0), 2)
+        total_remaining = round(total_remaining + float(enriched.get("remaining_balance") or 0), 2)
+        if status in NON_ACTIVE_MEMBERSHIP_STATUSES and not document.get("subscription_stop_date"):
+            issues.append({"member_id": document.get("id"), "membership_number": document.get("membership_number"), "issue": "عضو غير فعال بدون تاريخ إيقاف اشتراك"})
+    batches = await db.membership_batch_payments.find(with_organization({}, organization_id), {"_id": 0}).to_list(10000)
+    allocation_total = round(sum(float(allocation.get("amount") or 0) for batch in batches for allocation in batch.get("allocations", [])), 2)
+    batch_total = round(sum(float(batch.get("allocated_amount") or 0) for batch in batches), 2)
+    if allocation_total != batch_total:
+        issues.append({"issue": "إجمالي توزيعات الأذون لا يساوي إجمالي المبالغ الموزعة", "allocation_total": allocation_total, "batch_total": batch_total})
+    return {"organization_id": organization_id, "is_applicable": True, "as_of_date": as_of.isoformat(), "members_count": len(documents), "status_counts": status_counts, "total_due": total_due, "total_collected": total_collected, "remaining_balance": total_remaining, "batch_payments_count": len(batches), "allocated_amount": allocation_total, "issues": issues, "is_valid": not issues}
 
 
 def hydrate_reconciliation(document: dict) -> dict:
@@ -5535,7 +5635,7 @@ async def list_revenues(
     to_date: Optional[date] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_revenues"])),
 ):
-    query = with_organization({})
+    query = with_organization({"is_reversal": {"$ne": True}})
     if bank_id:
         await ensure_bank_async(bank_id)
         query["bank_id"] = bank_id
@@ -5650,7 +5750,7 @@ async def list_expenses(
     to_date: Optional[date] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses"])),
 ):
-    query = with_organization({})
+    query = with_organization({"is_reversal": {"$ne": True}})
     if bank_id:
         await ensure_bank_async(bank_id)
         query["bank_id"] = bank_id
@@ -6432,7 +6532,7 @@ async def list_journal_entries(
     source_type: Optional[str] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
-    query = with_organization({})
+    query = with_organization({"is_reversal": {"$ne": True}})
     if from_date or to_date:
         query["entry_date"] = {}
         if from_date:
@@ -6524,7 +6624,7 @@ async def get_general_ledger(
     account = await db.chart_accounts.find_one(with_organization(account_query, organization_id), {"_id": 0})
     if not account:
         raise HTTPException(status_code=404, detail="الحساب غير موجود")
-    entries = await db.journal_entries.find(with_organization({}, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+    entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}}, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
     running_balance = opening_balance
     rows = []
@@ -6707,7 +6807,7 @@ async def get_trial_balance(
             "balance_debit": 0.0,
             "balance_credit": 0.0,
         }
-    entry_query = with_organization({"status": "approved"}, organization_id)
+    entry_query = with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id)
     if from_date or to_date:
         entry_query["entry_date"] = {}
         if from_date:
@@ -7103,6 +7203,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
 
 
 BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
 TRAINING_DIR = ROOT_DIR.parent / "training_exports"
 TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -7525,6 +7626,52 @@ async def download_training_video(current_user: dict = Depends(require_admin)):
 async def clear_audit_logs(_: dict = Depends(require_super_admin)):
     result = await db.audit_logs.delete_many({})
     return {"message": "تم مسح محتويات سجل التدقيق", "deleted_count": result.deleted_count}
+
+
+@api_router.get("/admin/data-flow-validation")
+async def get_admin_data_flow_validation(current_user: dict = Depends(require_admin)):
+    target_orgs = list(ORGANIZATIONS.keys()) if is_super_admin(current_user) else [current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID]
+    organization_results = []
+    for organization_id in target_orgs:
+        organization_results.append({
+            "organization_id": organization_id,
+            "organization_name": (await get_organization_document(organization_id))["name"],
+            "accounting": await validate_accounting_data_flow(organization_id),
+            "membership": await validate_membership_data_flow(organization_id),
+        })
+    return {
+        "generated_at": serialize_datetime(datetime.now(timezone.utc)),
+        "organizations": organization_results,
+        "is_valid": all(item["accounting"].get("is_valid") and item["membership"].get("is_valid") for item in organization_results),
+    }
+
+
+@api_router.post("/admin/program-data/purge", response_model=ProgramPurgeResponse)
+async def purge_program_user_data(payload: ProgramPurgeRequest, current_user: dict = Depends(require_super_admin)):
+    if normalize_member_text(payload.confirmation_phrase) != "تفريغ البيانات نهائيا":
+        raise HTTPException(status_code=422, detail="اكتب عبارة التأكيد كما هي: تفريغ البيانات نهائيا")
+    target_organization_id = None if payload.scope == "all_organizations" else (current_user.get("organization_id") or DEFAULT_ORGANIZATION_ID)
+    collections = list(USER_DATA_PURGE_COLLECTIONS)
+    if payload.include_banks:
+        collections.extend(["banks", "bank_settings", "deleted_banks", "banking_tariffs"])
+    if payload.include_users:
+        collections.append("users")
+    deleted_counts = {}
+    for collection_name in collections:
+        query = {} if target_organization_id is None else {"organization_id": target_organization_id}
+        if collection_name == "users" and target_organization_id is not None:
+            query = {"organization_id": target_organization_id, "role": {"$ne": "super_admin"}}
+        if collection_name == "users" and target_organization_id is None:
+            query = {"role": {"$ne": "super_admin"}}
+        result = await db[collection_name].delete_many(query)
+        deleted_counts[collection_name] = int(result.deleted_count)
+    if target_organization_id is not None:
+        await sync_chart_accounts_for_organization(target_organization_id)
+    else:
+        for organization_id in ORGANIZATIONS:
+            CURRENT_ORGANIZATION_ID.set(organization_id)
+            await sync_chart_accounts_for_organization(organization_id)
+    return ProgramPurgeResponse(scope=payload.scope, organization_id=target_organization_id, deleted_counts=deleted_counts, reset_counters=["journal_counters"], message="تم تفريغ بيانات المستخدم المطلوبة نهائياً مع الحفاظ على إعدادات تشغيل البرنامج الأساسية")
 
 
 @api_router.get("/admin/program-security", response_model=ProgramSecurityResponse)

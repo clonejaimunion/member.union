@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Building2, FileImage, FileUp, GitCompareArrows, KeyRound, LockKeyhole, PlugZap, Plus, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, DatabaseZap, FileImage, FileUp, GitCompareArrows, KeyRound, LockKeyhole, PlugZap, Plus, Save, ShieldCheck, SlidersHorizontal, ToggleLeft, ToggleRight, Trash2, UserCog, UsersRound, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 import { moduleDefinitions } from "@/lib/modules";
+import { formatCurrency } from "@/lib/format";
 
 const permissionLabels = {
   enter_deposits: "إدخال ودائع",
@@ -87,10 +88,12 @@ const adminSections = [
   { id: "add-bank", title: "إضافة بنك", subtitle: "إضافة بنك جديد", icon: Building2 },
   { id: "opening-balances", title: "الأرصدة الافتتاحية", subtitle: "رصيد افتتاحي لكل بنك", icon: Save },
   { id: "security-review", title: "المراجعة الأمنية", subtitle: "ضوابط الاقتراب من الاعتماد", icon: ShieldCheck },
+  { id: "data-flows", title: "تدفقات البيانات", subtitle: "فحص محاسبي وعضوية شامل", icon: Workflow },
+  { id: "data-purge", title: "تفريغ البيانات", subtitle: "حذف نهائي لبيانات المستخدم", icon: DatabaseZap },
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration"]);
+const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration", "data-purge"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -146,6 +149,10 @@ export default function AdminPage() {
   const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
   const [etaIntegration, setEtaIntegration] = useState(defaultEtaIntegration);
   const [etaConnection, setEtaConnection] = useState(null);
+  const [dataFlowReport, setDataFlowReport] = useState(null);
+  const [dataFlowLoading, setDataFlowLoading] = useState(false);
+  const [purgeForm, setPurgeForm] = useState({ scope: "current_organization", confirmation_phrase: "", include_banks: false, include_users: false });
+  const [purgeResult, setPurgeResult] = useState(null);
   const [twoFactorSetup, setTwoFactorSetup] = useState(null);
   const [otpCode, setOtpCode] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -554,6 +561,33 @@ export default function AdminPage() {
     }
   };
 
+  const runDataFlowValidation = async () => {
+    setDataFlowLoading(true);
+    try {
+      const response = await api.get("/admin/data-flow-validation");
+      setDataFlowReport(response.data);
+      if (response.data.is_valid) toast.success("كل تدفقات البيانات سليمة ومتوازنة");
+      else toast.error("يوجد ملاحظات في تدفقات البيانات تحتاج مراجعة");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تشغيل فحص تدفقات البيانات");
+    } finally {
+      setDataFlowLoading(false);
+    }
+  };
+
+  const purgeProgramData = async () => {
+    if (!window.confirm("تحذير: سيتم حذف بيانات المستخدم المحددة نهائياً ولا يمكن التراجع. هل تريد المتابعة؟")) return;
+    try {
+      const response = await api.post("/admin/program-data/purge", purgeForm);
+      setPurgeResult(response.data);
+      toast.success("تم تفريغ البيانات المحددة نهائياً");
+      setPurgeForm((current) => ({ ...current, confirmation_phrase: "" }));
+      await Promise.all([loadBanks(), loadSecurityReview()]);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تفريغ البيانات");
+    }
+  };
+
   const setup2FA = async () => {
     try {
       const response = await api.post("/admin/2fa/setup");
@@ -873,6 +907,35 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
+          </section>}
+
+          {activeAdminSection === "data-flows" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="data-flow-validation-section">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between" data-testid="data-flow-validation-heading">
+              <div className="flex items-center gap-3" data-testid="data-flow-validation-title-block"><Workflow className="h-6 w-6 text-emerald-700" /><div><p className="text-sm font-extrabold text-emerald-700" data-testid="data-flow-validation-eyebrow">تدفقات البيانات</p><h2 className="text-2xl font-extrabold" data-testid="data-flow-validation-title">فحص شامل من القيد حتى القوائم</h2></div></div>
+              <Button type="button" onClick={runDataFlowValidation} disabled={dataFlowLoading} className="h-11 bg-slate-950 text-white" data-testid="run-data-flow-validation-button"><Workflow className="h-4 w-4" /> تشغيل الفحص الآن</Button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="data-flow-validation-summary-cards">
+              <div className="rounded-xl bg-slate-950 p-4 text-white" data-testid="data-flow-overall-card"><p className="text-xs font-bold text-slate-300" data-testid="data-flow-overall-label">الحالة العامة</p><p className="text-xl font-extrabold" data-testid="data-flow-overall-value">{dataFlowReport ? (dataFlowReport.is_valid ? "سليم" : "به ملاحظات") : "لم يتم الفحص"}</p></div>
+              <div className="rounded-xl bg-emerald-50 p-4" data-testid="data-flow-organizations-card"><p className="text-xs font-bold text-emerald-700" data-testid="data-flow-organizations-label">عدد الجهات المفحوصة</p><p className="text-xl font-extrabold" data-testid="data-flow-organizations-value">{dataFlowReport?.organizations?.length || 0}</p></div>
+              <div className="rounded-xl bg-amber-50 p-4" data-testid="data-flow-generated-card"><p className="text-xs font-bold text-amber-700" data-testid="data-flow-generated-label">وقت الفحص</p><p className="text-sm font-extrabold" data-testid="data-flow-generated-value">{dataFlowReport?.generated_at ? new Date(dataFlowReport.generated_at).toLocaleString("ar-EG") : "—"}</p></div>
+            </div>
+            <div className="mt-5 space-y-4" data-testid="data-flow-validation-organizations">
+              {(dataFlowReport?.organizations || []).map((item) => <div key={item.organization_id} className="rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid={`data-flow-organization-${item.organization_id}`}><div className="mb-3 flex flex-wrap items-center justify-between gap-3" data-testid={`data-flow-organization-${item.organization_id}-heading`}><h3 className="text-lg font-extrabold" data-testid={`data-flow-organization-${item.organization_id}-name`}>{item.organization_name}</h3><Badge className={item.accounting.is_valid && item.membership.is_valid ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"} data-testid={`data-flow-organization-${item.organization_id}-status`}>{item.accounting.is_valid && item.membership.is_valid ? "سليم" : "مراجعة مطلوبة"}</Badge></div><div className="grid grid-cols-1 gap-3 lg:grid-cols-2" data-testid={`data-flow-organization-${item.organization_id}-grid`}><div className="rounded-lg bg-white p-4" data-testid={`data-flow-organization-${item.organization_id}-accounting`}><h4 className="mb-3 font-extrabold" data-testid={`data-flow-organization-${item.organization_id}-accounting-title`}>المحاسبة</h4><ul className="space-y-2 text-sm font-bold text-slate-700" data-testid={`data-flow-organization-${item.organization_id}-accounting-list`}><li>القيود الظاهرة: {item.accounting.journal_entries_count}</li><li>قيود عكسية مخفية من التقارير: {item.accounting.hidden_reversal_entries_count}</li><li>دفتر الأستاذ ↔ ميزان المراجعة: {item.accounting.ledger_trial_mismatches?.length ? "به فروق" : "مطابق"}</li><li>ميزان المراجعة: {item.accounting.trial_balance?.is_balanced ? "متوازن" : "غير متوازن"}</li><li>فرق الميزانية: {formatCurrency(item.accounting.balance_sheet?.check || 0)}</li><li>الأخطاء الحرجة: {item.accounting.critical_accounting_errors?.length || 0}</li></ul></div><div className="rounded-lg bg-white p-4" data-testid={`data-flow-organization-${item.organization_id}-membership`}><h4 className="mb-3 font-extrabold" data-testid={`data-flow-organization-${item.organization_id}-membership-title`}>العضوية</h4>{item.membership.is_applicable ? <ul className="space-y-2 text-sm font-bold text-slate-700" data-testid={`data-flow-organization-${item.organization_id}-membership-list`}><li>عدد الأعضاء: {item.membership.members_count}</li><li>فعال: {item.membership.status_counts?.active || 0} — معاش: {item.membership.status_counts?.retired || 0} — متوفي: {item.membership.status_counts?.deceased || 0} — مستقيل: {item.membership.status_counts?.resigned || 0}</li><li>المستحق: {formatCurrency(item.membership.total_due || 0)}</li><li>المحصل: {formatCurrency(item.membership.total_collected || 0)}</li><li>المتبقي: {formatCurrency(item.membership.remaining_balance || 0)}</li><li>ملاحظات العضوية: {item.membership.issues?.length || 0}</li></ul> : <p className="text-sm font-bold text-slate-500" data-testid={`data-flow-organization-${item.organization_id}-membership-not-applicable`}>{item.membership.message}</p>}</div></div></div>)}
+              {!dataFlowReport && <p className="rounded-lg bg-slate-50 p-4 text-center font-bold text-slate-500" data-testid="data-flow-validation-empty-state">اضغط تشغيل الفحص الآن لعرض كل تدفقات البيانات بالبرنامج.</p>}
+            </div>
+          </section>}
+
+          {isSuperAdmin && activeAdminSection === "data-purge" && <section className="rounded-xl border border-red-200 bg-white p-6 shadow-sm" data-testid="program-data-purge-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="program-data-purge-heading"><DatabaseZap className="h-6 w-6 text-red-700" /><div><p className="text-sm font-extrabold text-red-700" data-testid="program-data-purge-eyebrow">تفريغ نهائي</p><h2 className="text-2xl font-extrabold" data-testid="program-data-purge-title">تفريغ البرنامج من بيانات المستخدم</h2></div></div>
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-extrabold text-red-800" data-testid="program-data-purge-warning">هذه العملية تحذف البيانات نهائياً ولا يمكن التراجع عنها. لا يتم تنفيذها إلا بعد كتابة عبارة التأكيد كما هي.</div>
+            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="program-data-purge-form">
+              <div className="space-y-2" data-testid="program-data-purge-scope-wrapper"><Label data-testid="program-data-purge-scope-label">نطاق التفريغ</Label><select value={purgeForm.scope} onChange={(event) => setPurgeForm((current) => ({ ...current, scope: event.target.value }))} className="h-11 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="program-data-purge-scope-select"><option value="current_organization">الجهة الحالية فقط</option><option value="all_organizations">كل الجهات</option></select></div>
+              <div className="space-y-2" data-testid="program-data-purge-confirmation-wrapper"><Label data-testid="program-data-purge-confirmation-label">عبارة التأكيد: تفريغ البيانات نهائيا</Label><Input value={purgeForm.confirmation_phrase} onChange={(event) => setPurgeForm((current) => ({ ...current, confirmation_phrase: event.target.value }))} className="h-11 bg-slate-50 text-right" data-testid="program-data-purge-confirmation-input" /></div>
+              <button type="button" onClick={() => setPurgeForm((current) => ({ ...current, include_banks: !current.include_banks }))} className={`rounded-lg border p-4 text-right font-extrabold ${purgeForm.include_banks ? "border-red-300 bg-red-50 text-red-800" : "border-slate-200 bg-slate-50 text-slate-600"}`} data-testid="program-data-purge-include-banks-toggle">{purgeForm.include_banks ? "✓" : "○"} حذف البنوك وإعداداتها أيضاً</button>
+              <button type="button" onClick={() => setPurgeForm((current) => ({ ...current, include_users: !current.include_users }))} className={`rounded-lg border p-4 text-right font-extrabold ${purgeForm.include_users ? "border-red-300 bg-red-50 text-red-800" : "border-slate-200 bg-slate-50 text-slate-600"}`} data-testid="program-data-purge-include-users-toggle">{purgeForm.include_users ? "✓" : "○"} حذف المستخدمين غير السوبر أدمن أيضاً</button>
+              <Button type="button" onClick={purgeProgramData} disabled={purgeForm.confirmation_phrase.trim() !== "تفريغ البيانات نهائيا"} className="h-12 bg-red-700 text-white hover:bg-red-800 md:col-span-2" data-testid="program-data-purge-submit-button"><Trash2 className="h-4 w-4" /> تنفيذ التفريغ النهائي</Button>
+            </div>
+            {purgeResult && <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4" data-testid="program-data-purge-result"><h3 className="mb-3 font-extrabold" data-testid="program-data-purge-result-title">نتيجة التفريغ</h3><div className="grid grid-cols-1 gap-2 md:grid-cols-2" data-testid="program-data-purge-result-grid">{Object.entries(purgeResult.deleted_counts || {}).map(([collection, count]) => <p key={collection} className="rounded bg-white p-2 text-sm font-bold" data-testid={`program-data-purge-result-${collection}`}>{collection}: {count}</p>)}</div></div>}
           </section>}
 
           {(activeAdminSection === "security-review" || activeAdminSection === "audit-log") && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="security-review-section">

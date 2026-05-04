@@ -16,19 +16,13 @@ const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 16 }, (_, index) => currentYear - 10 + index);
 
 const yearRange = (year) => ({ from_date: `${year}-01-01`, to_date: `${year}-12-31` });
-const lineAmount = (line) => Number(line?.amount || 0);
 const sectionTotal = (section) => Number(section?.total || 0);
+const lineAmount = (line) => Number(line?.amount || 0);
 const officialEmailOrEmpty = (email) => {
   const value = (email || "").trim();
   if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
   return value;
 };
-
-function buildCompareMap(sections = []) {
-  const map = new Map();
-  sections.forEach((section) => (section?.lines || []).forEach((line) => map.set(`${line.code || ""}-${line.name}`, lineAmount(line))));
-  return map;
-}
 
 function SignatureStrip({ testId }) {
   return (
@@ -53,46 +47,39 @@ function ReportHeader({ title, subtitle, year, dateLabel, testId, unionName, pro
   );
 }
 
-function AnnualRowsTable({ title, rows, compareMap, currentLabel, total, previousTotal, testId }) {
+function AnnualRowsTable({ title, rows, currentLabel, total, testId }) {
   return (
     <div className="rounded-lg border border-slate-300 bg-white" data-testid={`${testId}-box`}>
       <div className="border-b border-slate-300 bg-slate-100 px-4 py-2 text-center text-lg font-extrabold" data-testid={`${testId}-title`}>{title}</div>
       <Table data-testid={testId}>
         <TableHeader>
           <TableRow className="bg-white hover:bg-white">
-            <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">مقارن</TableHead>
             <TableHead className="border border-slate-300 text-center font-extrabold text-slate-900">البيان</TableHead>
             <TableHead className="w-36 border border-slate-300 text-center font-extrabold text-slate-900">{currentLabel}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && <TableRow data-testid={`${testId}-empty-row`}><TableCell colSpan={3} className="border border-slate-300 py-7 text-center font-bold text-slate-500">لا توجد بيانات</TableCell></TableRow>}
-          {rows.map((line, index) => <TableRow key={`${line.code || ""}-${line.name}-${index}`} data-testid={`${testId}-row-${index}`}><TableCell className="border border-slate-300 text-center" data-testid={`${testId}-row-${index}-compare`}>{formatCurrency(compareMap.get(`${line.code || ""}-${line.name}`) || 0)}</TableCell><TableCell className="border border-slate-300 font-extrabold" data-testid={`${testId}-row-${index}-name`}>{line.name}</TableCell><TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${index}-amount`}>{formatCurrency(lineAmount(line))}</TableCell></TableRow>)}
-          <TableRow className="bg-slate-100 font-extrabold" data-testid={`${testId}-total-row`}><TableCell className="border border-slate-300 text-center" data-testid={`${testId}-previous-total`}>{formatCurrency(previousTotal || 0)}</TableCell><TableCell className="border border-slate-300">الإجمالي</TableCell><TableCell className="border border-slate-300 text-center" data-testid={`${testId}-current-total`}>{formatCurrency(total || 0)}</TableCell></TableRow>
+          {rows.length === 0 && <TableRow data-testid={`${testId}-empty-row`}><TableCell colSpan={2} className="border border-slate-300 py-7 text-center font-bold text-slate-500">لا توجد بيانات</TableCell></TableRow>}
+          {rows.map((line, index) => <TableRow key={`${line.code || ""}-${line.name}-${index}`} data-testid={`${testId}-row-${index}`}><TableCell className="border border-slate-300 font-extrabold" data-testid={`${testId}-row-${index}-name`}>{line.name}</TableCell><TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${index}-amount`}>{formatCurrency(lineAmount(line))}</TableCell></TableRow>)}
+          <TableRow className="bg-slate-100 font-extrabold" data-testid={`${testId}-total-row`}><TableCell className="border border-slate-300">الإجمالي</TableCell><TableCell className="border border-slate-300 text-center" data-testid={`${testId}-current-total`}>{formatCurrency(total || 0)}</TableCell></TableRow>
         </TableBody>
       </Table>
     </div>
   );
 }
 
-function BalanceSheetPrint({ report, previousReport, year, unionName, projectName, email }) {
+function BalanceSheetPrint({ report, year, unionName, projectName, email }) {
   const currentAssets = report?.balance_sheet?.assets;
   const currentLiabilities = report?.balance_sheet?.liabilities;
   const currentEquity = report?.balance_sheet?.equity;
-  const previousAssets = previousReport?.balance_sheet?.assets;
-  const previousLiabilities = previousReport?.balance_sheet?.liabilities;
-  const previousEquity = previousReport?.balance_sheet?.equity;
-  const assetsCompare = buildCompareMap([previousAssets]);
-  const liabilitiesCompare = buildCompareMap([previousLiabilities, previousEquity]);
   const rightRows = [...(currentLiabilities?.lines || []), ...(currentEquity?.lines || [])];
-  const rightPreviousTotal = sectionTotal(previousLiabilities) + sectionTotal(previousEquity);
   const rightTotal = sectionTotal(currentLiabilities) + sectionTotal(currentEquity);
   return (
     <section className="financial-print-sheet" data-testid="balance-sheet-print-section">
       <ReportHeader title="الميزانية" year={year} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="balance-sheet-print-grid">
-        <AnnualRowsTable title="الأصول" rows={currentAssets?.lines || []} compareMap={assetsCompare} currentLabel={String(year)} total={sectionTotal(currentAssets)} previousTotal={sectionTotal(previousAssets)} testId="balance-sheet-print-assets-table" />
-        <AnnualRowsTable title="المخصصات والفائض" rows={rightRows} compareMap={liabilitiesCompare} currentLabel={String(year)} total={rightTotal} previousTotal={rightPreviousTotal} testId="balance-sheet-print-liabilities-equity-table" />
+        <AnnualRowsTable title="الأصول" rows={currentAssets?.lines || []} currentLabel={String(year)} total={sectionTotal(currentAssets)} testId="balance-sheet-print-assets-table" />
+        <AnnualRowsTable title="المخصصات والفائض" rows={rightRows} currentLabel={String(year)} total={rightTotal} testId="balance-sheet-print-liabilities-equity-table" />
       </div>
       <div className={`mt-5 border-2 p-3 text-center text-xl font-extrabold ${report?.balance_sheet?.check?.total === 0 ? "border-slate-400" : "border-red-600 text-red-700"}`} data-testid="balance-sheet-print-check">فرق اتزان الميزانية: {formatCurrency(report?.balance_sheet?.check?.total || 0)}</div>
       <SignatureStrip testId="balance-sheet-print-signatures" />
@@ -100,17 +87,15 @@ function BalanceSheetPrint({ report, previousReport, year, unionName, projectNam
   );
 }
 
-function IncomeExpensePrint({ report, previousReport, year, unionName, projectName, email }) {
+function IncomeExpensePrint({ report, year, unionName, projectName, email }) {
   const revenues = report?.revenues_expenses?.revenues;
   const expenses = report?.revenues_expenses?.expenses;
-  const revenuesCompare = buildCompareMap([previousReport?.revenues_expenses?.revenues]);
-  const expensesCompare = buildCompareMap([previousReport?.revenues_expenses?.expenses]);
   return (
     <section className="financial-print-sheet" data-testid="income-expense-print-section">
       <ReportHeader title="حساب الإيرادات والمصروفات" year={year} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="income-expense-print-grid">
-        <AnnualRowsTable title="إيرادات النشاط" rows={revenues?.lines || []} compareMap={revenuesCompare} currentLabel={String(year)} total={sectionTotal(revenues)} previousTotal={sectionTotal(previousReport?.revenues_expenses?.revenues)} testId="income-print-revenues-table" />
-        <AnnualRowsTable title="المصروفات" rows={expenses?.lines || []} compareMap={expensesCompare} currentLabel={String(year)} total={sectionTotal(expenses)} previousTotal={sectionTotal(previousReport?.revenues_expenses?.expenses)} testId="income-print-expenses-table" />
+        <AnnualRowsTable title="إيرادات النشاط" rows={revenues?.lines || []} currentLabel={String(year)} total={sectionTotal(revenues)} testId="income-print-revenues-table" />
+        <AnnualRowsTable title="المصروفات" rows={expenses?.lines || []} currentLabel={String(year)} total={sectionTotal(expenses)} testId="income-print-expenses-table" />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="income-expense-print-result">الفائض / العجز: {formatCurrency(report?.revenues_expenses?.result?.total || 0)}</div>
       <SignatureStrip testId="income-expense-print-signatures" />
@@ -118,17 +103,15 @@ function IncomeExpensePrint({ report, previousReport, year, unionName, projectNa
   );
 }
 
-function ReceiptsPaymentsPrint({ report, previousReport, year, unionName, projectName, email }) {
+function ReceiptsPaymentsPrint({ report, year, unionName, projectName, email }) {
   const receipts = report?.receipts_payments?.receipts;
   const payments = report?.receipts_payments?.payments;
-  const receiptsCompare = buildCompareMap([previousReport?.receipts_payments?.receipts]);
-  const paymentsCompare = buildCompareMap([previousReport?.receipts_payments?.payments]);
   return (
     <section className="financial-print-sheet" data-testid="receipts-payments-print-section">
       <ReportHeader title="حساب المقبوضات والمدفوعات" year={year} dateLabel={`في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="receipts-payments-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="receipts-payments-print-grid">
-        <AnnualRowsTable title="مقبوضات النشاط" rows={receipts?.lines || []} compareMap={receiptsCompare} currentLabel="رصيد آخر المدة" total={sectionTotal(receipts)} previousTotal={sectionTotal(previousReport?.receipts_payments?.receipts)} testId="receipts-print-table" />
-        <AnnualRowsTable title="مصروفات النشاط" rows={payments?.lines || []} compareMap={paymentsCompare} currentLabel="رصيد آخر المدة" total={sectionTotal(payments)} previousTotal={sectionTotal(previousReport?.receipts_payments?.payments)} testId="payments-print-table" />
+        <AnnualRowsTable title="مقبوضات النشاط" rows={receipts?.lines || []} currentLabel="رصيد آخر المدة" total={sectionTotal(receipts)} testId="receipts-print-table" />
+        <AnnualRowsTable title="مصروفات النشاط" rows={payments?.lines || []} currentLabel="رصيد آخر المدة" total={sectionTotal(payments)} testId="payments-print-table" />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="receipts-payments-print-net">صافي المقبوضات والمدفوعات: {formatCurrency(report?.receipts_payments?.net_cash_flow?.total || 0)}</div>
       <SignatureStrip testId="receipts-payments-print-signatures" />
@@ -179,7 +162,6 @@ export default function FinancialStatementsPage() {
   const reportEmail = officialEmailOrEmpty(settings.organizations?.[user?.organization_id]?.email);
   const [year, setYear] = useState(String(currentYear));
   const [report, setReport] = useState(null);
-  const [previousReport, setPreviousReport] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const loadReports = useCallback(async () => {
@@ -187,13 +169,8 @@ export default function FinancialStatementsPage() {
     try {
       const selectedYear = Number(year);
       const currentRange = yearRange(selectedYear);
-      const previousRange = yearRange(selectedYear - 1);
-      const [currentResponse, previousResponse] = await Promise.all([
-        api.get(`/financial-statements?from_date=${currentRange.from_date}&to_date=${currentRange.to_date}`),
-        api.get(`/financial-statements?from_date=${previousRange.from_date}&to_date=${previousRange.to_date}`),
-      ]);
+      const currentResponse = await api.get(`/financial-statements?from_date=${currentRange.from_date}&to_date=${currentRange.to_date}`);
       setReport(currentResponse.data);
-      setPreviousReport(previousResponse.data);
       if (currentResponse.data.accounting_errors?.length) toast.warning("تم اكتشاف ملاحظات محاسبية في التقرير");
     } catch (error) {
       toast.error("تعذر تحميل القوائم المالية");
@@ -212,9 +189,9 @@ export default function FinancialStatementsPage() {
         <section className="financial-report-actions rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="financial-statements-year-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-2xl font-extrabold" data-testid="financial-statements-year-title">تقارير سنوية فقط</h2><p className="text-sm font-bold text-slate-500" data-testid="financial-statements-year-subtitle">كل الحسابات الختامية تطبع في نهاية السنة المختارة بنفس شكل النماذج.</p></div><ExportReportButtons title={`الحسابات الختامية في ${year}`} fileName={`الحسابات-الختامية-${year}`} selectors={["[data-testid='balance-sheet-print-section']", "[data-testid='income-expense-print-section']", "[data-testid='receipts-payments-print-section']", "[data-testid='accounting-errors-print-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-financial-statements-button" excelTestId="export-financial-statements-excel-button" wordTestId="export-financial-statements-word-button" /></div><div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_auto]" data-testid="financial-statements-year-controls"><select value={year} onChange={(event) => setYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-year-select">{years.map((item) => <option key={item} value={item} label={String(item)} />)}</select><Button type="button" onClick={loadReports} className="h-11 bg-slate-950 text-white" data-testid="generate-financial-statements-button"><FileSpreadsheet className="h-4 w-4" /> توليد تلقائي</Button><Button type="button" onClick={() => window.print()} variant="outline" className="h-11 bg-white" data-testid="print-annual-financial-statements-button"><Printer className="h-4 w-4" /> طباعة الحسابات الختامية</Button></div></section>
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4 print:hidden" data-testid="financial-statements-kpi-grid"><div className="rounded-xl bg-slate-950 p-4 text-white"><p className="text-xs font-bold text-slate-300">حالة القوائم</p><p className="text-xl font-extrabold" data-testid="financial-statements-valid-value">{report?.is_accounting_valid ? "سليمة" : "بها أخطاء"}</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs font-bold text-emerald-700">إجمالي الأصول</p><p className="text-xl font-extrabold" data-testid="financial-statements-assets-value">{formatCurrency(report?.balance_sheet?.assets?.total || 0)}</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs font-bold text-amber-700">نتيجة السنة</p><p className="text-xl font-extrabold" data-testid="financial-statements-result-value">{formatCurrency(report?.revenues_expenses?.result?.total || 0)}</p></div><div className="rounded-xl bg-red-50 p-4"><p className="text-xs font-bold text-red-700">الأخطاء المكتشفة</p><p className="text-xl font-extrabold" data-testid="financial-statements-errors-value">{report?.accounting_errors?.length || 0}</p></div></section>
         <AccountingCorrectionsReview corrections={report?.accounting_corrections || []} />
-        <BalanceSheetPrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <IncomeExpensePrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <ReceiptsPaymentsPrint report={report} previousReport={previousReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <BalanceSheetPrint report={report} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <IncomeExpensePrint report={report} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <ReceiptsPaymentsPrint report={report} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
         <AccountingErrorsPrint report={report} />
       </section>
       <footer className="px-4 pb-5 print:hidden"><CreditLine testId="financial-statements-creator-credit" /></footer>

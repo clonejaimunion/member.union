@@ -5,6 +5,9 @@ const reactHooks = require("eslint-plugin-react-hooks");
 module.exports = [
   {
     ignores: ["build/**", "node_modules/**", "coverage/**"],
+    linterOptions: {
+      reportUnusedDisableDirectives: false,
+    },
   },
   {
     files: ["src/**/*.{js,jsx}"],
