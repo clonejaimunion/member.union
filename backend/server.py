@@ -1326,7 +1326,7 @@ class AuditLogResponse(BaseModel):
 
 
 class AccountingRuleBase(BaseModel):
-    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "OpeningBalance", "MembershipBatchPayment", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
     sub_type: Optional[str] = None
     payment_method: Optional[str] = None
     debit_account: str
@@ -1355,7 +1355,7 @@ class AccountingRuleResponse(AccountingRuleBase):
 
 
 class RuleSimulationRequest(BaseModel):
-    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
+    event_type: Literal["Income", "Expense", "BankFee", "Deposit", "Interest", "OpeningBalance", "MembershipBatchPayment", "AssetPurchase", "AssetDepreciation", "Loan", "Custody"]
     sub_type: Optional[str] = None
     payment_method: Optional[str] = None
     amount: float = Field(..., gt=0)
