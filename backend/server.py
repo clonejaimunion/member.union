@@ -2470,6 +2470,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
     base_accounts = [
         {"code": "1000", "name": "الأصول", "account_type": "asset", "nature": "debit", "is_postable": False, "system_key": "assets"},
         {"code": "1100", "name": "البنوك", "account_type": "asset", "nature": "debit", "is_postable": False, "parent_code": "1000", "system_key": "banks"},
+        {"code": "1150", "name": "الخزينة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "cash_box"},
         {"code": "1200", "name": "شيكات تحت التحصيل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "checks_under_collection"},
         {"code": "1250", "name": "ودائع لأجل", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "term_deposits"},
         {"code": "1300", "name": "عوائد ودائع مستحقة", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "accrued_deposit_interest"},
@@ -2573,8 +2574,10 @@ async def resolve_journal_account(line: dict) -> dict:
         "عوائد ودائع مستحقة": "accrued_deposit_interest",
         "إيرادات فوائد ودائع": "deposit_interest_revenue",
         "رصيد افتتاحي": "opening_balance_equity",
+        "الخزينة": "cash_box",
         "مديونية اشتراكات العضوية": "membership_subscription_receivable",
         "إيرادات اشتراكات العضوية": "membership_subscription_revenue",
+        "إيرادات الاشتراكات": "membership_subscription_revenue",
     }
     system_key = line.get("system_key") or system_key_map.get(account_name)
     account = await account_for_system_key(system_key, account_name) if system_key else await db.chart_accounts.find_one(with_organization({"name": account_name, "is_active": True, "is_postable": True}), {"_id": 0})
