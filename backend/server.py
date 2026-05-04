@@ -1474,7 +1474,7 @@ async def ensure_bank_transaction_date_allowed(bank_id: Optional[str], target_da
     bank = await ensure_bank_async(bank_id)
     opening_date = parse_date_field(bank.get("opening_balance_date"))
     if opening_date and target_date < opening_date:
-        raise HTTPException(status_code=400, detail="No financial transaction is allowed before the Opening Balance Date. لا يمكن تسجيل أي عملية مالية قبل تاريخ الرصيد الافتتاحي للبنك.")
+        raise HTTPException(status_code=400, detail="No financial transaction is allowed before the Opening Balance Date.")
 
 
 def default_tariff_rules(bank_id: str) -> BankingTariffRules:

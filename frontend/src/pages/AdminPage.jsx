@@ -75,6 +75,13 @@ const defaultAuthorityLogoSettings = [
   { name: "وزارة الاتصالات وتكنولوجيا المعلومات", enabled: true, src: "" },
 ];
 
+const openingDateToApi = (value) => {
+  const cleaned = String(value || "").trim().replace(/-/g, "/");
+  const match = cleaned.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (!match) return "";
+  return `${match[1]}-${match[2]}-${match[3]}`;
+};
+
 const managerEventOptions = [
   ["Income", "إيراد"], ["Expense", "مصروف"], ["BankFee", "مصروف بنكي"], ["Deposit", "وديعة"], ["Interest", "فائدة"], ["OpeningBalance", "رصيد افتتاحي"], ["MembershipBatchPayment", "إذن عضوية جماعي"], ["AssetPurchase", "شراء أصل"], ["AssetDepreciation", "إهلاك"], ["Loan", "سلفة"], ["Custody", "عهدة"],
 ];
@@ -193,7 +200,7 @@ export default function AdminPage() {
       const banksResponse = await api.get("/banks");
       setBanks(banksResponse.data);
       setOpeningBalances(banksResponse.data.reduce((acc, bank) => ({ ...acc, [bank.id]: String(bank.opening_balance || "") }), {}));
-      setOpeningBalanceDates(banksResponse.data.reduce((acc, bank) => ({ ...acc, [bank.id]: bank.opening_balance_date ? String(bank.opening_balance_date).slice(0, 10) : "" }), {}));
+      setOpeningBalanceDates(banksResponse.data.reduce((acc, bank) => ({ ...acc, [bank.id]: bank.opening_balance_date ? formatDate(bank.opening_balance_date) : "" }), {}));
     } catch (error) {
       toast.error("تعذر تحميل البنوك");
     }
@@ -458,9 +465,10 @@ export default function AdminPage() {
 
   const createBank = async (event) => {
     event.preventDefault();
-    if (!bankForm.opening_balance_date) return toast.error("يجب إدخال تاريخ الرصيد الافتتاحي بصيغة YYYY/MM/DD");
+    const openingBalanceDate = openingDateToApi(bankForm.opening_balance_date);
+    if (!openingBalanceDate) return toast.error("يجب إدخال تاريخ الرصيد الافتتاحي بصيغة YYYY/MM/DD");
     try {
-      await api.post("/admin/banks", { ...bankForm, opening_balance: Number(bankForm.opening_balance || 0) });
+      await api.post("/admin/banks", { ...bankForm, opening_balance: Number(bankForm.opening_balance || 0), opening_balance_date: openingBalanceDate });
       toast.success("تمت إضافة البنك الجديد");
       setBankForm({ name: "", code: "", swift_code: "", logo_url: "", color: "#0f172a", opening_balance: "0", opening_balance_date: "" });
       loadBanks();
@@ -479,9 +487,10 @@ export default function AdminPage() {
   };
 
   const saveOpeningBalance = async (bankId) => {
-    if (!openingBalanceDates[bankId]) return toast.error("يجب إدخال تاريخ الرصيد الافتتاحي بصيغة YYYY/MM/DD قبل الحفظ");
+    const openingBalanceDate = openingDateToApi(openingBalanceDates[bankId]);
+    if (!openingBalanceDate) return toast.error("يجب إدخال تاريخ الرصيد الافتتاحي بصيغة YYYY/MM/DD قبل الحفظ");
     try {
-      await api.put(`/admin/banks/${bankId}/opening-balance`, { opening_balance: Number(openingBalances[bankId] || 0), opening_balance_date: openingBalanceDates[bankId] });
+      await api.put(`/admin/banks/${bankId}/opening-balance`, { opening_balance: Number(openingBalances[bankId] || 0), opening_balance_date: openingBalanceDate });
       toast.success("تم حفظ الرصيد الافتتاحي");
       await loadBanks();
     } catch (error) {
@@ -950,7 +959,7 @@ export default function AdminPage() {
               </div>
               <div className="space-y-2" data-testid="new-bank-opening-balance-date-wrapper">
                 <Label htmlFor="new_bank_opening_balance_date" data-testid="new-bank-opening-balance-date-label">تاريخ الرصيد الافتتاحي YYYY/MM/DD</Label>
-                <Input id="new_bank_opening_balance_date" type="date" value={bankForm.opening_balance_date} onChange={(event) => setBankForm((current) => ({ ...current, opening_balance_date: event.target.value }))} required className="h-12 rounded-lg bg-slate-50" data-testid="new-bank-opening-balance-date-input" />
+                <Input id="new_bank_opening_balance_date" type="text" inputMode="numeric" placeholder="YYYY/MM/DD" value={bankForm.opening_balance_date} onChange={(event) => setBankForm((current) => ({ ...current, opening_balance_date: event.target.value.replace(/[^0-9/-]/g, "") }))} required className="h-12 rounded-lg bg-slate-50 text-right" data-testid="new-bank-opening-balance-date-input" />
               </div>
               <Button type="submit" className="h-12 rounded-lg bg-slate-950 text-white md:col-span-2" data-testid="create-bank-submit-button"><Plus className="h-4 w-4" /> إضافة البنك</Button>
             </form>
@@ -983,7 +992,7 @@ export default function AdminPage() {
                   </div>
                   <div className="space-y-2" data-testid={`opening-balance-date-wrapper-${bank.id}`}>
                     <Label data-testid={`opening-balance-date-label-${bank.id}`}>تاريخ الرصيد YYYY/MM/DD</Label>
-                    <Input type="date" value={openingBalanceDates[bank.id] || ""} onChange={(event) => updateOpeningBalanceDateInput(bank.id, event.target.value)} className="h-11 rounded-lg bg-white" data-testid={`opening-balance-date-input-${bank.id}`} />
+                    <Input type="text" inputMode="numeric" placeholder="YYYY/MM/DD" value={openingBalanceDates[bank.id] || ""} onChange={(event) => updateOpeningBalanceDateInput(bank.id, event.target.value.replace(/[^0-9/-]/g, ""))} className="h-11 rounded-lg bg-white text-right" data-testid={`opening-balance-date-input-${bank.id}`} />
                   </div>
                   <Button type="button" onClick={() => saveOpeningBalance(bank.id)} className="h-11 rounded-lg bg-slate-950 text-white" data-testid={`save-opening-balance-button-${bank.id}`}><Save className="h-4 w-4" /> حفظ</Button>
                 </div>
