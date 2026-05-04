@@ -111,6 +111,15 @@ export default function BankReconciliationPage() {
     });
   }, [bankId]);
 
+  const loadBookBalance = useCallback(async () => {
+    try {
+      const response = await api.get(`/banks/${bankId}/book-balance`);
+      setBookBalance(String(response.data.book_balance ?? 0));
+    } catch (error) {
+      toast.error("تعذر تحميل الرصيد الدفتري من دفتر الأستاذ");
+    }
+  }, [bankId]);
+
   const formatSourceCheckDate = useCallback((value) => {
     if (!value) return currentDayMonth();
     const date = new Date(value);
@@ -168,7 +177,8 @@ export default function BankReconciliationPage() {
   useEffect(() => {
     api.get("/banks").then((response) => setBanks(response.data)).catch(() => setBanks(fallbackBanks));
     loadReconciliations();
-  }, [bankId, loadReconciliations]);
+    loadBookBalance();
+  }, [bankId, loadReconciliations, loadBookBalance]);
 
   useEffect(() => {
     if (canEditReconciliation && !editingReconciliationId) syncChecksFromRecords("both", true);
@@ -278,7 +288,7 @@ export default function BankReconciliationPage() {
     setEditingReconciliationId(null);
     setPeriodLabel("");
     setAdministration(unionFullName);
-    setBookBalance("");
+    loadBookBalance();
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
@@ -467,8 +477,8 @@ export default function BankReconciliationPage() {
               <Input value={periodLabel} onChange={(event) => setPeriodLabel(event.target.value)} placeholder="مثال: يناير 2025" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="reconciliation-period-input" />
             </div>
             <div className="space-y-2" data-testid="book-balance-wrapper">
-              <Label data-testid="book-balance-label">الرصيد الدفتري</Label>
-              <Input type="number" step="0.01" value={bookBalance} onChange={(event) => setBookBalance(event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="book-balance-input" />
+              <Label data-testid="book-balance-label">الرصيد الدفتري من دفتر الأستاذ</Label>
+              <Input readOnly aria-readonly="true" type="number" step="0.01" value={bookBalance} className="h-12 rounded-lg bg-slate-100 text-right font-extrabold text-slate-700" data-testid="book-balance-input" />
             </div>
             <div className="space-y-2" data-testid="bank-statement-balance-wrapper">
               <Label data-testid="bank-statement-balance-label">الرصيد - كشف الحساب البنكي</Label>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { formatCurrency, toDateTimeLocal } from "@/lib/format";
+import { formatCurrency, toDateInput } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
 
 const defaultForm = () => {
@@ -19,8 +19,8 @@ const defaultForm = () => {
     account_number: "",
     deposit_number: "",
     amount: "",
-    creation_datetime: toDateTimeLocal(now),
-    maturity_datetime: toDateTimeLocal(maturity),
+    creation_datetime: toDateInput(now),
+    maturity_datetime: toDateInput(maturity),
     monthly_interest_rate: "",
   };
 };
@@ -63,6 +63,8 @@ export default function DepositRegistration() {
         ...form,
         amount: Number(form.amount),
         monthly_interest_rate: Number(form.monthly_interest_rate),
+        creation_datetime: `${form.creation_datetime}T00:00`,
+        maturity_datetime: `${form.maturity_datetime}T00:00`,
       };
       const response = await api.post(`/banks/${bankId}/deposits`, payload);
       toast.success("تم تسجيل الوديعة بنجاح");
@@ -122,12 +124,12 @@ export default function DepositRegistration() {
               <Input id="monthly_interest_rate" required min="0" step="0.001" type="number" value={form.monthly_interest_rate} onChange={(event) => updateField("monthly_interest_rate", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-interest-rate" />
             </div>
             <div className="space-y-2" data-testid="field-creation-date-wrapper">
-              <Label htmlFor="creation_datetime" data-testid="label-creation-date">تاريخ إنشاء الوديعة - ساعة/يوم/شهر/سنة</Label>
-              <Input id="creation_datetime" required type="datetime-local" value={form.creation_datetime} onChange={(event) => updateField("creation_datetime", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-creation-datetime" />
+              <Label htmlFor="creation_datetime" data-testid="label-creation-date">تاريخ إنشاء الوديعة</Label>
+              <Input id="creation_datetime" required type="date" value={form.creation_datetime} onChange={(event) => updateField("creation_datetime", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-creation-datetime" />
             </div>
             <div className="space-y-2" data-testid="field-maturity-date-wrapper">
-              <Label htmlFor="maturity_datetime" data-testid="label-maturity-date">تاريخ استحقاق الوديعة - ساعة/يوم/شهر/سنة</Label>
-              <Input id="maturity_datetime" required type="datetime-local" value={form.maturity_datetime} onChange={(event) => updateField("maturity_datetime", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-maturity-datetime" />
+              <Label htmlFor="maturity_datetime" data-testid="label-maturity-date">تاريخ استحقاق الوديعة</Label>
+              <Input id="maturity_datetime" required type="date" value={form.maturity_datetime} onChange={(event) => updateField("maturity_datetime", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-maturity-datetime" />
             </div>
             <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row" data-testid="deposit-form-actions">
               <Button type="submit" disabled={isSaving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="submit-deposit-button">

@@ -14,7 +14,7 @@ import { formatCurrency } from "@/lib/format";
 
 const eventOptions = [
   ["Income", "إيراد"], ["Expense", "مصروف"], ["BankFee", "مصروف بنكي"], ["Deposit", "وديعة"],
-  ["Interest", "فائدة"], ["AssetPurchase", "شراء أصل"], ["AssetDepreciation", "إهلاك أصل"], ["Loan", "سلفة"], ["Custody", "عهدة"],
+  ["Interest", "فائدة"], ["OpeningBalance", "رصيد افتتاحي"], ["MembershipBatchPayment", "إذن عضوية جماعي"], ["AssetPurchase", "شراء أصل"], ["AssetDepreciation", "إهلاك أصل"], ["Loan", "سلفة"], ["Custody", "عهدة"],
 ];
 const eventLabels = Object.fromEntries(eventOptions);
 const subTypeOptions = [
@@ -22,7 +22,7 @@ const subTypeOptions = [
   ["hajj_umrah", "جمعية الحج والعمرة"], ["meat_installment", "قسط لحوم"], ["union_committee", "لجنة نقابية"],
   ["death_benefits", "إعانات وفاة"], ["Principal", "أصل الوديعة"], ["Accrued", "فائدة مستحقة"],
   ["Received", "فائدة محصلة"], ["Employee Loan", "سلفة موظف"], ["Employee Custody", "عهدة موظف"],
-  ["Annual", "سنوي"],
+  ["Annual", "سنوي"], ["Bank", "بنك"], ["Committee", "لجنة"],
 ];
 const subTypeLabels = Object.fromEntries(subTypeOptions);
 const paymentOptions = [
@@ -40,6 +40,8 @@ const dynamicAccountOptions = [
   { id: "dynamic-deposits", code: "AUTO", name: "ودائع لأجل", nature: "debit", is_dynamic: true },
   { id: "dynamic-accrued-interest", code: "AUTO", name: "عوائد ودائع مستحقة", nature: "debit", is_dynamic: true },
   { id: "dynamic-interest-revenue", code: "AUTO", name: "إيرادات فوائد ودائع", nature: "credit", is_dynamic: true },
+  { id: "dynamic-opening-balance", code: "AUTO", name: "رصيد افتتاحي", nature: "credit", is_dynamic: true },
+  { id: "dynamic-membership-revenue", code: "AUTO", name: "إيرادات اشتراكات العضوية", nature: "credit", is_dynamic: true },
   { id: "dynamic-loans", code: "AUTO", name: "سلف الموظفين", nature: "debit", is_dynamic: true },
   { id: "dynamic-custody", code: "AUTO", name: "عهد الموظفين", nature: "debit", is_dynamic: true },
 ];

@@ -10,13 +10,28 @@ export const formatNumber = (value) =>
 
 export const formatEgpLabel = (value) => `${formatNumber(value)} ج.م`;
 
-export const formatDateTime = (value) => {
+export const formatDate = (value) => {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("ar-EG", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10).replace(/-/g, "/");
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
 };
+
+export const formatMonth = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 7).replace(/-/g, "/");
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
+
+export const formatYear = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 4);
+  return String(date.getFullYear());
+};
+
+export const formatDateTime = formatDate;
 
 const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"];
 const tens = ["", "عشرة", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
@@ -74,6 +89,11 @@ export const numberToArabicCurrencyWords = (value) => {
 export const toDateTimeLocal = (date) => {
   const pad = (number) => String(number).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+export const toDateInput = (date) => {
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
 
 const easternArabicDigits = {
