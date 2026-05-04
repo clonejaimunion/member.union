@@ -1263,6 +1263,10 @@ class AccountingRuleCreate(AccountingRuleBase):
     pass
 
 
+class AccountingRuleUpdate(AccountingRuleBase):
+    pass
+
+
 class AccountingRuleResponse(AccountingRuleBase):
     model_config = ConfigDict(extra="ignore")
 
@@ -2485,8 +2489,39 @@ async def save_journal_entry_document(*, entry_date: date, description: str, lin
     return document
 
 
+async def create_reverse_journal_entry(original: dict, reason: str = "إلغاء/حذف عملية مرحلة", current_user: Optional[dict] = None) -> Optional[dict]:
+    if not original or original.get("is_reversal") or original.get("reversal_entry_id"):
+        return None
+    reversed_lines = []
+    for line in original.get("lines", []):
+        reversed_line = line.copy()
+        reversed_line["debit"] = round(float(line.get("credit") or 0), 2)
+        reversed_line["credit"] = round(float(line.get("debit") or 0), 2)
+        reversed_line["notes"] = f"قيد عكسي للقيد رقم {original.get('entry_number')} - {reason}"
+        reversed_lines.append(reversed_line)
+    document = await save_journal_entry_document(
+        entry_date=datetime.now(timezone.utc).date(),
+        description=f"قيد عكسي: {original.get('description') or '-'}",
+        reference=f"REV-{original.get('entry_number')}",
+        source_type=original.get("source_type") or "manual",
+        source_id=original.get("source_id") or original.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=reversed_lines,
+    )
+    await db.journal_entries.update_one(with_organization({"id": document["id"]}), {"$set": {"is_reversal": True, "reversal_of_entry_id": original.get("id"), "reversal_reason": reason}})
+    await db.journal_entries.update_one(with_organization({"id": original.get("id")}), {"$set": {"reversal_entry_id": document["id"], "reversal_reason": reason, "reversed_at": serialize_datetime(datetime.now(timezone.utc)), "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    return document
+
+
+async def reverse_journal_for_source(source_type: str, source_id: str, reason: str = "إلغاء/حذف عملية مرحلة", current_user: Optional[dict] = None):
+    documents = await db.journal_entries.find(with_organization({"source_type": source_type, "source_id": source_id, "is_reversal": {"$ne": True}, "reversal_entry_id": {"$exists": False}}), {"_id": 0}).to_list(1000)
+    for document in documents:
+        await create_reverse_journal_entry(document, reason, current_user)
+
+
 async def delete_journal_for_source(source_type: str, source_id: str):
-    await db.journal_entries.delete_many(with_organization({"source_type": source_type, "source_id": source_id}))
+    await reverse_journal_for_source(source_type, source_id)
 
 
 EXPENSE_RULE_ACCOUNT_MAP = {
@@ -2498,14 +2533,14 @@ EXPENSE_RULE_ACCOUNT_MAP = {
 def default_accounting_rules(organization_id: str) -> List[dict]:
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     defaults = [
-        ("rule-income-bank", "Income", "General", "bank", "البنك", "الإيرادات", 5, "إيراد عادي محصل بالبنك"),
-        ("rule-expense-general", "Expense", "General", "bank", "المصروفات", "البنك", 5, "مصروف عادي مدفوع من البنك"),
-        ("rule-bank-fee", "BankFee", "Bank Fee", "bank", "المصروفات البنكية", "البنك", 1, "عمولة أو مصروف بنكي"),
-        ("rule-deposit", "Deposit", "Principal", "bank", "ودائع لأجل", "البنك", 1, "ربط وديعة لأجل"),
-        ("rule-interest-accrued", "Interest", "Accrued", "accrual", "عوائد ودائع مستحقة", "إيرادات فوائد ودائع", 1, "فائدة مستحقة غير محصلة"),
-        ("rule-interest-received", "Interest", "Received", "bank", "البنك", "عوائد ودائع مستحقة", 1, "تحصيل فائدة سبق إثباتها"),
-        ("rule-loan", "Loan", "Employee Loan", "bank", "سلف الموظفين", "البنك", 2, "صرف سلفة موظف"),
-        ("rule-custody", "Custody", "Employee Custody", "bank", "عهد الموظفين", "البنك", 2, "صرف عهدة موظف"),
+        ("rule-income-bank", "Income", "General", "bank_transfer", "البنك", "الإيرادات", "إيراد عادي محصل بالبنك"),
+        ("rule-expense-general", "Expense", "General", "bank_transfer", "المصروفات", "البنك", "مصروف عادي مدفوع من البنك"),
+        ("rule-bank-fee", "BankFee", "banking", "bank_transfer", "المصروفات البنكية", "البنك", "عمولة أو مصروف بنكي"),
+        ("rule-deposit", "Deposit", "Principal", "bank_transfer", "ودائع لأجل", "البنك", "ربط وديعة لأجل"),
+        ("rule-interest-accrued", "Interest", "Accrued", None, "عوائد ودائع مستحقة", "إيرادات فوائد ودائع", "فائدة مستحقة غير محصلة"),
+        ("rule-interest-received", "Interest", "Received", "bank_transfer", "البنك", "عوائد ودائع مستحقة", "تحصيل فائدة سبق إثباتها"),
+        ("rule-loan", "Loan", "Employee Loan", "bank_transfer", "سلف الموظفين", "البنك", "صرف سلفة موظف"),
+        ("rule-custody", "Custody", "Employee Custody", "bank_transfer", "عهد الموظفين", "البنك", "صرف عهدة موظف"),
     ]
     return [{
         "id": rule_id,
@@ -2515,13 +2550,28 @@ def default_accounting_rules(organization_id: str) -> List[dict]:
         "payment_method": payment_method,
         "debit_account": debit,
         "credit_account": credit,
-        "priority": priority,
+        "priority": calculate_rule_priority({"event_type": event_type, "sub_type": sub_type, "payment_method": payment_method, "debit_account": debit, "credit_account": credit}),
         "is_active": True,
         "is_system": True,
         "notes": notes,
         "created_at": now_iso,
         "updated_at": now_iso,
-    } for rule_id, event_type, sub_type, payment_method, debit, credit, priority, notes in defaults]
+    } for rule_id, event_type, sub_type, payment_method, debit, credit, notes in defaults]
+
+
+def calculate_rule_priority(rule_data: dict) -> int:
+    specificity_score = 0
+    if rule_data.get("event_type"):
+        specificity_score += 1
+    if rule_data.get("sub_type"):
+        specificity_score += 2
+    if rule_data.get("payment_method"):
+        specificity_score += 2
+    if rule_data.get("debit_account"):
+        specificity_score += 1
+    if rule_data.get("credit_account"):
+        specificity_score += 1
+    return max(1, min(10, 10 - specificity_score))
 
 
 async def list_accounting_rules_for_organization(organization_id: str) -> List[dict]:
@@ -2539,9 +2589,9 @@ def rule_matches(rule: dict, payload: RuleSimulationRequest) -> bool:
         return False
     if rule.get("event_type") != payload.event_type:
         return False
-    if rule.get("sub_type") and payload.sub_type and normalize_arabic_key(rule.get("sub_type")) != normalize_arabic_key(payload.sub_type):
+    if rule.get("sub_type") and normalize_arabic_key(rule.get("sub_type")) != normalize_arabic_key(payload.sub_type):
         return False
-    if rule.get("payment_method") and payload.payment_method and normalize_arabic_key(rule.get("payment_method")) != normalize_arabic_key(payload.payment_method):
+    if rule.get("payment_method") and normalize_arabic_key(rule.get("payment_method")) != normalize_arabic_key(payload.payment_method):
         return False
     return True
 
@@ -5932,6 +5982,21 @@ async def update_journal_entry(entry_id: str, payload: JournalEntryCreate, curre
     return JournalEntryResponse(**hydrate_journal_entry(updated))
 
 
+@api_router.delete("/journal-entries/{entry_id}", response_model=JournalEntryResponse)
+async def reverse_manual_journal_entry(entry_id: str, current_user: dict = Depends(require_admin)):
+    existing = await db.journal_entries.find_one(with_organization({"id": entry_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="القيد غير موجود")
+    if existing.get("is_reversal"):
+        raise HTTPException(status_code=400, detail="لا يمكن عكس قيد عكسي")
+    if existing.get("reversal_entry_id"):
+        reversal = await db.journal_entries.find_one(with_organization({"id": existing.get("reversal_entry_id")}), {"_id": 0})
+        if reversal:
+            return JournalEntryResponse(**hydrate_journal_entry(reversal))
+    reversal = await create_reverse_journal_entry(existing, "إلغاء القيد من المستخدم", current_user)
+    return JournalEntryResponse(**hydrate_journal_entry(reversal))
+
+
 @api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])
 async def list_chart_accounts(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
     await sync_chart_accounts_for_organization(organization_id_or_default())
@@ -6019,8 +6084,10 @@ async def save_rules_engine_rule(payload: AccountingRuleCreate, current_user: di
     organization_id = organization_id_or_default()
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     rule_id = f"rule-{payload.event_type.lower()}-{uuid.uuid4().hex[:8]}"
+    payload_data = payload.model_dump()
+    payload_data["priority"] = calculate_rule_priority(payload_data)
     document = {
-        **payload.model_dump(),
+        **payload_data,
         "id": rule_id,
         "organization_id": organization_id,
         "is_system": False,
@@ -6030,6 +6097,31 @@ async def save_rules_engine_rule(payload: AccountingRuleCreate, current_user: di
         "updated_at": now_iso,
     }
     await db.accounting_rules.insert_one(document.copy())
+    return AccountingRuleResponse(**document)
+
+
+@api_router.put("/rules-engine/rules/{rule_id}", response_model=AccountingRuleResponse)
+async def update_rules_engine_rule(rule_id: str, payload: AccountingRuleUpdate, current_user: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
+    rules = await list_accounting_rules_for_organization(organization_id)
+    existing = next((rule for rule in rules if rule.get("id") == rule_id), None)
+    if not existing:
+        raise HTTPException(status_code=404, detail="القاعدة غير موجودة")
+    payload_data = payload.model_dump()
+    payload_data["priority"] = calculate_rule_priority(payload_data)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = {
+        **existing,
+        **payload_data,
+        "id": rule_id,
+        "organization_id": organization_id,
+        "is_system": False,
+        "updated_by": current_user.get("id"),
+        "updated_by_name": real_name_for_user(current_user),
+        "updated_at": now_iso,
+        "created_at": existing.get("created_at") or now_iso,
+    }
+    await db.accounting_rules.update_one(with_organization({"id": rule_id}, organization_id), {"$set": document}, upsert=True)
     return AccountingRuleResponse(**document)
 
 
