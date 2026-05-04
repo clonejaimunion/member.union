@@ -2457,13 +2457,13 @@ async def next_journal_entry_number(organization_id: str) -> int:
     return int(counter.get("next_number", 1))
 
 
-async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None) -> dict:
+async def save_journal_entry_document(*, entry_date: date, description: str, lines: List[dict], reference: Optional[str], source_type: str, source_id: Optional[str], is_auto: bool, current_user: Optional[dict] = None, force_new: bool = False) -> dict:
     organization_id = organization_id_or_default()
     normalized_lines, total_debit, total_credit = await normalize_journal_lines(lines)
     if round(total_debit, 2) != round(total_credit, 2):
         raise HTTPException(status_code=422, detail="تم منع الترحيل: القيد غير متوازن، ولا يسمح النظام بترحيل ناقص.")
     now_iso = serialize_datetime(datetime.now(timezone.utc))
-    query = with_organization({"source_type": source_type, "source_id": source_id}, organization_id) if source_id else None
+    query = with_organization({"source_type": source_type, "source_id": source_id}, organization_id) if source_id and not force_new else None
     existing = await db.journal_entries.find_one(query, {"_id": 0}) if query else None
     entry_number = int(existing["entry_number"]) if existing else await next_journal_entry_number(organization_id)
     document = {
@@ -2508,6 +2508,7 @@ async def create_reverse_journal_entry(original: dict, reason: str = "إلغاء
         is_auto=True,
         current_user=current_user,
         lines=reversed_lines,
+        force_new=True,
     )
     await db.journal_entries.update_one(with_organization({"id": document["id"]}), {"$set": {"is_reversal": True, "reversal_of_entry_id": original.get("id"), "reversal_reason": reason}})
     await db.journal_entries.update_one(with_organization({"id": original.get("id")}), {"$set": {"reversal_entry_id": document["id"], "reversal_reason": reason, "reversed_at": serialize_datetime(datetime.now(timezone.utc)), "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
