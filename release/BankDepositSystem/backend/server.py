@@ -2439,7 +2439,7 @@ async def normalize_journal_lines(lines: List[dict]) -> tuple[List[dict], float,
     total_debit = round(sum(line["debit"] for line in normalized), 2)
     total_credit = round(sum(line["credit"] for line in normalized), 2)
     if len(normalized) < 2 or total_debit <= 0 or total_debit != total_credit:
-        raise HTTPException(status_code=400, detail="القيد غير متوازن: إجمالي المدين يجب أن يساوي إجمالي الدائن")
+        raise HTTPException(status_code=422, detail="تم منع الترحيل: القيد غير متوازن، ولا يسمح النظام بترحيل ناقص.")
     return normalized, total_debit, total_credit
 
 

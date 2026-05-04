@@ -89,6 +89,14 @@ const classifyExpense = (expense) => {
   return analysisCategories.filter((category) => !category.expenseCategory && category.keywords.some((keyword) => searchText.includes(normalizeArabic(keyword))));
 };
 
+const deductionAnalysisKeys = new Set(["hajj_umrah", "meat_installment", "union_committee"]);
+
+const deductionAmountForCategory = (expense, category) => (expense.deductions || []).reduce((sum, deduction) => {
+  const statement = normalizeArabic(deduction.statement || "");
+  const matched = category.keywords.some((keyword) => statement.includes(normalizeArabic(keyword)));
+  return matched ? sum + Number(deduction.amount || 0) : sum;
+}, 0);
+
 export default function ExpensesAnalysisPage() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -135,7 +143,12 @@ export default function ExpensesAnalysisPage() {
 
   const analysisRows = useMemo(() => selectedExpenses.map((expense) => {
     const matchedCategories = classifyExpense(expense);
-    const categoryAmounts = analysisCategories.reduce((acc, category) => ({ ...acc, [category.key]: matchedCategories.some((item) => item.key === category.key) ? Number(expense.gross_amount || 0) : 0 }), {});
+    const categoryAmounts = analysisCategories.reduce((acc, category) => {
+      if (deductionAnalysisKeys.has(category.key)) {
+        return { ...acc, [category.key]: deductionAmountForCategory(expense, category) };
+      }
+      return { ...acc, [category.key]: matchedCategories.some((item) => item.key === category.key) ? Number(expense.gross_amount || 0) : 0 };
+    }, {});
     return {
       ...expense,
       matchedCategories,
