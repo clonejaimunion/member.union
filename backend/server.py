@@ -1040,7 +1040,7 @@ class BankReconciliation(BankReconciliationCreate):
 class RevenueBase(BaseModel):
     receipt_number: str = Field(..., min_length=1)
     amount: float = Field(..., gt=0)
-    collection_method: Literal["cash", "check", "payment_order"]
+    collection_method: Literal["cash", "check", "payment_order", "current_account_interest", "deposit_maturity"]
     supplier_name: Optional[str] = None
     check_number: Optional[str] = None
     check_clearing_type: Optional[Literal["internal", "external"]] = None
@@ -1074,7 +1074,7 @@ class ExpenseDeduction(BaseModel):
 class ExpenseBase(BaseModel):
     expense_number: str = Field(..., min_length=1)
     organization_scope: Literal["general_union", "social_solidarity_project"] = "social_solidarity_project"
-    expense_category: Literal["general_expenses", "death_benefits"] = "general_expenses"
+    expense_category: Literal["general_expenses", "death_benefits", "deposit_link"] = "general_expenses"
     payment_method: Literal["cash", "check", "bank_transfer"]
     payee_name: Optional[str] = None
     check_number: Optional[str] = None
@@ -2587,6 +2587,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "4101", "name": "الإيرادات", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "revenue_general"},
         {"code": "4102", "name": "إيرادات فوائد ودائع", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "deposit_interest_revenue"},
         {"code": "4103", "name": "إيرادات اشتراكات العضوية", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "membership_subscription_revenue"},
+        {"code": "4104", "name": "إيرادات فوائد الحساب الجاري", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "current_account_interest_revenue"},
         {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
@@ -2834,9 +2835,16 @@ async def delete_journal_for_source(source_type: str, source_id: str):
     await reverse_journal_for_source(source_type, source_id)
 
 
+REPORT_EXCLUDED_SOURCE_TYPES = ["deposit_interest"]
+REVENUE_DIRECT_BANK_METHODS = {"current_account_interest", "deposit_maturity"}
+REVENUE_RULE_ACCOUNT_MAP = {
+    "deposit_maturity": {"account_name": "إيرادات فوائد ودائع", "system_key": "deposit_interest_revenue", "analysis_type": "استحقاق وديعة"},
+    "current_account_interest": {"account_name": "إيرادات فوائد الحساب الجاري", "system_key": "current_account_interest_revenue", "analysis_type": "فوائد الحساب الجاري"},
+}
 EXPENSE_RULE_ACCOUNT_MAP = {
     "general_expenses": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "مصروفات عمومية"},
     "death_benefits": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "إعانات وفاة"},
+    "deposit_link": {"account_name": "ودائع لأجل", "system_key": "term_deposits", "analysis_type": "ربط وديعة"},
 }
 
 
@@ -2978,6 +2986,7 @@ async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None
     if amount <= 0:
         return
     debit_account = "البنك" if (revenue.get("bank_collection_status") or "under_collection") == "collected" else "شيكات تحت التحصيل"
+    revenue_rule = REVENUE_RULE_ACCOUNT_MAP.get(revenue.get("collection_method") or "", {"account_name": "الإيرادات", "system_key": "revenue_general", "analysis_type": "إيراد عام"})
     await save_journal_entry_document(
         entry_date=revenue.get("issued_at") if isinstance(revenue.get("issued_at"), date) else date.fromisoformat(str(revenue.get("issued_at") or revenue.get("dated"))),
         description=f"قيد تلقائي لإيراد رقم {revenue.get('receipt_number')}",
@@ -2986,7 +2995,10 @@ async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None
         source_id=revenue.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[{"account_name": debit_account, "bank_id": revenue.get("bank_id"), "debit": amount, "credit": 0}, {"account_name": "الإيرادات", "debit": 0, "credit": amount}],
+        lines=[
+            {"account_name": debit_account, "bank_id": revenue.get("bank_id"), "debit": amount, "credit": 0, "notes": f"تحصيل: {revenue_rule['analysis_type']}"},
+            {"account_name": revenue_rule["account_name"], "system_key": revenue_rule["system_key"], "debit": 0, "credit": amount, "notes": f"تحليل: {revenue_rule['analysis_type']}"},
+        ],
     )
 
 
@@ -3030,24 +3042,8 @@ async def journal_for_banking_expense(document: dict, current_user: Optional[dic
 
 
 async def journal_for_deposit_interest(deposit: dict, current_user: Optional[dict] = None):
-    amount = round(float(deposit.get("amount") or 0) * float(deposit.get("monthly_interest_rate") or 0) / 100, 2)
-    if amount <= 0:
-        return
-    created_value = deposit.get("creation_datetime")
-    entry_date = created_value.date() if isinstance(created_value, datetime) else datetime.fromisoformat(str(created_value)).date()
-    if deposit.get("is_opening_balance_deposit") and deposit.get("accounting_start_datetime"):
-        accounting_start = deposit.get("accounting_start_datetime")
-        entry_date = accounting_start.date() if isinstance(accounting_start, datetime) else datetime.fromisoformat(str(accounting_start)).date()
-    await save_journal_entry_document(
-        entry_date=entry_date,
-        description=f"قيد تلقائي لإثبات عوائد وديعة رقم {deposit.get('deposit_number')}",
-        reference=deposit.get("deposit_number"),
-        source_type="deposit_interest",
-        source_id=deposit.get("id"),
-        is_auto=True,
-        current_user=current_user,
-        lines=[{"account_name": "عوائد ودائع مستحقة", "debit": amount, "credit": 0}, {"account_name": "إيرادات فوائد ودائع", "debit": 0, "credit": amount}],
-    )
+    if deposit.get("id"):
+        await reverse_journal_for_source("deposit_interest", deposit.get("id"), "إيقاف الترحيل الآلي لفوائد الودائع؛ تُسجل فقط عند اختيار استحقاق وديعة")
 
 
 async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] = None) -> float:
@@ -3382,7 +3378,7 @@ async def calculate_trial_balance_report(
             "balance_debit": 0.0,
             "balance_credit": 0.0,
         }
-    entry_query = with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id)
+    entry_query = with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}}, organization_id)
     if from_date or to_date:
         entry_query["entry_date"] = {}
         if from_date:
@@ -3393,7 +3389,7 @@ async def calculate_trial_balance_report(
     account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
     account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
     if from_date:
-        prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+        prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
         for entry in prior_entries:
             for line in entry.get("lines", []):
                 account = None
@@ -3758,6 +3754,8 @@ def hydrate_revenue(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if clean.get("collection_method") in REVENUE_DIRECT_BANK_METHODS:
+        clean["bank_collection_status"] = "collected"
     if clean.get("collection_method") in {"cash", "check", "payment_order"} and not clean.get("bank_collection_status"):
         clean["bank_collection_status"] = "under_collection"
     if clean.get("collection_method") == "check" and not clean.get("check_clearing_type"):
@@ -3772,6 +3770,8 @@ def hydrate_expense(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if clean.get("expense_category") == "deposit_link":
+        clean["bank_payment_status"] = "paid"
     if clean.get("payment_method") in {"cash", "check", "bank_transfer"} and not clean.get("bank_payment_status"):
         clean["bank_payment_status"] = "not_presented"
     if clean.get("payment_method") == "check" and not clean.get("check_clearing_type"):
@@ -4189,7 +4189,7 @@ async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Opti
         "value": payload.value.strip(),
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
-        "bank_collection_status": payload.bank_collection_status if method in ["cash", "check", "payment_order"] else None,
+        "bank_collection_status": "collected" if method in REVENUE_DIRECT_BANK_METHODS else (payload.bank_collection_status if method in ["cash", "check", "payment_order"] else None),
     }
 
 
@@ -4240,6 +4240,8 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         for item in payload.deductions
         if float(item.amount) > 0 or item.statement.strip()
     ]
+    if payload.expense_category == "deposit_link":
+        deductions = []
     total_deductions = round(sum(item["amount"] for item in deductions), 2)
     gross_amount = round(float(payload.gross_amount), 2)
     net_amount = round(gross_amount - total_deductions, 2)
@@ -4266,7 +4268,7 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
         "net_amount": net_amount,
         "issued_at": serialize_date(payload.issued_at),
         "responsible_employee": payload.responsible_employee,
-        "bank_payment_status": payload.bank_payment_status if payload.payment_method in ["cash", "check", "bank_transfer"] else None,
+        "bank_payment_status": "paid" if payload.expense_category == "deposit_link" else (payload.bank_payment_status if payload.payment_method in ["cash", "check", "bank_transfer"] else None),
     }
 
 
@@ -6030,6 +6032,8 @@ async def update_revenue_banking_status(
     existing = await db.revenues.find_one(with_organization({"id": revenue_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="الإيراد غير موجود")
+    if existing.get("collection_method") in REVENUE_DIRECT_BANK_METHODS and payload.bank_collection_status != "collected":
+        raise HTTPException(status_code=400, detail="فوائد الحساب الجاري واستحقاق الوديعة يتم تحصيلهما فوراً ولا يمكن جعلهما تحت التحصيل")
     await db.revenues.update_one(
         with_organization({"id": revenue_id}),
         {"$set": {"bank_collection_status": payload.bank_collection_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
@@ -6147,6 +6151,8 @@ async def update_expense_banking_status(
     existing = await db.expenses.find_one(with_organization({"id": expense_id}), {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    if existing.get("expense_category") == "deposit_link" and payload.bank_payment_status != "paid":
+        raise HTTPException(status_code=400, detail="ربط الوديعة حركة بنك فورية ولا يمكن جعلها تحت التحصيل")
     await db.expenses.update_one(
         with_organization({"id": expense_id}),
         {"$set": {"bank_payment_status": payload.bank_payment_status, "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
@@ -6868,6 +6874,8 @@ async def list_journal_entries(
             query["entry_date"]["$lte"] = to_date.isoformat()
     if source_type:
         query["source_type"] = source_type
+    else:
+        query["source_type"] = {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}
     documents = await db.journal_entries.find(query, {"_id": 0}).sort("entry_number", -1).to_list(2000)
     return [JournalEntryResponse(**hydrate_journal_entry(document)) for document in documents]
 

@@ -36,7 +36,10 @@ const methodLabels = {
   cash: "نقداً",
   check: "شيك",
   payment_order: "أمر دفع",
+  current_account_interest: "فوائد الحساب الجاري",
+  deposit_maturity: "استحقاق وديعة",
 };
+const directBankMethods = new Set(["current_account_interest", "deposit_maturity"]);
 
 const checkClearingLabels = {
   internal: "داخلي",
@@ -189,11 +192,16 @@ export default function RevenuesPage() {
   const detailValue = (item) => {
     if (item.collection_method === "cash") return item.supplier_name || "—";
     if (item.collection_method === "check") return `${item.check_number || "—"} — ${checkClearingLabels[item.check_clearing_type || "internal"]}`;
+    if (item.collection_method === "current_account_interest") return "فوائد حساب جاري محصلة فوراً";
+    if (item.collection_method === "deposit_maturity") return "فائدة وديعة مستحقة محصلة فوراً";
     return item.payment_order_number || "—";
   };
 
   const renderRevenueStatusActions = (item) => {
     const status = item.bank_collection_status || "under_collection";
+    if (directBankMethods.has(item.collection_method)) {
+      return <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-xs font-extrabold text-emerald-800" data-testid={`revenue-row-${item.id}-direct-bank-status`}>تمت الإضافة للبنك فوراً</div>;
+    }
     return (
       <div className="grid grid-cols-1 gap-2" data-testid={`revenue-row-${item.id}-status-actions`}>
         <button type="button" onClick={() => updateRevenueBankingStatus(item, "collected")} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-extrabold ${status === "collected" ? "border-emerald-800 bg-emerald-700 text-white" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`} data-testid={`mark-revenue-collected-button-${item.id}`}><CheckCircle2 className="h-4 w-4" /> {collectionStatusLabels.collected}</button>
@@ -256,7 +264,7 @@ export default function RevenuesPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="revenue-form-grid">
               <div className="space-y-2" data-testid="revenue-receipt-wrapper"><Label data-testid="revenue-receipt-label">رقم الإذن</Label><Input required inputMode="numeric" value={form.receipt_number} onChange={(event) => updateForm("receipt_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-receipt-input" /></div>
               <div className="space-y-2" data-testid="revenue-amount-wrapper"><Label data-testid="revenue-amount-label">المبلغ بالجنيه المصري</Label><Input required inputMode="decimal" value={form.amount} onChange={(event) => updateForm("amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-amount-input" /></div>
-              <div className="space-y-2" data-testid="revenue-method-wrapper"><Label data-testid="revenue-method-label">طريقة التحصيل</Label><select value={form.collection_method} onChange={(event) => updateForm("collection_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-method-select"><option value="cash" data-testid="revenue-method-cash-option">نقداً</option><option value="check" data-testid="revenue-method-check-option">شيك</option><option value="payment_order" data-testid="revenue-method-payment-order-option">أمر دفع</option></select></div>
+              <div className="space-y-2" data-testid="revenue-method-wrapper"><Label data-testid="revenue-method-label">طريقة التحصيل</Label><select value={form.collection_method} onChange={(event) => updateForm("collection_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-method-select"><option value="cash" data-testid="revenue-method-cash-option">نقداً</option><option value="check" data-testid="revenue-method-check-option">شيك</option><option value="payment_order" data-testid="revenue-method-payment-order-option">أمر دفع</option><option value="current_account_interest" data-testid="revenue-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenue-method-deposit-maturity-option">استحقاق وديعة</option></select></div>
               {form.collection_method === "cash" && <div className="space-y-2" data-testid="revenue-supplier-wrapper"><Label data-testid="revenue-supplier-label">اسم الشخص الذي قام بالتوريد</Label><Input required value={form.supplier_name} onChange={(event) => updateForm("supplier_name", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-supplier-input" /></div>}
               {form.collection_method === "check" && <div className="space-y-2" data-testid="revenue-check-wrapper"><Label data-testid="revenue-check-label">رقم الشيك</Label><Input required inputMode="numeric" value={form.check_number} onChange={(event) => updateForm("check_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-check-input" /></div>}
               {form.collection_method === "check" && <div className="space-y-2" data-testid="revenue-check-clearing-wrapper"><Label data-testid="revenue-check-clearing-label">نوع الشيك</Label><select value={form.check_clearing_type} onChange={(event) => updateForm("check_clearing_type", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-check-clearing-select"><option value="internal" data-testid="revenue-check-clearing-internal-option">داخلي</option><option value="external" data-testid="revenue-check-clearing-external-option">خارجي</option></select></div>}
@@ -288,7 +296,7 @@ export default function RevenuesPage() {
           </div>
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="revenues-filters-grid">
             <select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-bank-select"><option value="all" data-testid="revenues-filter-bank-all-option">كل البنوك</option>{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`revenues-filter-bank-${bank.id}`}>{bank.name}</option>)}</select>
-            <select value={filters.collection_method} onChange={(event) => setFilters((current) => ({ ...current, collection_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-method-select"><option value="all" data-testid="revenues-filter-method-all-option">كل طرق التحصيل</option><option value="cash" data-testid="revenues-filter-method-cash-option">نقداً</option><option value="check" data-testid="revenues-filter-method-check-option">شيك</option><option value="payment_order" data-testid="revenues-filter-method-payment-option">أمر دفع</option></select>
+            <select value={filters.collection_method} onChange={(event) => setFilters((current) => ({ ...current, collection_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-method-select"><option value="all" data-testid="revenues-filter-method-all-option">كل طرق التحصيل</option><option value="cash" data-testid="revenues-filter-method-cash-option">نقداً</option><option value="check" data-testid="revenues-filter-method-check-option">شيك</option><option value="payment_order" data-testid="revenues-filter-method-payment-option">أمر دفع</option><option value="current_account_interest" data-testid="revenues-filter-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenues-filter-method-deposit-maturity-option">استحقاق وديعة</option></select>
             <Input type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenues-filter-from-date-input" />
             <Input type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenues-filter-to-date-input" />
           </div>

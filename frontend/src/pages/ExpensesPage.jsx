@@ -26,10 +26,11 @@ const officialEmailOrEmpty = (email) => {
   if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
   return value;
 };
-const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة" };
+const categoryLabels = { general_expenses: "مصروفات عمومية", death_benefits: "إعانات وفاة", deposit_link: "ربط وديعة" };
 const categoryOptions = [
   ["general_expenses", "مصروفات عمومية"],
   ["death_benefits", "إعانات وفاة"],
+  ["deposit_link", "ربط وديعة"],
 ];
 const monthLabels = { "01": "يناير", "02": "فبراير", "03": "مارس", "04": "أبريل", "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس", "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر" };
 const employeeOptions = ["يوسف عبدالغني", "دعاء علي"];
@@ -259,6 +260,9 @@ export default function ExpensesPage() {
 
   const renderExpenseStatusActions = (item) => {
     const status = item.bank_payment_status || "not_presented";
+    if (item.expense_category === "deposit_link") {
+      return <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center text-xs font-extrabold text-emerald-800" data-testid={`expense-row-${item.id}-direct-bank-status`}>تم الخصم من البنك فوراً</div>;
+    }
     return (
       <div className="grid grid-cols-1 gap-2" data-testid={`expense-row-${item.id}-status-actions`}>
         <button type="button" onClick={() => updateExpenseBankingStatus(item, "paid")} className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-xs font-extrabold ${status === "paid" ? "border-emerald-800 bg-emerald-700 text-white" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`} data-testid={`mark-expense-collected-button-${item.id}`}><CheckCircle2 className="h-4 w-4" /> {expenseCollectionStatusLabels.paid}</button>
