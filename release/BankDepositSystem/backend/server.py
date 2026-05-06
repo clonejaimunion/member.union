@@ -600,6 +600,8 @@ class BankReconciliationBalanceBreakdown(BaseModel):
     period_to: date
     opening_balance: float = 0
     monthly_revenues: float = 0
+    monthly_deposit_interest: float = 0
+    total_receipts: float = 0
     deposit_settlements: float = 0
     checks_under_collection: float = 0
     gross_total: float = 0
@@ -607,6 +609,7 @@ class BankReconciliationBalanceBreakdown(BaseModel):
     monthly_expenses: float = 0
     checks_not_presented: float = 0
     bank_expenses: float = 0
+    total_payments: float = 0
     reconciliation_balance: float = 0
     source: str = "opening_balance_plus_monthly_components"
 
@@ -3149,12 +3152,12 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     period_from, period_to = reconciliation_period_bounds(period_label, year, month, as_of_date)
     organization_id = organization_id_or_default()
     opening_balance = await calculate_bank_period_opening_balance(bank_id, period_from)
-    revenue_query = with_organization({"bank_id": bank_id, "bank_collection_status": "collected", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
+    period_filter = {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}
+    revenue_query = with_organization({"bank_id": bank_id, "bank_collection_status": "collected", "issued_at": period_filter}, organization_id)
     revenues = await db.revenues.find(revenue_query, {"_id": 0, "amount": 1}).to_list(100000)
     monthly_revenues = round(sum(float(item.get("amount") or 0) for item in revenues), 2)
-    deposit_query = with_organization({"bank_id": bank_id, "maturity_datetime": {"$gte": f"{period_from.isoformat()}T00:00:00", "$lte": f"{period_to.isoformat()}T23:59:59"}}, organization_id)
-    deposits = await db.deposits.find(deposit_query, {"_id": 0, "amount": 1}).to_list(100000)
-    deposit_settlements = round(sum(float(item.get("amount") or 0) for item in deposits), 2)
+    monthly_deposit_interest = await calculate_total_deposit_interest_for_period(organization_id, period_from, period_to, bank_id=bank_id)
+    deposit_settlements = monthly_deposit_interest
     collection_query = with_organization({"bank_id": bank_id, "collection_method": "check", "bank_collection_status": "under_collection", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
     collection_checks = await db.revenues.find(collection_query, {"_id": 0, "amount": 1}).to_list(100000)
     checks_under_collection = round(sum(float(item.get("amount") or 0) for item in collection_checks), 2)
@@ -3166,15 +3169,19 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     checks_not_presented = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in outstanding_checks), 2)
     manual_charges = await db.banking_manual_charges.find_one(with_organization({"bank_id": bank_id, "year": period_from.year, "month": period_from.month}, organization_id), {"_id": 0})
     bank_expenses = sum_manual_charge_items(manual_charges)
-    gross_total = round(opening_balance + monthly_revenues + deposit_settlements, 2)
-    book_balance = round(gross_total - monthly_expenses - bank_expenses, 2)
-    reconciliation_balance = round(book_balance + checks_not_presented - checks_under_collection, 2)
+    total_receipts = round(monthly_revenues + monthly_deposit_interest, 2)
+    total_payments = round(monthly_expenses + bank_expenses, 2)
+    gross_total = round(opening_balance + total_receipts, 2)
+    book_balance = round(gross_total - total_payments, 2)
+    reconciliation_balance = book_balance
     return BankReconciliationBalanceBreakdown(
         bank_id=bank_id,
         period_from=period_from,
         period_to=period_to,
         opening_balance=opening_balance,
         monthly_revenues=monthly_revenues,
+        monthly_deposit_interest=monthly_deposit_interest,
+        total_receipts=total_receipts,
         deposit_settlements=deposit_settlements,
         checks_under_collection=checks_under_collection,
         gross_total=gross_total,
@@ -3182,6 +3189,7 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
         monthly_expenses=monthly_expenses,
         checks_not_presented=checks_not_presented,
         bank_expenses=bank_expenses,
+        total_payments=total_payments,
         reconciliation_balance=reconciliation_balance,
     )
 
@@ -4900,18 +4908,21 @@ def calculate_deposit_interest_for_period(deposit: Deposit, period_from: date, p
     return round(daily_interest * active_days, 2)
 
 
-async def calculate_total_deposit_interest_for_period(organization_id: str, period_from: Optional[date], period_to: Optional[date]) -> float:
+async def calculate_total_deposit_interest_for_period(organization_id: str, period_from: Optional[date], period_to: Optional[date], bank_id: Optional[str] = None) -> float:
     if not period_from or not period_to:
         return 0.0
     period_start_iso = datetime.combine(period_from, datetime.min.time(), tzinfo=timezone.utc).isoformat()
     period_end_iso = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
-    query = with_organization({
+    query_body = {
         "maturity_datetime": {"$gt": period_start_iso},
         "$or": [
             {"accounting_start_datetime": {"$lt": period_end_iso}},
             {"creation_datetime": {"$lt": period_end_iso}},
         ],
-    }, organization_id)
+    }
+    if bank_id:
+        query_body["bank_id"] = bank_id
+    query = with_organization(query_body, organization_id)
     documents = await db.deposits.find(query, {"_id": 0}).to_list(100000)
     total = 0.0
     for document in documents:

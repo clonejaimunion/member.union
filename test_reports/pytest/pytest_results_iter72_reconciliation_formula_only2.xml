@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.649" timestamp="2026-05-06T13:22:45.357384+00:00" hostname="agent-env-ba67e22d-6b71-4fe8-aa51-02b7e4b7510e"><testcase classname="tests.test_iteration72_bank_reconciliation_monthly_formula" name="test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments" time="2.480"><failure message="AssertionError: {&quot;detail&quot;:&quot;يجب إدخال اسم يصرف للسيد&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+admin_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MDczNzY1LCJleHAiOjE3NzgxMDI1NjV9.7NGhu7_SG0y3SHi8pNladiAX-crh0vJAQzsp7u1JJRE'
+
+    def test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments(base_url, admin_token):
+        _create_revenue(base_url, admin_token, "01", 100.0, "cash")
+        _create_revenue(base_url, admin_token, "02", 200.0, "check")
+        _create_revenue(base_url, admin_token, "03", 300.0, "payment_order")
+        _create_revenue(base_url, admin_token, "04", 40.0, "current_account_interest")
+        _create_revenue(base_url, admin_token, "05", 60.0, "deposit_maturity")
+        _create_revenue(base_url, admin_token, "06", 999.0, "check", status="under_collection")
+        _create_expense(base_url, admin_token, "07", 70.0, "general_expenses")
+        _create_expense(base_url, admin_token, "08", 80.0, "death_benefits")
+        _create_expense(base_url, admin_token, "09", 90.0, "deposit_link")
+&gt;       _create_expense(base_url, admin_token, "10", 777.0, "general_expenses", status="not_presented", method="check")
+
+tests/test_iteration72_bank_reconciliation_monthly_formula.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MDczNzY1LCJleHAiOjE3NzgxMDI1NjV9.7NGhu7_SG0y3SHi8pNladiAX-crh0vJAQzsp7u1JJRE'
+suffix = '10', amount = 777.0, category = 'general_expenses'
+status = 'not_presented', method = 'check'
+
+    def _create_expense(base_url: str, token: str, suffix: str, amount: float, category: str, status: str = "paid", method: str = "cash"):
+        payload = {
+            "expense_number": f"{ITER_NUM_PREFIX}{suffix}",
+            "organization_scope": "social_solidarity_project",
+            "expense_category": category,
+            "payment_method": method,
+            "payee_name": f"{ITER_PREFIX} مستفيد" if method == "cash" else None,
+            "check_number": f"{ITER_NUM_PREFIX}{suffix}7" if method == "check" else None,
+            "check_clearing_type": "internal" if method == "check" else None,
+            "transfer_number": None,
+            "transfer_to": None,
+            "membership_number": f"{ITER_NUM_PREFIX}{suffix}" if category == "death_benefits" else None,
+            "committee": "لجنة اختبار" if category == "death_benefits" else None,
+            "governorate": "القاهرة" if category == "death_benefits" else None,
+            "bank_id": BANK_ID,
+            "gross_amount": amount,
+            "gross_statement": f"{ITER_PREFIX} {category}",
+            "deductions": [],
+            "issued_at": "2199-04-12",
+            "responsible_employee": "يوسف عبدالغني",
+            "bank_payment_status": status,
+        }
+        response = requests.post(f"{base_url}/api/expenses", json=payload, headers=_headers(token), timeout=60)
+&gt;       assert response.status_code == 200, response.text
+E       AssertionError: {"detail":"يجب إدخال اسم يصرف للسيد"}
+E       assert 400 == 200
+E        +  where 400 = &lt;Response [400]&gt;.status_code
+
+tests/test_iteration72_bank_reconciliation_monthly_formula.py:108: AssertionError</failure></testcase></testsuite></testsuites>

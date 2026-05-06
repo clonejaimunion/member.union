@@ -213,13 +213,15 @@ def test_reconciliation_balance_formula_matches_breakdown(base_url, admin_token)
     opening = round(float(data.get("opening_balance") or 0), 2)
     monthly_revenues = round(float(data.get("monthly_revenues") or 0), 2)
     deposit_settlements = round(float(data.get("deposit_settlements") or 0), 2)
+    total_receipts = round(float(data.get("total_receipts") or 0), 2)
     monthly_expenses = round(float(data.get("monthly_expenses") or 0), 2)
     bank_expenses = round(float(data.get("bank_expenses") or 0), 2)
-    checks_not_presented = round(float(data.get("checks_not_presented") or 0), 2)
-    checks_under_collection = round(float(data.get("checks_under_collection") or 0), 2)
+    total_payments = round(float(data.get("total_payments") or 0), 2)
 
-    expected_book = round(opening + monthly_revenues + deposit_settlements - monthly_expenses - bank_expenses, 2)
-    expected_reconciliation = round(expected_book + checks_not_presented - checks_under_collection, 2)
+    assert total_receipts == round(monthly_revenues + deposit_settlements, 2)
+    assert total_payments == round(monthly_expenses + bank_expenses, 2)
+    expected_book = round(opening + total_receipts - total_payments, 2)
+    expected_reconciliation = expected_book
 
     assert round(float(data.get("book_balance") or 0), 2) == expected_book
     assert round(float(data.get("reconciliation_balance") or 0), 2) == expected_reconciliation
