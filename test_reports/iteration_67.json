@@ -1,0 +1,45 @@
+{
+  "summary": "Executed backend+frontend regression for period-scope accounting rules on public URL; identified one functional backend gap in trial balance opening logic.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/trial-balance?from_date=2098-07-01&to_date=2098-07-31",
+        "issue": "opening_balance for tested account remained 0.0 instead of including prior-period net movement (expected 100.0 from 2098-06-30 journal entry).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration67_period_scope_financial_reports.py",
+    "/app/test_reports/pytest/pytest_results_iter67_backend.xml"
+  ],
+  "action_items": [
+    "Fix /api/trial-balance to roll forward net entries before from_date into each account opening_balance (not only chart account opening_balance field).",
+    "Retest trial balance with controlled before/inside period entries to confirm opening_balance and movement separation.",
+    "After fix, rerun full requested period-scope regression for journal/ledger/trial-balance/reconciliation endpoints."
+  ],
+  "critical_code_review_comments": [
+    "In get_trial_balance, entry query is period-only and no prior-entry accumulation is applied to row.opening_balance; this causes period opening underreporting.",
+    "Ledger single/all and journal filters correctly enforce in-period rows in tested scenarios, with closing formula consistency validated.",
+    "backend/server.py remains very large (>700 lines), increasing regression risk for financial calculations and period logic changes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration67_period_scope_financial_reports.py",
+    "/app/test_reports/iteration_67.json"
+  ],
+  "success_rate": {
+    "backend": "83%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Created temporary TEST-ITER67 chart account and 4 manual journal entries (before/inside/inside/after period); cleaned with teardown via Mongo.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public URL from frontend/.env used. Pytest run: 5 passed, 1 failed (trial balance opening). /api/journal-entries period filtering passed, /api/ledger single+all passed with in-period rows and closing formula checks, /api/banks/{bank_id}/reconciliation-balance formula checks passed, /api/admin/data-flow-validation is_valid=true passed. UI automation passed for /ledger and /bank/industrial-development/reconciliation (book/check add-subtract breakdown labels present). yarn lint/build succeeded. Installer exists at /app/dist/BankDepositSystemSetup.exe (16987370 bytes).",
+  "rca of the issue": "RCA: /api/trial-balance initializes opening_balance from chart_accounts.opening_balance only (server.py: around rows_by_key init) and then processes only entries inside from/to range, so net movements before from_date are never added to opening_balance. Reproduction: create account + manual entry before from_date (debit 100), then query trial-balance for later month; account opening_balance returns 0 instead of 100. Mitigation: fetch and aggregate prior approved non-reversal entries (entry_date < from_date) per account and add to opening_balance before period movement totals."
+}

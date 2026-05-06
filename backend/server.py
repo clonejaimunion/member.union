@@ -603,6 +603,7 @@ class BankReconciliationBalanceBreakdown(BaseModel):
     deposit_settlements: float = 0
     checks_under_collection: float = 0
     gross_total: float = 0
+    book_balance: float = 0
     monthly_expenses: float = 0
     checks_not_presented: float = 0
     bank_expenses: float = 0
@@ -3069,6 +3070,23 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
     return balance
 
 
+async def calculate_bank_period_opening_balance(bank_id: str, period_from: date) -> float:
+    organization_id = organization_id_or_default()
+    bank = await ensure_bank_async(bank_id)
+    await sync_chart_accounts_for_organization(organization_id)
+    account = await db.chart_accounts.find_one(with_organization({"system_key": f"bank:{bank_id}", "is_active": True}, organization_id), {"_id": 0})
+    balance = round(float(bank.get("opening_balance") or 0), 2)
+    if not account:
+        return balance
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$ne": "opening_balance"}, "entry_date": {"$lt": period_from.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+    for entry in entries:
+        for line in entry.get("lines", []):
+            if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
+                continue
+            balance = round(balance + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+    return balance
+
+
 ARABIC_MONTH_NAME_TO_NUMBER = {
     "يناير": 1,
     "فبراير": 2,
@@ -3131,10 +3149,10 @@ def sum_manual_charge_items(document: Optional[dict]) -> float:
 
 
 async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_label: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, as_of_date: Optional[date] = None) -> BankReconciliationBalanceBreakdown:
-    bank = await ensure_bank_async(bank_id)
+    await ensure_bank_async(bank_id)
     period_from, period_to = reconciliation_period_bounds(period_label, year, month, as_of_date)
     organization_id = organization_id_or_default()
-    opening_balance = round(float(bank.get("opening_balance") or 0), 2)
+    opening_balance = await calculate_bank_period_opening_balance(bank_id, period_from)
     revenue_query = with_organization({"bank_id": bank_id, "bank_collection_status": "collected", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
     revenues = await db.revenues.find(revenue_query, {"_id": 0, "amount": 1}).to_list(100000)
     monthly_revenues = round(sum(float(item.get("amount") or 0) for item in revenues), 2)
@@ -3152,8 +3170,9 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     checks_not_presented = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in outstanding_checks), 2)
     manual_charges = await db.banking_manual_charges.find_one(with_organization({"bank_id": bank_id, "year": period_from.year, "month": period_from.month}, organization_id), {"_id": 0})
     bank_expenses = sum_manual_charge_items(manual_charges)
-    gross_total = round(opening_balance + monthly_revenues + deposit_settlements + checks_under_collection, 2)
-    reconciliation_balance = round(gross_total - monthly_expenses - checks_not_presented - bank_expenses, 2)
+    gross_total = round(opening_balance + monthly_revenues + deposit_settlements, 2)
+    book_balance = round(gross_total - monthly_expenses - bank_expenses, 2)
+    reconciliation_balance = round(book_balance + checks_not_presented - checks_under_collection, 2)
     return BankReconciliationBalanceBreakdown(
         bank_id=bank_id,
         period_from=period_from,
@@ -3163,6 +3182,7 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
         deposit_settlements=deposit_settlements,
         checks_under_collection=checks_under_collection,
         gross_total=gross_total,
+        book_balance=book_balance,
         monthly_expenses=monthly_expenses,
         checks_not_presented=checks_not_presented,
         bank_expenses=bank_expenses,
@@ -3372,6 +3392,25 @@ async def calculate_trial_balance_report(
     entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1}).to_list(100000)
     account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
     account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
+    if from_date:
+        prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+        for entry in prior_entries:
+            for line in entry.get("lines", []):
+                account = None
+                if line.get("account_id") and line["account_id"] in rows_by_key:
+                    key = line["account_id"]
+                else:
+                    account = account_by_code.get(line.get("account_code")) or account_by_name.get(line.get("account_name"))
+                    if account_type and (not account or account.get("account_type") != account_type):
+                        continue
+                    key = account.get("id") if account else (line.get("account_code") or line.get("account_name"))
+                if key not in rows_by_key:
+                    continue
+                movement_net = round(float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+                if rows_by_key[key].get("nature") == "credit":
+                    rows_by_key[key]["opening_balance"] = round(rows_by_key[key]["opening_balance"] - movement_net, 2)
+                else:
+                    rows_by_key[key]["opening_balance"] = round(rows_by_key[key]["opening_balance"] + movement_net, 2)
     for entry in entries:
         for line in entry.get("lines", []):
             account = None
@@ -6908,15 +6947,15 @@ async def get_general_ledger(
 ):
     organization_id = organization_id_or_default()
     await sync_chart_accounts_for_organization(organization_id)
-    entry_query = {"is_reversal": {"$ne": True}, "status": "approved"}
+    period_entry_query = {"is_reversal": {"$ne": True}, "status": "approved"}
     if from_date or to_date:
         date_query = {}
         if from_date:
             date_query["$gte"] = from_date.isoformat()
         if to_date:
             date_query["$lte"] = to_date.isoformat()
-        entry_query["entry_date"] = date_query
-    entries = await db.journal_entries.find(with_organization(entry_query, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+        period_entry_query["entry_date"] = date_query
+    entries = await db.journal_entries.find(with_organization(period_entry_query, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
     if account_id == "all" or account_code == "all":
         accounts = await db.chart_accounts.find(with_organization({"is_postable": True, "is_active": True}, organization_id), {"_id": 0}).to_list(10000)
         accounts_by_id = {account.get("id"): account for account in accounts if account.get("id")}
@@ -6924,7 +6963,15 @@ async def get_general_ledger(
         rows = []
         total_debit = 0.0
         total_credit = 0.0
-        running_balance = 0.0
+        opening_balance_total = 0.0
+        if from_date:
+            prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+            for entry in prior_entries:
+                for line in entry.get("lines", []):
+                    account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
+                    if account:
+                        opening_balance_total = round(opening_balance_total + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+        running_balance = opening_balance_total
         serial = 1
         for entry in entries:
             entry_date = date.fromisoformat(str(entry.get("entry_date")))
@@ -6953,12 +7000,19 @@ async def get_general_ledger(
                     balance=running_balance,
                 ))
                 serial += 1
-        return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=0, total_debit=total_debit, total_credit=total_credit, closing_balance=running_balance, rows=rows)
+        return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=opening_balance_total, total_debit=total_debit, total_credit=total_credit, closing_balance=running_balance, rows=rows)
     account_query = {"id": account_id} if account_id else {"code": account_code} if account_code else {"is_postable": True}
     account = await db.chart_accounts.find_one(with_organization(account_query, organization_id), {"_id": 0})
     if not account:
         raise HTTPException(status_code=404, detail="الحساب غير موجود")
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
+    if from_date:
+        prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+        for entry in prior_entries:
+            for line in entry.get("lines", []):
+                if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
+                    continue
+                opening_balance = round(opening_balance + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
     running_balance = opening_balance
     rows = []
     total_debit = 0.0
