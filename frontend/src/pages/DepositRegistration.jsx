@@ -22,6 +22,7 @@ const defaultForm = () => {
     creation_datetime: toDateInput(now),
     maturity_datetime: toDateInput(maturity),
     monthly_interest_rate: "",
+    is_opening_balance_deposit: false,
   };
 };
 
@@ -131,6 +132,10 @@ export default function DepositRegistration() {
               <Label htmlFor="maturity_datetime" data-testid="label-maturity-date">تاريخ استحقاق الوديعة</Label>
               <Input id="maturity_datetime" required type="date" value={form.maturity_datetime} onChange={(event) => updateField("maturity_datetime", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="input-maturity-datetime" />
             </div>
+            <button type="button" onClick={() => updateField("is_opening_balance_deposit", !form.is_opening_balance_deposit)} className={`rounded-xl border p-4 text-right transition-colors md:col-span-2 ${form.is_opening_balance_deposit ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700"}`} data-testid="opening-balance-deposit-toggle">
+              <span className="block text-sm font-extrabold" data-testid="opening-balance-deposit-toggle-title">{form.is_opening_balance_deposit ? "✓ وديعة قائمة عند بداية الفترة" : "○ وديعة جديدة خلال الفترة"}</span>
+              <span className="mt-1 block text-xs font-bold" data-testid="opening-balance-deposit-toggle-description">اخترها إذا كان تاريخ ربط الوديعة أقدم من تاريخ الرصيد الافتتاحي؛ سيتم إثباتها كرصيد افتتاحي للودائع بدون حركة بنك تاريخية قبل بداية الفترة.</span>
+            </button>
             <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row" data-testid="deposit-form-actions">
               <Button type="submit" disabled={isSaving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="submit-deposit-button">
                 <Save className="h-4 w-4" /> {isSaving ? "جاري الحفظ..." : "حفظ بيانات الوديعة"}

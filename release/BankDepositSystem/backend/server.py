@@ -222,6 +222,8 @@ class DepositBase(BaseModel):
     creation_datetime: datetime
     maturity_datetime: datetime
     monthly_interest_rate: float = Field(..., ge=0)
+    is_opening_balance_deposit: bool = False
+    accounting_start_datetime: Optional[datetime] = None
 
 
 class DepositCreate(DepositBase):
@@ -1498,7 +1500,7 @@ async def bank_transactions_before_date(bank_id: str, opening_date: date) -> Lis
     organization_id = organization_id_or_default()
     date_value = opening_date.isoformat()
     checks = [
-        ("الودائع", "deposits", {"bank_id": bank_id, "creation_datetime": {"$lt": f"{date_value}T00:00:00"}}, "deposit_number", "creation_datetime"),
+        ("الودائع", "deposits", {"bank_id": bank_id, "creation_datetime": {"$lt": f"{date_value}T00:00:00"}, "is_opening_balance_deposit": {"$ne": True}}, "deposit_number", "creation_datetime"),
         ("الإيرادات", "revenues", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "receipt_number", "issued_at"),
         ("المصروفات", "expenses", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "expense_number", "issued_at"),
         ("الأصول الثابتة", "fixed_assets", {"bank_id": bank_id, "purchase_date": {"$lt": date_value}}, "asset_code", "purchase_date"),
@@ -1924,7 +1926,8 @@ def serialize_date(value: date) -> str:
 
 def hydrate_deposit(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
-    for field_name in ["creation_datetime", "maturity_datetime", "created_at", "updated_at"]:
+    clean.setdefault("is_opening_balance_deposit", False)
+    for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
     return clean
@@ -2941,18 +2944,27 @@ async def journal_for_deposit_principal(deposit: dict, current_user: Optional[di
         return
     created_value = deposit.get("creation_datetime")
     entry_date = created_value.date() if isinstance(created_value, datetime) else datetime.fromisoformat(str(created_value)).date()
+    if deposit.get("is_opening_balance_deposit"):
+        accounting_start = deposit.get("accounting_start_datetime")
+        entry_date = accounting_start.date() if isinstance(accounting_start, datetime) else datetime.fromisoformat(str(accounting_start)).date()
+        lines = [
+            {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": amount, "credit": 0, "notes": "وديعة قائمة أول الفترة: إثبات أصل وديعة بدون حركة بنك تاريخية"},
+            {"account_name": "رصيد افتتاحي", "system_key": "opening_balance_equity", "debit": 0, "credit": amount, "notes": "القيد المقابل لوديعة قائمة عند بداية الفترة"},
+        ]
+    else:
+        lines = [
+            {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": amount, "credit": 0, "notes": "محرك القواعد: DepositEvent"},
+            {"account_name": "البنك", "bank_id": deposit.get("bank_id"), "debit": 0, "credit": amount, "notes": "محرك القواعد: DepositEvent"},
+        ]
     await save_journal_entry_document(
         entry_date=entry_date,
-        description=f"قيد تلقائي لربط وديعة رقم {deposit.get('deposit_number')}",
+        description=f"قيد تلقائي {'لرصيد افتتاحي وديعة قائمة' if deposit.get('is_opening_balance_deposit') else 'لربط وديعة'} رقم {deposit.get('deposit_number')}",
         reference=deposit.get("deposit_number"),
         source_type="deposit",
         source_id=deposit.get("id"),
         is_auto=True,
         current_user=current_user,
-        lines=[
-            {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": amount, "credit": 0, "notes": "محرك القواعد: DepositEvent"},
-            {"account_name": "البنك", "bank_id": deposit.get("bank_id"), "debit": 0, "credit": amount, "notes": "محرك القواعد: DepositEvent"},
-        ],
+        lines=lines,
     )
 
 
@@ -3018,6 +3030,9 @@ async def journal_for_deposit_interest(deposit: dict, current_user: Optional[dic
         return
     created_value = deposit.get("creation_datetime")
     entry_date = created_value.date() if isinstance(created_value, datetime) else datetime.fromisoformat(str(created_value)).date()
+    if deposit.get("is_opening_balance_deposit") and deposit.get("accounting_start_datetime"):
+        accounting_start = deposit.get("accounting_start_datetime")
+        entry_date = accounting_start.date() if isinstance(accounting_start, datetime) else datetime.fromisoformat(str(accounting_start)).date()
     await save_journal_entry_document(
         entry_date=entry_date,
         description=f"قيد تلقائي لإثبات عوائد وديعة رقم {deposit.get('deposit_number')}",
@@ -3050,7 +3065,7 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
     return balance
 
 
-ARABIC_MONTHS = {
+ARABIC_MONTH_NAME_TO_NUMBER = {
     "يناير": 1,
     "فبراير": 2,
     "مارس": 3,
@@ -3097,7 +3112,7 @@ def reconciliation_period_bounds(period_label: Optional[str] = None, year: Optio
     numeric_match = re.search(r"(?:^|\D)(1[0-2]|0?[1-9])(?:\D|$)", label)
     if numeric_match:
         detected_month = int(numeric_match.group(1))
-    for name, value in ARABIC_MONTHS.items():
+    for name, value in ARABIC_MONTH_NAME_TO_NUMBER.items():
         if name in label:
             detected_month = value
             break
@@ -4789,7 +4804,7 @@ def days_in_year(year: int) -> int:
 
 
 def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestRow], float, float]:
-    start = normalize_datetime(deposit.creation_datetime)
+    start = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime)
     end = normalize_datetime(deposit.maturity_datetime)
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
     daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
@@ -4854,7 +4869,7 @@ def latest_payment_date_on_or_before(target_day: date, creation_day: date) -> da
 
 
 def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
-    creation_day = normalize_datetime(deposit.creation_datetime).date()
+    creation_day = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime).date()
     maturity_day = normalize_datetime(deposit.maturity_datetime).date()
     today = datetime.now(timezone.utc).date()
     current_year = today.year
@@ -4911,7 +4926,7 @@ def calculate_year_total(deposit: Deposit, year: int) -> float:
 
 
 def calculate_previous_years(deposit: Deposit, current_year: int) -> tuple[List[PreviousYearBreakdown], float]:
-    start_year = normalize_datetime(deposit.creation_datetime).year
+    start_year = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime).year
     end_year = min(normalize_datetime(deposit.maturity_datetime).year, current_year - 1)
     breakdown = []
     total = 0.0
@@ -5463,11 +5478,22 @@ async def create_deposit(
     payload: DepositCreate,
     current_user: dict = Depends(require_permission("enter_deposits")),
 ):
-    await ensure_bank_async(bank_id)
+    bank = await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
-    await ensure_period_is_open(creation_datetime.date())
-    await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
+    opening_date = parse_date_field(bank.get("opening_balance_date"))
+    is_opening_balance_deposit = bool(payload.is_opening_balance_deposit)
+    accounting_start_datetime = creation_datetime
+    if is_opening_balance_deposit:
+        if not opening_date:
+            raise HTTPException(status_code=400, detail="يجب تحديد تاريخ الرصيد الافتتاحي للبنك قبل تسجيل وديعة قائمة أول الفترة")
+        if maturity_datetime.date() <= opening_date:
+            raise HTTPException(status_code=400, detail="الوديعة القائمة أول الفترة يجب أن يكون تاريخ استحقاقها بعد تاريخ الرصيد الافتتاحي")
+        accounting_start_datetime = datetime.combine(opening_date, datetime.min.time(), tzinfo=timezone.utc)
+        await ensure_period_is_open(opening_date)
+    else:
+        await ensure_period_is_open(creation_datetime.date())
+        await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
 
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
@@ -5482,12 +5508,14 @@ async def create_deposit(
         creation_datetime=creation_datetime,
         maturity_datetime=maturity_datetime,
         monthly_interest_rate=payload.monthly_interest_rate,
+        is_opening_balance_deposit=is_opening_balance_deposit,
+        accounting_start_datetime=accounting_start_datetime,
         created_at=now,
         updated_at=now,
     )
     document = deposit.model_dump()
     attach_organization(document)
-    for field_name in ["creation_datetime", "maturity_datetime", "created_at", "updated_at"]:
+    for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         document[field_name] = serialize_datetime(document[field_name])
 
     await db.deposits.insert_one(document)
@@ -5515,11 +5543,22 @@ async def update_deposit(
     payload: DepositCreate,
     current_user: dict = Depends(require_permission("edit_deposits")),
 ):
-    await ensure_bank_async(bank_id)
+    bank = await ensure_bank_async(bank_id)
     creation_datetime = normalize_datetime(payload.creation_datetime)
     maturity_datetime = normalize_datetime(payload.maturity_datetime)
-    await ensure_period_is_open(creation_datetime.date())
-    await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
+    opening_date = parse_date_field(bank.get("opening_balance_date"))
+    is_opening_balance_deposit = bool(payload.is_opening_balance_deposit)
+    accounting_start_datetime = creation_datetime
+    if is_opening_balance_deposit:
+        if not opening_date:
+            raise HTTPException(status_code=400, detail="يجب تحديد تاريخ الرصيد الافتتاحي للبنك قبل تسجيل وديعة قائمة أول الفترة")
+        if maturity_datetime.date() <= opening_date:
+            raise HTTPException(status_code=400, detail="الوديعة القائمة أول الفترة يجب أن يكون تاريخ استحقاقها بعد تاريخ الرصيد الافتتاحي")
+        accounting_start_datetime = datetime.combine(opening_date, datetime.min.time(), tzinfo=timezone.utc)
+        await ensure_period_is_open(opening_date)
+    else:
+        await ensure_period_is_open(creation_datetime.date())
+        await ensure_bank_transaction_date_allowed(bank_id, creation_datetime.date())
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
 
@@ -5529,6 +5568,8 @@ async def update_deposit(
         "amount": payload.amount,
         "creation_datetime": serialize_datetime(creation_datetime),
         "maturity_datetime": serialize_datetime(maturity_datetime),
+        "is_opening_balance_deposit": is_opening_balance_deposit,
+        "accounting_start_datetime": serialize_datetime(accounting_start_datetime),
         "monthly_interest_rate": payload.monthly_interest_rate,
         "updated_at": serialize_datetime(datetime.now(timezone.utc)),
     }
@@ -5697,7 +5738,7 @@ async def get_accrued_interest_report(
     if deposit_id and not deposits:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
     current_year = datetime.now(timezone.utc).year
-    min_year = min([normalize_datetime(deposit.creation_datetime).year for deposit in all_deposits], default=current_year)
+    min_year = min([normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime).year for deposit in all_deposits], default=current_year)
     available_years = list(range(min_year, current_year + 1))
     target_year = year or current_year
 

@@ -8,6 +8,7 @@ export const DepositSummary = ({ deposit }) => {
     { label: "مبلغ الوديعة", value: formatCurrency(deposit?.amount), icon: WalletCards, testId: "summary-deposit-amount" },
     { label: "نسبة الفائدة السنوية", value: `${formatNumber(deposit?.monthly_interest_rate)}%`, icon: Percent, testId: "summary-interest-rate" },
     { label: "تاريخ إنشاء الوديعة", value: formatDateTime(deposit?.creation_datetime), icon: CalendarClock, testId: "summary-creation-date" },
+    { label: "بداية الاحتساب", value: deposit?.is_opening_balance_deposit ? formatDateTime(deposit?.accounting_start_datetime) : "من تاريخ الربط", icon: CalendarClock, testId: "summary-accounting-start-date" },
     { label: "تاريخ الاستحقاق", value: formatDateTime(deposit?.maturity_datetime), icon: Landmark, testId: "summary-maturity-date" },
   ];
 
