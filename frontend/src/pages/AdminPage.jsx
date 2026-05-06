@@ -977,6 +977,7 @@ export default function AdminPage() {
             <div className="mb-5" data-testid="opening-balances-heading">
               <p className="text-sm font-extrabold text-emerald-700" data-testid="opening-balances-eyebrow">الأرصدة الافتتاحية</p>
               <h2 className="text-2xl font-extrabold" data-testid="opening-balances-title">رصيد افتتاحي لكل بنك</h2>
+              <p className="mt-1 text-sm font-bold text-slate-500" data-testid="opening-balances-date-help">تاريخ الرصيد الافتتاحي يجب أن يسبق أو يساوي أقدم معاملة مالية على البنك؛ أي عملية قبل هذا التاريخ سيتم رفضها.</p>
             </div>
             <div className="space-y-3" data-testid="opening-balances-list">
               {banks.map((bank) => (

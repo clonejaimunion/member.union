@@ -1491,7 +1491,39 @@ async def ensure_bank_transaction_date_allowed(bank_id: Optional[str], target_da
     bank = await ensure_bank_async(bank_id)
     opening_date = parse_date_field(bank.get("opening_balance_date"))
     if opening_date and target_date < opening_date:
-        raise HTTPException(status_code=400, detail="No financial transaction is allowed before the Opening Balance Date.")
+        raise HTTPException(status_code=400, detail=f"لا يُسمح بإجراء أي معاملة مالية قبل تاريخ الرصيد الافتتاحي. البنك: {bank.get('name')} | تاريخ العملية: {target_date.isoformat().replace('-', '/')} | تاريخ الرصيد الافتتاحي: {opening_date.isoformat().replace('-', '/')}")
+
+
+async def bank_transactions_before_date(bank_id: str, opening_date: date) -> List[dict]:
+    organization_id = organization_id_or_default()
+    date_value = opening_date.isoformat()
+    checks = [
+        ("الودائع", "deposits", {"bank_id": bank_id, "creation_datetime": {"$lt": f"{date_value}T00:00:00"}}, "deposit_number", "creation_datetime"),
+        ("الإيرادات", "revenues", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "receipt_number", "issued_at"),
+        ("المصروفات", "expenses", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "expense_number", "issued_at"),
+        ("الأصول الثابتة", "fixed_assets", {"bank_id": bank_id, "purchase_date": {"$lt": date_value}}, "asset_code", "purchase_date"),
+        ("العهد والسلف", "custody_advances", {"bank_id": bank_id, "issue_date": {"$lt": date_value}}, "document_number", "issue_date"),
+        ("أذون العضوية الجماعية", "membership_batch_payments", {"bank_id": bank_id, "payment_date": {"$lt": date_value}}, "receipt_number", "payment_date"),
+        ("التسويات البنكية", "reconciliations", {"bank_id": bank_id, "created_at": {"$lt": f"{date_value}T00:00:00"}}, "period_label", "created_at"),
+    ]
+    conflicts = []
+    for label, collection_name, query, reference_field, date_field in checks:
+        documents = await db[collection_name].find(with_organization(query, organization_id), {"_id": 0, reference_field: 1, date_field: 1}).sort(date_field, 1).limit(3).to_list(3)
+        if documents:
+            conflicts.append({"collection": label, "count": await db[collection_name].count_documents(with_organization(query, organization_id)), "examples": documents})
+    manual_query = with_organization({"bank_id": bank_id, "$or": [{"year": {"$lt": opening_date.year}}, {"year": opening_date.year, "month": {"$lt": opening_date.month}}]}, organization_id)
+    manual_count = await db.banking_manual_charges.count_documents(manual_query)
+    if manual_count:
+        examples = await db.banking_manual_charges.find(manual_query, {"_id": 0, "year": 1, "month": 1}).sort("year", 1).sort("month", 1).limit(3).to_list(3)
+        conflicts.append({"collection": "المصروفات البنكية", "count": manual_count, "examples": examples})
+    return conflicts
+
+
+async def ensure_opening_balance_date_not_after_existing_transactions(bank_id: str, opening_date: date):
+    conflicts = await bank_transactions_before_date(bank_id, opening_date)
+    if conflicts:
+        summary = "، ".join(f"{item['collection']} ({item['count']})" for item in conflicts)
+        raise HTTPException(status_code=400, detail=f"لا يمكن تعيين تاريخ الرصيد الافتتاحي بعد معاملات مسجلة بالفعل لهذا البنك. اختر تاريخاً يسبق أو يساوي أقدم معاملة. معاملات أقدم من التاريخ المختار: {summary}")
 
 
 def default_tariff_rules(bank_id: str) -> BankingTariffRules:
@@ -5277,6 +5309,7 @@ async def update_bank_opening_balance(bank_id: str, payload: BankOpeningBalanceU
     bank = await ensure_bank_async(bank_id)
     opening_balance = round(float(payload.opening_balance or 0), 2)
     opening_balance_date = payload.opening_balance_date
+    await ensure_opening_balance_date_not_after_existing_transactions(bank_id, opening_balance_date)
     now = datetime.now(timezone.utc)
     await db.bank_settings.update_one(
         with_organization({"bank_id": bank_id}, organization_id),
