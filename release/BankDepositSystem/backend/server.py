@@ -6955,7 +6955,7 @@ async def get_general_ledger(
 ):
     organization_id = organization_id_or_default()
     await sync_chart_accounts_for_organization(organization_id)
-    period_entry_query = {"is_reversal": {"$ne": True}, "status": "approved"}
+    period_entry_query = {"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}}
     if from_date or to_date:
         date_query = {}
         if from_date:
@@ -6968,28 +6968,44 @@ async def get_general_ledger(
         accounts = await db.chart_accounts.find(with_organization({"is_postable": True, "is_active": True}, organization_id), {"_id": 0}).to_list(10000)
         accounts_by_id = {account.get("id"): account for account in accounts if account.get("id")}
         accounts_by_code = {account.get("code"): account for account in accounts if account.get("code")}
+        period_movement_account_ids = set()
+        for entry in entries:
+            for line in entry.get("lines", []):
+                account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
+                if not account:
+                    continue
+                if round(float(line.get("debit") or 0), 2) != 0 or round(float(line.get("credit") or 0), 2) != 0:
+                    period_movement_account_ids.add(account.get("id"))
         rows = []
         total_debit = 0.0
         total_credit = 0.0
-        opening_balance_total = 0.0
+        account_openings = {account_id_value: 0.0 for account_id_value in period_movement_account_ids}
         if from_date:
-            prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+            for account in accounts:
+                if account.get("id") in account_openings:
+                    account_openings[account.get("id")] = round(float(account.get("opening_balance") or 0) * (-1 if account.get("nature") == "credit" else 1), 2)
+            prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
             for entry in prior_entries:
                 for line in entry.get("lines", []):
                     account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
-                    if account:
-                        opening_balance_total = round(opening_balance_total + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
-        running_balance = opening_balance_total
+                    if account and account.get("id") in account_openings:
+                        account_openings[account.get("id")] = round(account_openings[account.get("id")] + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+        else:
+            for account in accounts:
+                if account.get("id") in account_openings:
+                    account_openings[account.get("id")] = round(float(account.get("opening_balance") or 0) * (-1 if account.get("nature") == "credit" else 1), 2)
+        account_running_balances = account_openings.copy()
+        opening_balance_total = round(sum(account_openings.values()), 2)
         serial = 1
         for entry in entries:
             entry_date = date.fromisoformat(str(entry.get("entry_date")))
             for line in entry.get("lines", []):
                 account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
-                if not account:
+                if not account or account.get("id") not in period_movement_account_ids:
                     continue
                 debit = round(float(line.get("debit") or 0), 2)
                 credit = round(float(line.get("credit") or 0), 2)
-                running_balance = round(running_balance + debit - credit, 2)
+                account_running_balances[account.get("id")] = round(account_running_balances.get(account.get("id"), 0.0) + debit - credit, 2)
                 total_debit = round(total_debit + debit, 2)
                 total_credit = round(total_credit + credit, 2)
                 rows.append(GeneralLedgerLine(
@@ -7005,17 +7021,18 @@ async def get_general_ledger(
                     description=entry.get("description") or line.get("notes") or "-",
                     debit=debit,
                     credit=credit,
-                    balance=running_balance,
+                    balance=account_running_balances[account.get("id")],
                 ))
                 serial += 1
-        return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=opening_balance_total, total_debit=total_debit, total_credit=total_credit, closing_balance=running_balance, rows=rows)
+        closing_balance = round(sum(account_running_balances.values()), 2)
+        return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=opening_balance_total, total_debit=total_debit, total_credit=total_credit, closing_balance=closing_balance, rows=rows)
     account_query = {"id": account_id} if account_id else {"code": account_code} if account_code else {"is_postable": True}
     account = await db.chart_accounts.find_one(with_organization(account_query, organization_id), {"_id": 0})
     if not account:
         raise HTTPException(status_code=404, detail="الحساب غير موجود")
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
     if from_date:
-        prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+        prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
         for entry in prior_entries:
             for line in entry.get("lines", []):
                 if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
