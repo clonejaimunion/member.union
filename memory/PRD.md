@@ -145,3 +145,14 @@
 - تم تشغيل فحص ذاتي: رفض عملية قبل التاريخ، قبول عملية في نفس التاريخ، `/api/admin/data-flow-validation` سليم، واجهة التسوية تعرض خيار إدارة واحد للجهتين.
 - Testing Agent iteration_62 نجح في نطاق الطلب، وتمت معالجة ملاحظتي الرسالة وصيغة التاريخ بعده ذاتياً.
 - نجح `yarn lint` و`yarn craco build`، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe`.
+
+
+## تحديث معادلة رصيد التسوية البنكية بتاريخ 2026-05-06
+- تم تعديل رصيد التسوية البنكية ليحسب أوتوماتيكياً من بنود تفصيلية، وليس من إدخال يدوي أو من رصيد الأستاذ الخام فقط.
+- المعادلة المعتمدة: الرصيد الافتتاحي + إجمالي الإيرادات الشهرية المحصلة للبنك + ترصيد الودائع المستحقة في الفترة + شيكات تحت التحصيل - المصروفات المدفوعة - شيكات لم تقدم للصرف - المصروفات البنكية.
+- تم إضافة endpoint: `/api/banks/{bank_id}/reconciliation-balance` يعيد breakdown كامل: opening_balance, monthly_revenues, deposit_settlements, checks_under_collection, gross_total, monthly_expenses, checks_not_presented, bank_expenses, reconciliation_balance.
+- حفظ/تعديل التسوية الآن يتجاهل أي `book_balance` مرسل من الواجهة ويستخدم الرصيد المحسوب تلقائياً، ويحفظ `balance_breakdown` داخل مذكرة التسوية.
+- تم منع الجمع/الطرح المزدوج داخل التسوية بجعل `calculated_balance = book_balance` المحسوب من المعادلة.
+- واجهة التسوية تعرض تفصيل رصيد التسوية البنكية في بطاقات واضحة، وتعرض التفصيل داخل الطباعة/المعاينة.
+- تم التحقق ذاتياً من المعادلة والحفظ وتدفق البيانات، ثم نجح Testing Agent iteration_63 بالكامل بدون تدفقات مكسورة.
+- نجح `yarn lint` و`yarn craco build` وتم تحديث `/app/dist/BankDepositSystemSetup.exe`.
