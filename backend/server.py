@@ -566,6 +566,9 @@ class GeneralLedgerLine(BaseModel):
     entry_date: date
     source_type: str
     reference: Optional[str] = None
+    account_id: Optional[str] = None
+    account_code: Optional[str] = None
+    account_name: Optional[str] = None
     description: str
     debit: float
     credit: float
@@ -573,7 +576,8 @@ class GeneralLedgerLine(BaseModel):
 
 
 class GeneralLedgerReport(BaseModel):
-    account: ChartAccountResponse
+    account: Optional[ChartAccountResponse] = None
+    account_scope: Literal["single", "all"] = "single"
     from_date: Optional[date] = None
     to_date: Optional[date] = None
     opening_balance: float
@@ -6904,11 +6908,56 @@ async def get_general_ledger(
 ):
     organization_id = organization_id_or_default()
     await sync_chart_accounts_for_organization(organization_id)
+    entry_query = {"is_reversal": {"$ne": True}, "status": "approved"}
+    if from_date or to_date:
+        date_query = {}
+        if from_date:
+            date_query["$gte"] = from_date.isoformat()
+        if to_date:
+            date_query["$lte"] = to_date.isoformat()
+        entry_query["entry_date"] = date_query
+    entries = await db.journal_entries.find(with_organization(entry_query, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+    if account_id == "all" or account_code == "all":
+        accounts = await db.chart_accounts.find(with_organization({"is_postable": True, "is_active": True}, organization_id), {"_id": 0}).to_list(10000)
+        accounts_by_id = {account.get("id"): account for account in accounts if account.get("id")}
+        accounts_by_code = {account.get("code"): account for account in accounts if account.get("code")}
+        rows = []
+        total_debit = 0.0
+        total_credit = 0.0
+        running_balance = 0.0
+        serial = 1
+        for entry in entries:
+            entry_date = date.fromisoformat(str(entry.get("entry_date")))
+            for line in entry.get("lines", []):
+                account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
+                if not account:
+                    continue
+                debit = round(float(line.get("debit") or 0), 2)
+                credit = round(float(line.get("credit") or 0), 2)
+                running_balance = round(running_balance + debit - credit, 2)
+                total_debit = round(total_debit + debit, 2)
+                total_credit = round(total_credit + credit, 2)
+                rows.append(GeneralLedgerLine(
+                    serial=serial,
+                    entry_id=entry.get("id"),
+                    entry_number=int(entry.get("entry_number") or 0),
+                    entry_date=entry_date,
+                    source_type=entry.get("source_type") or "manual",
+                    reference=entry.get("reference"),
+                    account_id=account.get("id"),
+                    account_code=account.get("code"),
+                    account_name=account.get("name"),
+                    description=entry.get("description") or line.get("notes") or "-",
+                    debit=debit,
+                    credit=credit,
+                    balance=running_balance,
+                ))
+                serial += 1
+        return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=0, total_debit=total_debit, total_credit=total_credit, closing_balance=running_balance, rows=rows)
     account_query = {"id": account_id} if account_id else {"code": account_code} if account_code else {"is_postable": True}
     account = await db.chart_accounts.find_one(with_organization(account_query, organization_id), {"_id": 0})
     if not account:
         raise HTTPException(status_code=404, detail="الحساب غير موجود")
-    entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}}, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
     running_balance = opening_balance
     rows = []
@@ -6923,11 +6972,6 @@ async def get_general_ledger(
             debit = round(float(line.get("debit") or 0), 2)
             credit = round(float(line.get("credit") or 0), 2)
             direction_value = debit - credit if account.get("nature") == "debit" else credit - debit
-            if from_date and entry_date < from_date:
-                running_balance = round(running_balance + direction_value, 2)
-                continue
-            if to_date and entry_date > to_date:
-                continue
             running_balance = round(running_balance + direction_value, 2)
             total_debit = round(total_debit + debit, 2)
             total_credit = round(total_credit + credit, 2)
@@ -6938,6 +6982,9 @@ async def get_general_ledger(
                 entry_date=entry_date,
                 source_type=entry.get("source_type") or "manual",
                 reference=entry.get("reference"),
+                account_id=account.get("id"),
+                account_code=account.get("code"),
+                account_name=account.get("name"),
                 description=entry.get("description") or line.get("notes") or "-",
                 debit=debit,
                 credit=credit,
@@ -6946,6 +6993,7 @@ async def get_general_ledger(
             serial += 1
     return GeneralLedgerReport(
         account=ChartAccountResponse(**hydrate_chart_account(account)),
+        account_scope="single",
         from_date=from_date,
         to_date=to_date,
         opening_balance=opening_balance,
