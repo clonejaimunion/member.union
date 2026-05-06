@@ -39,7 +39,15 @@ export default function LedgerPage() {
         setReport(null);
         return;
       }
-      const response = await api.get(`/ledger?account_id=${accountId}&from_date=${filters.from_date}&to_date=${filters.to_date}`);
+      if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
+        toast.error("تاريخ بداية الفترة يجب أن يكون قبل تاريخ النهاية");
+        setReport(null);
+        return;
+      }
+      const params = new URLSearchParams({ account_id: accountId });
+      if (filters.from_date) params.set("from_date", filters.from_date);
+      if (filters.to_date) params.set("to_date", filters.to_date);
+      const response = await api.get(`/ledger?${params.toString()}`);
       setReport(response.data);
     } catch (error) {
       toast.error("تعذر تحميل دفتر الأستاذ من القيود اليومية");
