@@ -7173,95 +7173,12 @@ async def get_trial_balance(
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
     organization_id = organization_id_or_default()
-    await sync_chart_accounts_for_organization(organization_id)
-    account_query = with_organization({}, organization_id)
-    if account_type:
-        account_query["account_type"] = account_type
-    accounts = await db.chart_accounts.find(account_query, {"_id": 0}).sort("code", 1).to_list(5000)
-    rows_by_key = {}
-    for account in accounts:
-        key = account.get("id") or account.get("code") or account.get("name")
-        rows_by_key[key] = {
-            "account_id": account.get("id"),
-            "account_code": account.get("code"),
-            "account_name": account.get("name"),
-            "account_type": account.get("account_type"),
-            "nature": account.get("nature"),
-            "opening_balance": round(float(account.get("opening_balance") or 0), 2),
-            "total_debit": 0.0,
-            "total_credit": 0.0,
-            "balance_debit": 0.0,
-            "balance_credit": 0.0,
-        }
-    entry_query = with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id)
-    if from_date or to_date:
-        entry_query["entry_date"] = {}
-        if from_date:
-            entry_query["entry_date"]["$gte"] = from_date.isoformat()
-        if to_date:
-            entry_query["entry_date"]["$lte"] = to_date.isoformat()
-    entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1}).to_list(100000)
-    account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
-    account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
-    for entry in entries:
-        for line in entry.get("lines", []):
-            account = None
-            if line.get("account_id") and line["account_id"] in rows_by_key:
-                key = line["account_id"]
-            else:
-                account = account_by_code.get(line.get("account_code")) or account_by_name.get(line.get("account_name"))
-                if account_type and (not account or account.get("account_type") != account_type):
-                    continue
-                key = account.get("id") if account else (line.get("account_code") or line.get("account_name"))
-            if key not in rows_by_key:
-                if account_type and (account.get("account_type") if account else line.get("account_type")) != account_type:
-                    continue
-                rows_by_key[key] = {
-                    "account_id": account.get("id") if account else line.get("account_id"),
-                    "account_code": account.get("code") if account else line.get("account_code"),
-                    "account_name": account.get("name") if account else line.get("account_name") or "حساب غير محدد",
-                    "account_type": account.get("account_type") if account else line.get("account_type"),
-                    "nature": account.get("nature") if account else None,
-                    "opening_balance": 0.0,
-                    "total_debit": 0.0,
-                    "total_credit": 0.0,
-                    "balance_debit": 0.0,
-                    "balance_credit": 0.0,
-                }
-            rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + float(line.get("debit") or 0), 2)
-            rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + float(line.get("credit") or 0), 2)
-    rows = []
-    for row in rows_by_key.values():
-        signed_balance = row["total_debit"] - row["total_credit"]
-        if row.get("nature") == "credit":
-            signed_balance -= row["opening_balance"]
-        else:
-            signed_balance += row["opening_balance"]
-        if signed_balance >= 0:
-            row["balance_debit"] = round(signed_balance, 2)
-            row["balance_credit"] = 0.0
-        else:
-            row["balance_debit"] = 0.0
-            row["balance_credit"] = round(abs(signed_balance), 2)
-        if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
-            continue
-        rows.append(TrialBalanceRow(**row))
-    rows.sort(key=lambda item: item.account_code or "999999")
-    total_debit = round(sum(row.total_debit for row in rows), 2)
-    total_credit = round(sum(row.total_credit for row in rows), 2)
-    total_balance_debit = round(sum(row.balance_debit for row in rows), 2)
-    total_balance_credit = round(sum(row.balance_credit for row in rows), 2)
-    return TrialBalanceReport(
+    return await calculate_trial_balance_report(
         organization_id=organization_id,
         from_date=from_date,
         to_date=to_date,
         account_type=account_type,
-        rows=rows,
-        total_debit=total_debit,
-        total_credit=total_credit,
-        total_balance_debit=total_balance_debit,
-        total_balance_credit=total_balance_credit,
-        is_balanced=round(total_debit - total_credit, 2) == 0,
+        non_zero_only=non_zero_only,
     )
 
 
