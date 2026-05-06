@@ -4885,6 +4885,40 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
     return rows, round(annual_interest, 2), round(total, 2)
 
 
+def calculate_deposit_interest_for_period(deposit: Deposit, period_from: date, period_to: date) -> float:
+    start = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime)
+    end = normalize_datetime(deposit.maturity_datetime)
+    period_start = datetime.combine(period_from, datetime.min.time(), tzinfo=timezone.utc)
+    period_end = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    overlap_start = max(start, period_start)
+    overlap_end = min(end, period_end)
+    if overlap_end <= overlap_start:
+        return 0.0
+    annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
+    daily_interest = math.floor((annual_interest / days_in_year(period_from.year)) * 100) / 100
+    active_days = (overlap_end - overlap_start).total_seconds() / 86400
+    return round(daily_interest * active_days, 2)
+
+
+async def calculate_total_deposit_interest_for_period(organization_id: str, period_from: Optional[date], period_to: Optional[date]) -> float:
+    if not period_from or not period_to:
+        return 0.0
+    period_start_iso = datetime.combine(period_from, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    period_end_iso = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    query = with_organization({
+        "maturity_datetime": {"$gt": period_start_iso},
+        "$or": [
+            {"accounting_start_datetime": {"$lt": period_end_iso}},
+            {"creation_datetime": {"$lt": period_end_iso}},
+        ],
+    }, organization_id)
+    documents = await db.deposits.find(query, {"_id": 0}).to_list(100000)
+    total = 0.0
+    for document in documents:
+        total = round(total + calculate_deposit_interest_for_period(Deposit(**hydrate_deposit(document)), period_from, period_to), 2)
+    return total
+
+
 def calculate_daily_interest_amount(deposit: Deposit, year: int) -> tuple[float, float]:
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
     daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
@@ -6955,6 +6989,13 @@ async def get_general_ledger(
 ):
     organization_id = organization_id_or_default()
     await sync_chart_accounts_for_organization(organization_id)
+    opening_deposit_documents = await db.deposits.find(with_organization({"is_opening_balance_deposit": True}, organization_id), {"_id": 0, "id": 1}).to_list(100000)
+    opening_deposit_source_ids = {item.get("id") for item in opening_deposit_documents if item.get("id")}
+
+    def is_opening_deposit_entry(entry: dict) -> bool:
+        return entry.get("source_type") == "deposit" and (entry.get("source_id") in opening_deposit_source_ids or "رصيد افتتاحي وديعة قائمة" in str(entry.get("description") or ""))
+
+    deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, from_date, to_date)
     period_entry_query = {"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}}
     if from_date or to_date:
         date_query = {}
@@ -6964,18 +7005,28 @@ async def get_general_ledger(
             date_query["$lte"] = to_date.isoformat()
         period_entry_query["entry_date"] = date_query
     entries = await db.journal_entries.find(with_organization(period_entry_query, organization_id), {"_id": 0}).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+    movement_entries = [entry for entry in entries if not is_opening_deposit_entry(entry)]
+    opening_entries_inside_period = [entry for entry in entries if is_opening_deposit_entry(entry) and (not to_date or str(entry.get("entry_date") or "") <= to_date.isoformat())]
     if account_id == "all" or account_code == "all":
         accounts = await db.chart_accounts.find(with_organization({"is_postable": True, "is_active": True}, organization_id), {"_id": 0}).to_list(10000)
         accounts_by_id = {account.get("id"): account for account in accounts if account.get("id")}
         accounts_by_code = {account.get("code"): account for account in accounts if account.get("code")}
+        accounts_by_system_key = {account.get("system_key"): account for account in accounts if account.get("system_key")}
         period_movement_account_ids = set()
-        for entry in entries:
+        for entry in movement_entries:
             for line in entry.get("lines", []):
                 account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
                 if not account:
                     continue
                 if round(float(line.get("debit") or 0), 2) != 0 or round(float(line.get("credit") or 0), 2) != 0:
                     period_movement_account_ids.add(account.get("id"))
+        accrued_interest_account = accounts_by_system_key.get("accrued_deposit_interest")
+        deposit_interest_revenue_account = accounts_by_system_key.get("deposit_interest_revenue")
+        if deposit_period_interest > 0:
+            if accrued_interest_account:
+                period_movement_account_ids.add(accrued_interest_account.get("id"))
+            if deposit_interest_revenue_account:
+                period_movement_account_ids.add(deposit_interest_revenue_account.get("id"))
         rows = []
         total_debit = 0.0
         total_credit = 0.0
@@ -6985,7 +7036,7 @@ async def get_general_ledger(
                 if account.get("id") in account_openings:
                     account_openings[account.get("id")] = round(float(account.get("opening_balance") or 0) * (-1 if account.get("nature") == "credit" else 1), 2)
             prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
-            for entry in prior_entries:
+            for entry in prior_entries + opening_entries_inside_period:
                 for line in entry.get("lines", []):
                     account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
                     if account and account.get("id") in account_openings:
@@ -6997,7 +7048,7 @@ async def get_general_ledger(
         account_running_balances = account_openings.copy()
         opening_balance_total = round(sum(account_openings.values()), 2)
         serial = 1
-        for entry in entries:
+        for entry in movement_entries:
             entry_date = date.fromisoformat(str(entry.get("entry_date")))
             for line in entry.get("lines", []):
                 account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
@@ -7024,6 +7075,18 @@ async def get_general_ledger(
                     balance=account_running_balances[account.get("id")],
                 ))
                 serial += 1
+        synthetic_date = to_date or from_date or date.today()
+        synthetic_description = f"إجمالي فوائد الودائع عن الفترة من {from_date.isoformat() if from_date else '-'} إلى {to_date.isoformat() if to_date else '-'}"
+        if deposit_period_interest > 0 and accrued_interest_account:
+            account_running_balances[accrued_interest_account.get("id")] = round(account_running_balances.get(accrued_interest_account.get("id"), 0.0) + deposit_period_interest, 2)
+            total_debit = round(total_debit + deposit_period_interest, 2)
+            rows.append(GeneralLedgerLine(serial=serial, entry_id="deposit-interest-period-total", entry_number=0, entry_date=synthetic_date, source_type="deposit_interest", reference="DEPOSIT-INTEREST-PERIOD", account_id=accrued_interest_account.get("id"), account_code=accrued_interest_account.get("code"), account_name=accrued_interest_account.get("name"), description=synthetic_description, debit=deposit_period_interest, credit=0.0, balance=account_running_balances[accrued_interest_account.get("id")]))
+            serial += 1
+        if deposit_period_interest > 0 and deposit_interest_revenue_account:
+            account_running_balances[deposit_interest_revenue_account.get("id")] = round(account_running_balances.get(deposit_interest_revenue_account.get("id"), 0.0) - deposit_period_interest, 2)
+            total_credit = round(total_credit + deposit_period_interest, 2)
+            rows.append(GeneralLedgerLine(serial=serial, entry_id="deposit-interest-period-total", entry_number=0, entry_date=synthetic_date, source_type="deposit_interest", reference="DEPOSIT-INTEREST-PERIOD", account_id=deposit_interest_revenue_account.get("id"), account_code=deposit_interest_revenue_account.get("code"), account_name=deposit_interest_revenue_account.get("name"), description=synthetic_description, debit=0.0, credit=deposit_period_interest, balance=account_running_balances[deposit_interest_revenue_account.get("id")]))
+            serial += 1
         closing_balance = round(sum(account_running_balances.values()), 2)
         return GeneralLedgerReport(account=None, account_scope="all", from_date=from_date, to_date=to_date, opening_balance=opening_balance_total, total_debit=total_debit, total_credit=total_credit, closing_balance=closing_balance, rows=rows)
     account_query = {"id": account_id} if account_id else {"code": account_code} if account_code else {"is_postable": True}
@@ -7033,7 +7096,7 @@ async def get_general_ledger(
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
     if from_date:
         prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
-        for entry in prior_entries:
+        for entry in prior_entries + opening_entries_inside_period:
             for line in entry.get("lines", []):
                 if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
                     continue
@@ -7043,7 +7106,7 @@ async def get_general_ledger(
     total_debit = 0.0
     total_credit = 0.0
     serial = 1
-    for entry in entries:
+    for entry in movement_entries:
         entry_date = date.fromisoformat(str(entry.get("entry_date")))
         for line in entry.get("lines", []):
             if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
@@ -7070,6 +7133,29 @@ async def get_general_ledger(
                 balance=running_balance,
             ))
             serial += 1
+    synthetic_date = to_date or from_date or date.today()
+    if deposit_period_interest > 0 and account.get("system_key") in {"accrued_deposit_interest", "deposit_interest_revenue"}:
+        debit = deposit_period_interest if account.get("system_key") == "accrued_deposit_interest" else 0.0
+        credit = deposit_period_interest if account.get("system_key") == "deposit_interest_revenue" else 0.0
+        direction_value = debit - credit if account.get("nature") == "debit" else credit - debit
+        running_balance = round(running_balance + direction_value, 2)
+        total_debit = round(total_debit + debit, 2)
+        total_credit = round(total_credit + credit, 2)
+        rows.append(GeneralLedgerLine(
+            serial=serial,
+            entry_id="deposit-interest-period-total",
+            entry_number=0,
+            entry_date=synthetic_date,
+            source_type="deposit_interest",
+            reference="DEPOSIT-INTEREST-PERIOD",
+            account_id=account.get("id"),
+            account_code=account.get("code"),
+            account_name=account.get("name"),
+            description=f"إجمالي فوائد الودائع عن الفترة من {from_date.isoformat() if from_date else '-'} إلى {to_date.isoformat() if to_date else '-'}",
+            debit=debit,
+            credit=credit,
+            balance=running_balance,
+        ))
     return GeneralLedgerReport(
         account=ChartAccountResponse(**hydrate_chart_account(account)),
         account_scope="single",
