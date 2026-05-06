@@ -588,6 +588,22 @@ class BankBookBalanceResponse(BaseModel):
     source: str = "journal_entries"
 
 
+class BankReconciliationBalanceBreakdown(BaseModel):
+    bank_id: str
+    period_from: date
+    period_to: date
+    opening_balance: float = 0
+    monthly_revenues: float = 0
+    deposit_settlements: float = 0
+    checks_under_collection: float = 0
+    gross_total: float = 0
+    monthly_expenses: float = 0
+    checks_not_presented: float = 0
+    bank_expenses: float = 0
+    reconciliation_balance: float = 0
+    source: str = "opening_balance_plus_monthly_components"
+
+
 class TrialBalanceRow(BaseModel):
     account_id: Optional[str] = None
     account_code: Optional[str] = None
@@ -1009,6 +1025,7 @@ class BankReconciliation(BankReconciliationCreate):
     difference: float
     is_matched: bool
     status_text: str
+    balance_breakdown: Optional[BankReconciliationBalanceBreakdown] = None
     created_at: datetime
     updated_at: datetime
 
@@ -3001,6 +3018,107 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
     return balance
 
 
+ARABIC_MONTHS = {
+    "يناير": 1,
+    "فبراير": 2,
+    "مارس": 3,
+    "أبريل": 4,
+    "ابريل": 4,
+    "مايو": 5,
+    "يونيو": 6,
+    "يوليو": 7,
+    "أغسطس": 8,
+    "اغسطس": 8,
+    "سبتمبر": 9,
+    "أكتوبر": 10,
+    "اكتوبر": 10,
+    "نوفمبر": 11,
+    "ديسمبر": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def month_bounds(year: int, month: int) -> tuple[date, date]:
+    start = date(year, month, 1)
+    end = date(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+def reconciliation_period_bounds(period_label: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, as_of_date: Optional[date] = None) -> tuple[date, date]:
+    if year and month:
+        return month_bounds(int(year), int(month))
+    label = normalize_digit_text(period_label or "").strip().lower()
+    year_match = re.search(r"(19\d{2}|20\d{2}|21\d{2})", label)
+    detected_year = int(year_match.group(1)) if year_match else None
+    detected_month = None
+    numeric_match = re.search(r"(?:^|\D)(1[0-2]|0?[1-9])(?:\D|$)", label)
+    if numeric_match:
+        detected_month = int(numeric_match.group(1))
+    for name, value in ARABIC_MONTHS.items():
+        if name in label:
+            detected_month = value
+            break
+    target = as_of_date or date.today()
+    return month_bounds(detected_year or target.year, detected_month or target.month)
+
+
+def sum_manual_charge_items(document: Optional[dict]) -> float:
+    if not document:
+        return 0.0
+    return round(sum(float(item.get("total") if item.get("total") is not None else float(item.get("count") or 1) * float(item.get("amount") or 0)) for item in document.get("items", [])), 2)
+
+
+async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_label: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, as_of_date: Optional[date] = None) -> BankReconciliationBalanceBreakdown:
+    bank = await ensure_bank_async(bank_id)
+    period_from, period_to = reconciliation_period_bounds(period_label, year, month, as_of_date)
+    organization_id = organization_id_or_default()
+    opening_balance = round(float(bank.get("opening_balance") or 0), 2)
+    revenue_query = with_organization({"bank_id": bank_id, "bank_collection_status": "collected", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
+    revenues = await db.revenues.find(revenue_query, {"_id": 0, "amount": 1}).to_list(100000)
+    monthly_revenues = round(sum(float(item.get("amount") or 0) for item in revenues), 2)
+    deposit_query = with_organization({"bank_id": bank_id, "maturity_datetime": {"$gte": f"{period_from.isoformat()}T00:00:00", "$lte": f"{period_to.isoformat()}T23:59:59"}}, organization_id)
+    deposits = await db.deposits.find(deposit_query, {"_id": 0, "amount": 1}).to_list(100000)
+    deposit_settlements = round(sum(float(item.get("amount") or 0) for item in deposits), 2)
+    collection_query = with_organization({"bank_id": bank_id, "collection_method": "check", "bank_collection_status": "under_collection", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
+    collection_checks = await db.revenues.find(collection_query, {"_id": 0, "amount": 1}).to_list(100000)
+    checks_under_collection = round(sum(float(item.get("amount") or 0) for item in collection_checks), 2)
+    expense_query = with_organization({"bank_id": bank_id, "bank_payment_status": "paid", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
+    expenses = await db.expenses.find(expense_query, {"_id": 0, "net_amount": 1, "gross_amount": 1}).to_list(100000)
+    monthly_expenses = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in expenses), 2)
+    outstanding_query = with_organization({"bank_id": bank_id, "payment_method": "check", "bank_payment_status": "not_presented", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
+    outstanding_checks = await db.expenses.find(outstanding_query, {"_id": 0, "net_amount": 1, "gross_amount": 1}).to_list(100000)
+    checks_not_presented = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in outstanding_checks), 2)
+    manual_charges = await db.banking_manual_charges.find_one(with_organization({"bank_id": bank_id, "year": period_from.year, "month": period_from.month}, organization_id), {"_id": 0})
+    bank_expenses = sum_manual_charge_items(manual_charges)
+    gross_total = round(opening_balance + monthly_revenues + deposit_settlements + checks_under_collection, 2)
+    reconciliation_balance = round(gross_total - monthly_expenses - checks_not_presented - bank_expenses, 2)
+    return BankReconciliationBalanceBreakdown(
+        bank_id=bank_id,
+        period_from=period_from,
+        period_to=period_to,
+        opening_balance=opening_balance,
+        monthly_revenues=monthly_revenues,
+        deposit_settlements=deposit_settlements,
+        checks_under_collection=checks_under_collection,
+        gross_total=gross_total,
+        monthly_expenses=monthly_expenses,
+        checks_not_presented=checks_not_presented,
+        bank_expenses=bank_expenses,
+        reconciliation_balance=reconciliation_balance,
+    )
+
+
 async def journal_for_bank_opening_balance(bank: dict, opening_balance: float, current_user: Optional[dict] = None):
     amount = round(float(opening_balance or 0), 2)
     bank_id = bank.get("id")
@@ -4193,7 +4311,7 @@ def hydrate_custody_advance(document: dict) -> dict:
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
     total_outstanding = round(sum(item.amount for item in payload.outstanding_checks), 2)
     total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
-    calculated_balance = round(payload.book_balance + total_outstanding - total_collection, 2)
+    calculated_balance = round(payload.book_balance, 2)
     difference = round(calculated_balance - payload.bank_statement_balance, 2)
     is_matched = abs(difference) < 0.01
     return {
@@ -5594,8 +5712,8 @@ async def create_bank_reconciliation(
     await ensure_bank_async(bank_id)
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
-    gl_book_balance = await calculate_bank_book_balance(bank_id, now.date())
-    payload = payload.model_copy(update={"book_balance": gl_book_balance})
+    balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.reconciliation_balance})
     computed = calculate_reconciliation(payload)
     document = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks"]:
@@ -5607,6 +5725,7 @@ async def create_bank_reconciliation(
             "bank_id": bank_id,
             "organization_id": organization_id_or_default(),
             **computed,
+            "balance_breakdown": balance_breakdown.model_dump(mode="json"),
             "created_at": serialize_datetime(now),
             "updated_at": serialize_datetime(now),
         }
@@ -5639,6 +5758,18 @@ async def get_bank_book_balance(bank_id: str, as_of_date: Optional[date] = Query
     return BankBookBalanceResponse(bank_id=bank_id, as_of_date=target_date, book_balance=await calculate_bank_book_balance(bank_id, target_date))
 
 
+@api_router.get("/banks/{bank_id}/reconciliation-balance", response_model=BankReconciliationBalanceBreakdown)
+async def get_bank_reconciliation_balance(
+    bank_id: str,
+    period_label: Optional[str] = Query(default=None),
+    year: Optional[int] = Query(default=None, ge=1900, le=2200),
+    month: Optional[int] = Query(default=None, ge=1, le=12),
+    as_of_date: Optional[date] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"])),
+):
+    return await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=period_label, year=year, month=month, as_of_date=as_of_date)
+
+
 @api_router.get("/banks/{bank_id}/reconciliations/{reconciliation_id}", response_model=BankReconciliation)
 async def get_bank_reconciliation(bank_id: str, reconciliation_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_reconciliations"]))):
     await ensure_bank_async(bank_id)
@@ -5662,14 +5793,15 @@ async def update_bank_reconciliation(
 
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
-    gl_book_balance = await calculate_bank_book_balance(bank_id, now.date())
-    payload = payload.model_copy(update={"book_balance": gl_book_balance})
+    balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.reconciliation_balance})
     computed = calculate_reconciliation(payload)
     updates = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks"]:
         for item in updates[list_name]:
             item["check_date"] = serialize_datetime(item["check_date"])
     updates.update({**computed, "updated_at": serialize_datetime(datetime.now(timezone.utc))})
+    updates["balance_breakdown"] = balance_breakdown.model_dump(mode="json")
     await db.reconciliations.update_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"$set": updates})
     updated = await db.reconciliations.find_one(with_organization({"bank_id": bank_id, "id": reconciliation_id}), {"_id": 0})
     await journal_for_reconciliation(updated, current_user)

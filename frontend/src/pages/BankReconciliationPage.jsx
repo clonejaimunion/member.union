@@ -36,6 +36,7 @@ export default function BankReconciliationPage() {
   const [periodLabel, setPeriodLabel] = useState("");
   const [administration, setAdministration] = useState(currentAdministrationName);
   const [bookBalance, setBookBalance] = useState("");
+  const [balanceBreakdown, setBalanceBreakdown] = useState(null);
   const [bankStatementBalance, setBankStatementBalance] = useState("");
   const [outstandingChecks, setOutstandingChecks] = useState([emptyCheck()]);
   const [collectionChecks, setCollectionChecks] = useState([emptyCheck()]);
@@ -56,7 +57,7 @@ export default function BankReconciliationPage() {
   const totals = useMemo(() => {
     const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
     const collection = collectionChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
-    const calculated = Number(bookBalance || 0) + outstanding - collection;
+    const calculated = Number(bookBalance || 0);
     const difference = calculated - Number(bankStatementBalance || 0);
     return {
       outstanding,
@@ -114,12 +115,15 @@ export default function BankReconciliationPage() {
 
   const loadBookBalance = useCallback(async () => {
     try {
-      const response = await api.get(`/banks/${bankId}/book-balance`);
-      setBookBalance(String(response.data.book_balance ?? 0));
+      const params = new URLSearchParams();
+      if (periodLabel) params.set("period_label", periodLabel);
+      const response = await api.get(`/banks/${bankId}/reconciliation-balance${params.toString() ? `?${params.toString()}` : ""}`);
+      setBookBalance(String(response.data.reconciliation_balance ?? 0));
+      setBalanceBreakdown(response.data);
     } catch (error) {
-      toast.error("تعذر تحميل الرصيد الدفتري من دفتر الأستاذ");
+      toast.error("تعذر تحميل رصيد التسوية البنكية تلقائياً");
     }
-  }, [bankId]);
+  }, [bankId, periodLabel]);
 
   const formatSourceCheckDate = useCallback((value) => {
     if (!value) return currentDayMonth();
@@ -273,6 +277,7 @@ export default function BankReconciliationPage() {
     setPeriodLabel(item.period_label || "");
     setAdministration(currentAdministrationName);
     setBookBalance(String(item.book_balance ?? ""));
+    setBalanceBreakdown(item.balance_breakdown || null);
     setBankStatementBalance(String(item.bank_statement_balance ?? ""));
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
@@ -293,6 +298,7 @@ export default function BankReconciliationPage() {
     setEditingReconciliationId(null);
     setPeriodLabel("");
     setAdministration(currentAdministrationName);
+    setBalanceBreakdown(null);
     loadBookBalance();
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
@@ -481,7 +487,7 @@ export default function BankReconciliationPage() {
               <Input value={periodLabel} onChange={(event) => setPeriodLabel(event.target.value)} placeholder="مثال: يناير 2025" className="h-12 rounded-lg bg-slate-50 text-right" data-testid="reconciliation-period-input" />
             </div>
             <div className="space-y-2" data-testid="book-balance-wrapper">
-              <Label data-testid="book-balance-label">الرصيد الدفتري من دفتر الأستاذ</Label>
+              <Label data-testid="book-balance-label">رصيد التسوية البنكية التلقائي</Label>
               <Input readOnly aria-readonly="true" type="number" step="0.01" value={bookBalance} className="h-12 rounded-lg bg-slate-100 text-right font-extrabold text-slate-700" data-testid="book-balance-input" />
             </div>
             <div className="space-y-2" data-testid="bank-statement-balance-wrapper">
@@ -493,8 +499,25 @@ export default function BankReconciliationPage() {
           {renderCheckEditor({ title: "شيكات لم تقدم للصرف", type: "outstanding", checks: outstandingChecks })}
           {renderCheckEditor({ title: "شيكات تحت التحصيل", type: "collection", checks: collectionChecks })}
 
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="reconciliation-balance-breakdown-section">
+            <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between" data-testid="reconciliation-balance-breakdown-heading">
+              <div data-testid="reconciliation-balance-breakdown-title-block"><h3 className="text-xl font-extrabold text-slate-950" data-testid="reconciliation-balance-breakdown-title">تفصيل رصيد التسوية البنكية التلقائي</h3><p className="text-sm font-bold text-slate-500" data-testid="reconciliation-balance-breakdown-period">الفترة: {balanceBreakdown?.period_from || "—"} إلى {balanceBreakdown?.period_to || "—"}</p></div>
+              <Button type="button" onClick={loadBookBalance} variant="outline" className="h-10 bg-white" data-testid="refresh-reconciliation-balance-button"><Save className="h-4 w-4" /> تحديث الرصيد</Button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="reconciliation-balance-breakdown-grid">
+              <div className="rounded-lg bg-emerald-50 p-4" data-testid="breakdown-opening-balance-card"><p className="text-xs font-bold text-emerald-700">الرصيد الافتتاحي</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.opening_balance || 0)}</p></div>
+              <div className="rounded-lg bg-emerald-50 p-4" data-testid="breakdown-monthly-revenues-card"><p className="text-xs font-bold text-emerald-700">إجمالي الإيرادات الشهرية للبنك</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.monthly_revenues || 0)}</p></div>
+              <div className="rounded-lg bg-emerald-50 p-4" data-testid="breakdown-deposit-settlements-card"><p className="text-xs font-bold text-emerald-700">ترصيد ودائع</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.deposit_settlements || 0)}</p></div>
+              <div className="rounded-lg bg-emerald-50 p-4" data-testid="breakdown-checks-under-collection-card"><p className="text-xs font-bold text-emerald-700">شيكات تحت التحصيل</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.checks_under_collection || 0)}</p></div>
+              <div className="rounded-lg bg-slate-950 p-4 text-white" data-testid="breakdown-gross-total-card"><p className="text-xs font-bold text-slate-300">الإجمالي قبل الخصم</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.gross_total || 0)}</p></div>
+              <div className="rounded-lg bg-red-50 p-4" data-testid="breakdown-monthly-expenses-card"><p className="text-xs font-bold text-red-700">المصروفات</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.monthly_expenses || 0)}</p></div>
+              <div className="rounded-lg bg-red-50 p-4" data-testid="breakdown-checks-not-presented-card"><p className="text-xs font-bold text-red-700">شيكات لم تقدم للصرف</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.checks_not_presented || 0)}</p></div>
+              <div className="rounded-lg bg-red-50 p-4" data-testid="breakdown-bank-expenses-card"><p className="text-xs font-bold text-red-700">المصروفات البنكية</p><p className="mt-1 font-extrabold">{formatEgpText(balanceBreakdown?.bank_expenses || 0)}</p></div>
+            </div>
+          </section>
+
           <section className="grid grid-cols-1 gap-4 md:grid-cols-4" data-testid="reconciliation-live-summary">
-            <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="summary-book-balance-card"><p className="text-xs font-bold text-slate-300">الرصيد الدفتري</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(bookBalance)}</p></div>
+            <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="summary-book-balance-card"><p className="text-xs font-bold text-slate-300">رصيد التسوية البنكية</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(bookBalance)}</p></div>
             <div className="rounded-xl bg-emerald-50 p-5 text-emerald-900" data-testid="summary-outstanding-card"><p className="text-xs font-bold text-emerald-700">إجمالي شيكات لم تقدم</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(totals.outstanding)}</p></div>
             <div className="rounded-xl bg-amber-50 p-5 text-amber-950" data-testid="summary-collection-card"><p className="text-xs font-bold text-amber-700">إجمالي تحت التحصيل</p><p className="mt-2 text-xl font-extrabold">{formatEgpText(totals.collection)}</p></div>
             <div className={`rounded-xl p-5 ${totals.matched ? "bg-emerald-700 text-white" : "bg-red-700 text-white"}`} data-testid="summary-matched-card"><p className="text-xs font-bold opacity-80">الحالة</p><p className="mt-2 text-xl font-extrabold">{totals.matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p></div>
@@ -575,10 +598,11 @@ export default function BankReconciliationPage() {
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
             <div className="grid grid-cols-1 gap-4" data-testid="reconciliation-print-kpis">
-              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
+              <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">رصيد التسوية البنكية</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
             </div>
-            {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
-            {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
+            {activeReconciliation.balance_breakdown && <div className="grid grid-cols-2 gap-2 text-sm" data-testid="print-balance-breakdown"><div className="rounded-lg border p-2" data-testid="print-breakdown-opening">الرصيد الافتتاحي: {formatEgpText(activeReconciliation.balance_breakdown.opening_balance)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-revenues">الإيرادات الشهرية: {formatEgpText(activeReconciliation.balance_breakdown.monthly_revenues)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-deposits">ترصيد ودائع: {formatEgpText(activeReconciliation.balance_breakdown.deposit_settlements)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-collection">شيكات تحت التحصيل: {formatEgpText(activeReconciliation.balance_breakdown.checks_under_collection)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-expenses">المصروفات: {formatEgpText(activeReconciliation.balance_breakdown.monthly_expenses)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-outstanding">شيكات لم تقدم للصرف: {formatEgpText(activeReconciliation.balance_breakdown.checks_not_presented)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-bank-expenses">المصروفات البنكية: {formatEgpText(activeReconciliation.balance_breakdown.bank_expenses)}</div><div className="rounded-lg border p-2 font-extrabold" data-testid="print-breakdown-final">الرصيد النهائي: {formatEgpText(activeReconciliation.balance_breakdown.reconciliation_balance)}</div></div>}
+            {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يخصم: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
+            {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يضاف: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
             <div className="flex justify-end pt-6 print:mt-auto print:justify-start" data-testid="print-status-wrapper">
               <div className={`rounded-xl p-4 text-center print:bg-transparent print:p-0 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xl font-extrabold" data-testid="print-status-text">{activeReconciliation.status_text}</p>{activeReconciliation.is_matched && <p className="mt-2 text-2xl font-black text-slate-950 print:mt-1" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p>}</div>
             </div>
