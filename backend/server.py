@@ -3043,7 +3043,7 @@ async def journal_for_banking_expense(document: dict, current_user: Optional[dic
 
 async def journal_for_deposit_interest(deposit: dict, current_user: Optional[dict] = None):
     if deposit.get("id"):
-        await reverse_journal_for_source("deposit_interest", deposit.get("id"), "إيقاف الترحيل الآلي لفوائد الودائع؛ تُسجل فقط عند اختيار استحقاق وديعة")
+        await reverse_journal_for_source("deposit_interest", deposit.get("id"), "إيقاف الترحيل الآلي لفوائد الودائع؛ تُسجل فقط عند اختيار استحقاق وديعة", current_user)
 
 
 async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] = None) -> float:
@@ -3621,7 +3621,7 @@ async def validate_accounting_data_flow(organization_id: str) -> dict:
     accounts_by_id = {item.get("id"): item for item in accounts if item.get("id")}
     accounts_by_code = {item.get("code"): item for item in accounts if item.get("code")}
     accounts_by_name = {item.get("name"): item for item in accounts if item.get("name")}
-    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).to_list(100000)
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).to_list(100000)
     reversal_count = await db.journal_entries.count_documents(with_organization({"is_reversal": True}, organization_id))
     missing_lines = []
     ledger_totals: dict[str, dict] = {}

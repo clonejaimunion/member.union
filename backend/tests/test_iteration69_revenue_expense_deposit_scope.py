@@ -58,7 +58,7 @@ def cleanup_iter69_data():
     db = client[DB_NAME]
     db.revenues.delete_many({"receipt_number": {"$regex": f"^{ITER_NUM_PREFIX}"}})
     db.expenses.delete_many({"expense_number": {"$regex": f"^{ITER_NUM_PREFIX}"}})
-    db.journal_entries.delete_many({"reference": {"$regex": f"^{ITER_PREFIX}"}})
+    db.journal_entries.delete_many({"$or": [{"reference": {"$regex": f"^{ITER_PREFIX}"}}, {"reference": {"$regex": f"^{ITER_NUM_PREFIX}"}}]})
     client.close()
 
 
