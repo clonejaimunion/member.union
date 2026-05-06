@@ -168,3 +168,13 @@
 - تم إضافة عرض `بداية الاحتساب` في ملخص الوديعة.
 - الاختبارات الذاتية نجحت، ثم Testing Agent iteration_65 نفّذ اختبارات API/UI فعلية ونجحت 2/2 backend مع UI toggle، ولا توجد تدفقات مكسورة.
 - ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` موجود ورابط `/api/download/setup` يعمل.
+
+
+## تحديث دفتر الأستاذ — عرض الكل داخل الفترة بتاريخ 2026-05-06
+- تم إضافة خيار `عرض الكل ضمن الفترة المحددة` في قائمة الحساب داخل صفحة دفتر الأستاذ.
+- endpoint `/api/ledger` يدعم الآن `account_id=all` ويعيد كل حركات الحسابات القابلة للترحيل داخل الفترة فقط.
+- تم إضافة `account_scope=all/single` وحقول الحساب داخل كل صف: `account_id`, `account_code`, `account_name`.
+- في وضع حساب واحد، لم يعد دفتر الأستاذ يضيف حركات قبل `from_date` إلى الرصيد الجاري؛ يتم عرض واحتساب الحركات داخل الفترة المحددة فقط.
+- واجهة دفتر الأستاذ تعرض عمود `الحساب` عند اختيار عرض الكل، وتوضح أن التقرير للحركات المالية داخل الفترة فقط.
+- تم اختبار API ذاتياً ثم Testing Agent iteration_66: backend pytest 3/3 ناجح، UI contract ناجح، data-flow valid=true، ولا توجد APIs مكسورة.
+- نجح `yarn lint` و`yarn build` وتم تحديث `/app/dist/BankDepositSystemSetup.exe`.
