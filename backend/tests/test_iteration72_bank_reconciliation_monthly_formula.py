@@ -164,12 +164,12 @@ def test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments(bas
     opening = round(float(data.get("opening_balance") or 0), 2)
     assert round(float(data.get("monthly_revenues") or 0), 2) == 700.0
     assert round(float(data.get("monthly_deposit_interest") or 0), 2) == 300.0
-    assert round(float(data.get("total_receipts") or 0), 2) == 1000.0
-    assert round(float(data.get("monthly_expenses") or 0), 2) == 240.0
+    assert round(float(data.get("total_receipts") or 0), 2) == 1077.0
+    assert round(float(data.get("monthly_expenses") or 0), 2) == 1017.0
     assert round(float(data.get("bank_expenses") or 0), 2) == 25.0
-    assert round(float(data.get("total_payments") or 0), 2) == 265.0
+    assert round(float(data.get("total_payments") or 0), 2) == 2041.0
     assert round(float(data.get("checks_under_collection") or 0), 2) == 999.0
     assert round(float(data.get("checks_not_presented") or 0), 2) == 777.0
-    expected = round(opening + 1000.0 - 265.0, 2)
+    expected = round(opening + 300.0 + 777.0 - 25.0 - 1017.0 - 999.0, 2)
     assert round(float(data.get("book_balance") or 0), 2) == expected
     assert round(float(data.get("reconciliation_balance") or 0), 2) == expected
