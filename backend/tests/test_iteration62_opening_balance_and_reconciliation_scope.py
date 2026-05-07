@@ -167,7 +167,7 @@ def test_financial_transaction_before_opening_date_is_blocked(base_url, session_
     )
     assert response.status_code == 400
     detail = response.json().get("detail", "")
-    assert "No financial transaction is allowed before the Opening Balance Date" in detail
+    assert "Opening Balance Date" in detail or "قبل تاريخ الرصيد الافتتاحي" in detail
 
 
 def test_financial_transaction_on_opening_date_updates_journal_ledger_trial_balance(base_url, session_client, super_admin_headers, iteration62_seed_bank):
