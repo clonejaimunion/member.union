@@ -28,6 +28,11 @@ html {
         margin: 7mm;
     }
 
+    @page reconciliation-single-page {
+        size: A4 portrait;
+        margin: 5mm;
+    }
+
     body {
         background: #ffffff !important;
     }
@@ -58,6 +63,128 @@ html {
 
     [data-testid="print-status"] {
         direction: rtl !important;
+    }
+
+    [data-testid="reconciliation-print-report"] {
+        page: reconciliation-single-page;
+        width: 200mm !important;
+        max-width: 200mm !important;
+        min-height: auto !important;
+        max-height: 286mm !important;
+        margin: 0 auto !important;
+        padding: 3mm !important;
+        gap: 2mm !important;
+        overflow: visible !important;
+        zoom: 0.82 !important;
+        box-shadow: none !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        font-size: 8px !important;
+        line-height: 1.12 !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    [data-testid="reconciliation-print-report"] * {
+        font-size: inherit !important;
+        line-height: 1.12 !important;
+    }
+
+    [data-testid="reconciliation-print-header"] {
+        min-height: 13mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    [data-testid="reconciliation-print-period"] {
+        margin: 0 !important;
+        font-size: 12px !important;
+        font-weight: 800 !important;
+    }
+
+    [data-testid="reconciliation-print-bank-logo"] img,
+    [data-testid="reconciliation-print-bank-logo-mark"] {
+        max-height: 12mm !important;
+        max-width: 24mm !important;
+        object-fit: contain !important;
+    }
+
+    [data-testid="reconciliation-print-kpis"] {
+        gap: 1mm !important;
+        margin: 0 !important;
+    }
+
+    [data-testid="print-book-balance"] {
+        padding: 2mm !important;
+        margin: 0 !important;
+        border: 1px solid #111827 !important;
+        background: #ffffff !important;
+    }
+
+    [data-testid="print-book-balance"] p:first-child {
+        font-size: 8px !important;
+        margin-bottom: 1mm !important;
+    }
+
+    [data-testid="print-book-balance"] p:last-child {
+        font-size: 12px !important;
+    }
+
+    [data-testid="outstanding-print-print-section"],
+    [data-testid="collection-print-print-section"] {
+        margin: 1mm 0 0 !important;
+        padding: 0 !important;
+        gap: 1mm !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
+    [data-testid="outstanding-print-print-title"],
+    [data-testid="collection-print-print-title"] {
+        margin: 0 0 1mm !important;
+        font-size: 10px !important;
+        font-weight: 800 !important;
+    }
+
+    [data-testid="reconciliation-print-report"] table {
+        margin: 0 !important;
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+    }
+
+    [data-testid="reconciliation-print-report"] th,
+    [data-testid="reconciliation-print-report"] td {
+        padding: 1mm !important;
+        font-size: 7px !important;
+        line-height: 1.08 !important;
+        border: 1px solid #111827 !important;
+        word-break: break-word !important;
+    }
+
+    [data-testid="reconciliation-print-report"] th {
+        font-weight: 800 !important;
+    }
+
+    [data-testid="print-status-wrapper"] {
+        padding-top: 2mm !important;
+        margin-top: auto !important;
+    }
+
+    [data-testid="print-status"] {
+        padding: 1mm !important;
+    }
+
+    [data-testid="print-status-text"] {
+        font-size: 11px !important;
+        margin: 0 !important;
+    }
+
+    [data-testid="print-matched-balance-value"] {
+        font-size: 13px !important;
+        margin-top: 1mm !important;
     }
 
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-header"],
