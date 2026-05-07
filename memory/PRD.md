@@ -295,3 +295,13 @@
 - تم التحقق عملياً أن `1250 - ودائع لأجل` لا يظهر في ميزان مراجعة يناير مع `non_zero_only=true`، وأن `data-flow-validation=true` للجهتين.
 - تم تحديث اختبار التجديد `test_iteration73_deposit_renewal_independent_asset.py` ليثبت أن أصل الودائع لا يظهر في ميزان المراجعة للفترات العادية.
 - الاختبارات نجحت: iteration73 + iteration75 + iteration67 + iteration72 = 9/9، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.
+
+## مراجعة شاملة للتدفقات وخاصة التسوية البنكية بتاريخ 2026-05-07
+- تم اكتشاف وتصحيح نقطة مهمة في معادلة التسوية: كانت `monthly_revenues` تحتسب الإيرادات المحصلة فقط، وبالتالي كان الشيك تحت التحصيل يُخصم في المرحلة الثانية دون أن يكون مدرجاً أولاً ضمن الإيرادات. تم تعديلها لتشمل كل إيرادات البنك داخل الفترة أولاً، ثم يُخصم `checks_under_collection` في مرحلة تسويات الشيكات.
+- تم تأكيد أن المصروفات تعمل بالطريقة المقابلة: كل مصروفات البنك داخل الفترة تدخل أولاً ضمن `monthly_expenses`، ثم تُضاف `checks_not_presented` في مرحلة تسويات الشيكات.
+- تم تثبيت معادلة التسوية النهائية: `book_balance = opening_balance + monthly_revenues + monthly_deposit_interest - bank_expenses - monthly_expenses` ثم `reconciliation_balance = book_balance + checks_not_presented - checks_under_collection`.
+- تم تصحيح عناوين نسخة الطباعة: `شيكات لم تقدم للصرف = يضاف` و`شيكات تحت التحصيل = يخصم`.
+- تم تشغيل مراجعة ذاتية موسعة: اختبارات iteration72/67/75/73 = 9/9، وباقة التسوية البنكية الأوسع = 15 passed / 12 skipped، وPlaywright smoke لواجهة التسوية نجح.
+- تم استدعاء testing agent لمراجعة مستقلة للتسوية وميزان المراجعة والتدفقات الأساسية؛ النتيجة iteration_71: Backend 100% وFrontend 100%، ولا توجد عيوب Blocking، مع تأكيد أن حفظ مذكرة التسوية لا يطبق الشيكات مرتين.
+- أنشأ testing agent اختبارات إضافية للمراجعة: `test_iteration71_core_smoke_endpoints.py`, `test_iteration71_auth_playbook_checks.py`, `test_iteration71_reconciliation_save_integrity.py` وتقارير pytest الخاصة بها.
+- تم بناء الواجهة بنجاح، وتحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe`، والتحقق من رابط التحميل بنجاح.

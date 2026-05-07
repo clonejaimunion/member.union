@@ -3204,7 +3204,7 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     organization_id = organization_id_or_default()
     opening_balance = await calculate_bank_period_opening_balance(bank_id, period_from)
     period_filter = {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}
-    revenue_query = with_organization({"bank_id": bank_id, "bank_collection_status": "collected", "issued_at": period_filter}, organization_id)
+    revenue_query = with_organization({"bank_id": bank_id, "issued_at": period_filter}, organization_id)
     revenues = await db.revenues.find(revenue_query, {"_id": 0, "amount": 1}).to_list(100000)
     monthly_revenues = round(sum(float(item.get("amount") or 0) for item in revenues), 2)
     monthly_deposit_interest = await calculate_total_deposit_interest_for_period(organization_id, period_from, period_to, bank_id=bank_id)
