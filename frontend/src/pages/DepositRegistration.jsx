@@ -23,6 +23,8 @@ const defaultForm = () => {
     maturity_datetime: toDateInput(maturity),
     monthly_interest_rate: "",
     is_opening_balance_deposit: false,
+    renewed_from_deposit_id: "",
+    renewal_notes: "",
   };
 };
 
@@ -66,6 +68,8 @@ export default function DepositRegistration() {
         monthly_interest_rate: Number(form.monthly_interest_rate),
         creation_datetime: `${form.creation_datetime}T00:00`,
         maturity_datetime: `${form.maturity_datetime}T00:00`,
+        renewed_from_deposit_id: form.renewed_from_deposit_id || null,
+        renewal_notes: form.renewal_notes || null,
       };
       const response = await api.post(`/banks/${bankId}/deposits`, payload);
       toast.success("تم تسجيل الوديعة بنجاح");
@@ -136,6 +140,17 @@ export default function DepositRegistration() {
               <span className="block text-sm font-extrabold" data-testid="opening-balance-deposit-toggle-title">{form.is_opening_balance_deposit ? "✓ وديعة قائمة عند بداية الفترة" : "○ وديعة جديدة خلال الفترة"}</span>
               <span className="mt-1 block text-xs font-bold" data-testid="opening-balance-deposit-toggle-description">اخترها إذا كان تاريخ ربط الوديعة أقدم من تاريخ الرصيد الافتتاحي؛ سيتم إثباتها كرصيد افتتاحي للودائع بدون حركة بنك تاريخية قبل بداية الفترة.</span>
             </button>
+            <div className="space-y-2 md:col-span-2" data-testid="field-renewed-from-wrapper">
+              <Label htmlFor="renewed_from_deposit_id" data-testid="label-renewed-from-deposit">تم تجديد هذه الوديعة من وديعة سابقة</Label>
+              <select id="renewed_from_deposit_id" value={form.renewed_from_deposit_id} onChange={(event) => updateField("renewed_from_deposit_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="select-renewed-from-deposit">
+                <option value="" data-testid="renewed-from-empty-option">وديعة جديدة مستقلة بدون تجديد</option>
+                {deposits.map((deposit) => <option key={deposit.id} value={deposit.id} data-testid={`renewed-from-option-${deposit.id}`}>{deposit.deposit_number} — {formatCurrency(deposit.amount)}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2 md:col-span-2" data-testid="field-renewal-notes-wrapper">
+              <Label htmlFor="renewal_notes" data-testid="label-renewal-notes">ملاحظات التجديد / الملاحظات التوضيحية</Label>
+              <textarea id="renewal_notes" value={form.renewal_notes} onChange={(event) => updateField("renewal_notes", event.target.value)} rows={3} className="w-full rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-right text-sm font-bold outline-none" placeholder="تظهر داخل تقارير الودائع فقط بدون أي أثر محاسبي" data-testid="textarea-renewal-notes" />
+            </div>
             <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row" data-testid="deposit-form-actions">
               <Button type="submit" disabled={isSaving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="submit-deposit-button">
                 <Save className="h-4 w-4" /> {isSaving ? "جاري الحفظ..." : "حفظ بيانات الوديعة"}
@@ -185,6 +200,7 @@ export default function DepositRegistration() {
                     <div className="min-w-0" data-testid={`admin-delete-deposit-row-${deposit.id}-details`}>
                       <p className="break-words text-base font-extrabold text-slate-950" data-testid={`admin-delete-deposit-row-${deposit.id}-number`}>{deposit.deposit_number}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-account`}>حساب: {deposit.account_number}</p>
+                      <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "renewed" ? "مجددة" : deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}</p>
                     </div>
                     <button
                       type="button"

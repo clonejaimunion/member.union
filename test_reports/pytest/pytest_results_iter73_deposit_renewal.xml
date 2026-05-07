@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="4" time="4.840" timestamp="2026-05-07T00:18:53.649667+00:00" hostname="agent-env-ba67e22d-6b71-4fe8-aa51-02b7e4b7510e"><testcase classname="tests.test_iteration73_deposit_renewal_independent_asset" name="test_renewed_deposit_is_independent_and_active_asset_is_period_scoped" time="0.891"><failure message="AssertionError: Internal Server Error&#10;assert 500 == 200&#10; +  where 500 = &lt;Response [500]&gt;.status_code">base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+admin_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MTEzMTM0LCJleHAiOjE3NzgxNDE5MzR9.htCgdLk5wUCrVUQpeZLHwgDLe1daH6nb0o-8qJ9WNnU'
+
+    def test_renewed_deposit_is_independent_and_active_asset_is_period_scoped(base_url, admin_token):
+        old_deposit = _create_deposit(base_url, admin_token, f"{ITER_PREFIX}-OLD", 1000.0, "2198-01-01", "2198-02-01", 12.0)
+&gt;       new_deposit = _create_deposit(base_url, admin_token, f"{ITER_PREFIX}-NEW", 1300.0, "2198-02-01", "2198-03-01", 15.0, renewed_from=old_deposit["id"])
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_iteration73_deposit_renewal_independent_asset.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MTEzMTM0LCJleHAiOjE3NzgxNDE5MzR9.htCgdLk5wUCrVUQpeZLHwgDLe1daH6nb0o-8qJ9WNnU'
+number = 'TEST-ITER73-d255365c-NEW', amount = 1300.0, start = '2198-02-01'
+maturity = '2198-03-01', rate = 15.0
+renewed_from = '419520d0-d21e-4c89-b2d5-aa08c42250ad'
+
+    def _create_deposit(base_url: str, token: str, number: str, amount: float, start: str, maturity: str, rate: float, renewed_from: str | None = None):
+        payload = {
+            "account_number": f"ACC-{number}",
+            "deposit_number": number,
+            "amount": amount,
+            "creation_datetime": f"{start}T00:00:00Z",
+            "maturity_datetime": f"{maturity}T00:00:00Z",
+            "monthly_interest_rate": rate,
+            "is_opening_balance_deposit": False,
+            "renewed_from_deposit_id": renewed_from,
+            "renewal_notes": None,
+        }
+        response = requests.post(f"{base_url}/api/banks/{BANK_ID}/deposits", json=payload, headers=_headers(token), timeout=90)
+&gt;       assert response.status_code == 200, response.text
+E       AssertionError: Internal Server Error
+E       assert 500 == 200
+E        +  where 500 = &lt;Response [500]&gt;.status_code
+
+tests/test_iteration73_deposit_renewal_independent_asset.py:72: AssertionError</failure></testcase><testcase classname="tests.test_iteration71_ledger_opening_deposit_interest" name="test_opening_deposit_entry_moves_to_opening_balance_not_january_rows" time="1.028"><failure message="AssertionError: assert 0.0 &gt;= 5000.0&#10; +  where 0.0 = round(0.0, 2)&#10; +    where 0.0 = float((0.0 or 0))&#10; +      where 0.0 = &lt;built-in method get of dict object at 0xfcd7f64fe080&gt;('opening_balance')&#10; +        where &lt;built-in method get of dict object at 0xfcd7f64fe080&gt; = {'account': {'account_type': 'asset', 'code': '1250', 'created_at': '2026-05-03T23:24:45.506767Z', 'id': 'eedecf79-5376-4db0-8697-af550a7031cf', ...}, 'account_scope': 'single', 'closing_balance': 0.0, 'from_date': '2096-01-01', ...}.get">base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+admin_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MTEzMTM1LCJleHAiOjE3NzgxNDE5MzV9.46pxwgUH8Hm7YJ5PqOMK42lV5F1rhztdnOFFzB3RxRk'
+db_client = Database(MongoClient(host=['localhost:27017'], document_class=dict, tz_aware=False, connect=True), 'test_database')
+
+    def test_opening_deposit_entry_moves_to_opening_balance_not_january_rows(base_url, admin_token, db_client):
+        term_account = _account_by_system_key(base_url, admin_token, "term_deposits")
+        opening_equity = _account_by_system_key(base_url, admin_token, "opening_balance_equity")
+        deposit_id = str(uuid.uuid4())
+        _insert_deposit(db_client, deposit_id=deposit_id, number=f"{ITER_PREFIX}-OPEN", amount=5000, start="2096-01-05T00:00:00", maturity="2096-12-31T00:00:00", rate=0, opening=True)
+        _insert_opening_deposit_entry(db_client, term_account, opening_equity, deposit_id, 5000)
+    
+        response = requests.get(
+            f"{base_url}/api/ledger",
+            params={"account_id": term_account["id"], "from_date": "2096-01-01", "to_date": "2096-01-31"},
+            headers=_headers(admin_token),
+            timeout=90,
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+&gt;       assert round(float(body.get("opening_balance") or 0), 2) &gt;= 5000.0
+E       AssertionError: assert 0.0 &gt;= 5000.0
+E        +  where 0.0 = round(0.0, 2)
+E        +    where 0.0 = float((0.0 or 0))
+E        +      where 0.0 = &lt;built-in method get of dict object at 0xfcd7f64fe080&gt;('opening_balance')
+E        +        where &lt;built-in method get of dict object at 0xfcd7f64fe080&gt; = {'account': {'account_type': 'asset', 'code': '1250', 'created_at': '2026-05-03T23:24:45.506767Z', 'id': 'eedecf79-5376-4db0-8697-af550a7031cf', ...}, 'account_scope': 'single', 'closing_balance': 0.0, 'from_date': '2096-01-01', ...}.get
+
+tests/test_iteration71_ledger_opening_deposit_interest.py:139: AssertionError</failure></testcase><testcase classname="tests.test_iteration71_ledger_opening_deposit_interest" name="test_ledger_january_shows_aggregated_deposit_interest_only_for_period" time="0.222" /><testcase classname="tests.test_iteration72_bank_reconciliation_monthly_formula" name="test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments" time="2.390" /></testsuite></testsuites>

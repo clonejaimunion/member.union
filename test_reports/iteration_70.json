@@ -1,0 +1,47 @@
+{
+  "summary": "Tested deposit-renewal independent-asset scope on public URL: backend regression passed (5/5), UI selectors/columns validated, and no renewal accounting side-effects found beyond new deposit entry.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "DepositRegistration renewal select options",
+        "issue": "Browser console shows hydration warning: '<span> cannot be a child of <option>' while rendering renewal options.",
+        "selector": "[data-testid='select-renewed-from-deposit']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration74_deposit_renewal_journal_scope.py",
+    "/app/backend/tests/test_iteration73_deposit_renewal_independent_asset.py",
+    "/app/backend/tests/test_iteration71_ledger_opening_deposit_interest.py",
+    "/app/test_reports/pytest/pytest_results_iter74_backend.xml"
+  ],
+  "action_items": [
+    "Fix renewal dropdown rendering to avoid invalid nested markup inside <option> (hydration warning).",
+    "After UI fix, rerun Playwright on /bank/industrial-development/register to confirm no console hydration errors."
+  ],
+  "critical_code_review_comments": [
+    "Renewal flow in create_deposit correctly inserts a new deposit and only updates previous status/notes (no mutation of old amount/number/dates).",
+    "Journal posting path for renewal does not include renewal_notes and does not create an extra accounting entry for old deposit status update.",
+    "backend/server.py remains very large (>700 lines), increasing regression risk around accounting/reporting logic."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration74_deposit_renewal_journal_scope.py",
+    "/app/test_reports/iteration_70.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "95%"
+  },
+  "seed_data_creation": "Automated tests created TEST-ITER74-* deposits and cleaned them via pytest autouse cleanup fixture (Mongo delete by prefix).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed pytest suite covering renewal independence, statements period scope, trial balance term-deposit scope, and ledger opening-balance behavior. UI validated login -> deposit registration -> statements page with required data-testid fields/columns; only console hydration warning observed on renewal select options. ETA Electronic Invoice integration is MOCKED and out of this scope.",
+  "rca of the issue": "RCA for UI warning: renewal options are rendered in a way that introduces a span wrapper under option at runtime (console reports invalid HTML child), likely from dynamic wrapper/instrumentation around option text. Reproduction: login -> /bank/industrial-development/register -> open page and inspect console. Mitigation: ensure option label renders plain text node only (no nested elements/wrappers)."
+}

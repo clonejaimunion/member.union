@@ -1,6 +1,8 @@
 import { CalendarClock, CreditCard, Landmark, Percent, ReceiptText, WalletCards } from "lucide-react";
 import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
 
+const statusLabels = { active: "نشطة", matured: "مستحقة", renewed: "مجددة", closed: "مغلقة" };
+
 export const DepositSummary = ({ deposit }) => {
   const items = [
     { label: "رقم الحساب", value: deposit?.account_number, icon: CreditCard, testId: "summary-account-number" },
@@ -10,6 +12,7 @@ export const DepositSummary = ({ deposit }) => {
     { label: "تاريخ إنشاء الوديعة", value: formatDateTime(deposit?.creation_datetime), icon: CalendarClock, testId: "summary-creation-date" },
     { label: "بداية الاحتساب", value: deposit?.is_opening_balance_deposit ? formatDateTime(deposit?.accounting_start_datetime) : "من تاريخ الربط", icon: CalendarClock, testId: "summary-accounting-start-date" },
     { label: "تاريخ الاستحقاق", value: formatDateTime(deposit?.maturity_datetime), icon: Landmark, testId: "summary-maturity-date" },
+    { label: "حالة الوديعة", value: statusLabels[deposit?.status] || "نشطة", icon: Landmark, testId: "summary-deposit-status" },
   ];
 
   return (
@@ -30,6 +33,7 @@ export const DepositSummary = ({ deposit }) => {
           </div>
         );
       })}
+      {deposit?.renewal_notes && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm md:col-span-2 xl:col-span-3" data-testid="summary-renewal-notes-card"><p className="text-sm font-bold text-emerald-700" data-testid="summary-renewal-notes-label">ملاحظات الوديعة</p><p className="mt-2 whitespace-pre-wrap text-base font-extrabold leading-7 text-emerald-950" data-testid="summary-renewal-notes">{deposit.renewal_notes}</p></div>}
     </section>
   );
 };

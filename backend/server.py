@@ -224,6 +224,8 @@ class DepositBase(BaseModel):
     monthly_interest_rate: float = Field(..., ge=0)
     is_opening_balance_deposit: bool = False
     accounting_start_datetime: Optional[datetime] = None
+    renewed_from_deposit_id: Optional[str] = None
+    renewal_notes: Optional[str] = None
 
 
 class DepositCreate(DepositBase):
@@ -235,6 +237,7 @@ class Deposit(DepositBase):
 
     id: str
     bank_id: str
+    status: Literal["active", "matured", "renewed", "closed"] = "active"
     created_at: datetime
     updated_at: datetime
 
@@ -460,6 +463,8 @@ class DepositStatementRow(BaseModel):
     previous_years_interest: float
     total_due_interest: float
     previous_years_breakdown: List[PreviousYearBreakdown]
+    status: Literal["active", "matured", "renewed", "closed"] = "active"
+    renewal_notes: Optional[str] = None
 
 
 class BankStatement(BaseModel):
@@ -481,6 +486,8 @@ class DepositVolumeRow(BaseModel):
     amount: float
     monthly_interest_rate: float
     monthly_interest_amount: float
+    status: Literal["active", "matured", "renewed", "closed"] = "active"
+    renewal_notes: Optional[str] = None
 
 
 class DepositVolumeStatement(BaseModel):
@@ -1935,9 +1942,15 @@ def serialize_date(value: date) -> str:
 def hydrate_deposit(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
     clean.setdefault("is_opening_balance_deposit", False)
+    clean.setdefault("renewed_from_deposit_id", None)
+    clean.setdefault("renewal_notes", None)
     for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
+    stored_status = clean.get("status")
+    if stored_status not in {"renewed", "closed"}:
+        maturity_value = normalize_datetime(clean.get("maturity_datetime")) if clean.get("maturity_datetime") else None
+        clean["status"] = "matured" if maturity_value and maturity_value <= datetime.now(timezone.utc) else "active"
     return clean
 
 
@@ -3380,6 +3393,7 @@ async def calculate_trial_balance_report(
             "account_name": account.get("name"),
             "account_type": account.get("account_type"),
             "nature": account.get("nature"),
+            "system_key": account.get("system_key"),
             "opening_balance": round(float(account.get("opening_balance") or 0), 2),
             "total_debit": 0.0,
             "total_credit": 0.0,
@@ -3434,6 +3448,7 @@ async def calculate_trial_balance_report(
                     "account_name": account.get("name") if account else line.get("account_name") or "حساب غير محدد",
                     "account_type": account.get("account_type") if account else line.get("account_type"),
                     "nature": account.get("nature") if account else None,
+                    "system_key": account.get("system_key") if account else None,
                     "opening_balance": 0.0,
                     "total_debit": 0.0,
                     "total_credit": 0.0,
@@ -3443,6 +3458,7 @@ async def calculate_trial_balance_report(
             rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + float(line.get("debit") or 0), 2)
             rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + float(line.get("credit") or 0), 2)
     rows = []
+    active_term_deposits_total = await active_deposit_principal_total(organization_id, to_date or date.today())
     for row in rows_by_key.values():
         signed_balance = row["total_debit"] - row["total_credit"]
         if row.get("nature") == "credit":
@@ -3455,8 +3471,12 @@ async def calculate_trial_balance_report(
         else:
             row["balance_debit"] = 0.0
             row["balance_credit"] = round(abs(signed_balance), 2)
+        if row.get("system_key") == "term_deposits":
+            row["balance_debit"] = active_term_deposits_total
+            row["balance_credit"] = 0.0
         if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
             continue
+        row.pop("system_key", None)
         rows.append(TrialBalanceRow(**row))
     rows.sort(key=lambda item: item.account_code or "999999")
     total_debit = round(sum(row.total_debit for row in rows), 2)
@@ -4908,6 +4928,59 @@ def calculate_deposit_interest_for_period(deposit: Deposit, period_from: date, p
     return round(daily_interest * active_days, 2)
 
 
+def deposit_principal_start_date(deposit: Deposit) -> date:
+    return normalize_datetime(deposit.creation_datetime).date()
+
+
+def deposit_principal_maturity_date(deposit: Deposit) -> date:
+    return normalize_datetime(deposit.maturity_datetime).date()
+
+
+def deposit_is_active_in_period(deposit: Deposit, period_from: date, period_to: date) -> bool:
+    return deposit_principal_start_date(deposit) <= period_to and deposit_principal_maturity_date(deposit) > period_from
+
+
+def deposit_is_active_as_of(deposit: Deposit, as_of: date) -> bool:
+    return deposit_principal_start_date(deposit) <= as_of < deposit_principal_maturity_date(deposit)
+
+
+async def active_deposit_principal_total(organization_id: str, as_of: Optional[date], bank_id: Optional[str] = None) -> float:
+    if not as_of:
+        return 0.0
+    as_of_start = datetime.combine(as_of, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    as_of_end = datetime.combine(as_of + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    query_body = {
+        "creation_datetime": {"$lt": as_of_end},
+        "maturity_datetime": {"$gt": as_of_start},
+        "status": {"$ne": "closed"},
+    }
+    if bank_id:
+        query_body["bank_id"] = bank_id
+    documents = await db.deposits.find(with_organization(query_body, organization_id), {"_id": 0, "amount": 1}).to_list(100000)
+    return round(sum(float(item.get("amount") or 0) for item in documents), 2)
+
+
+async def active_deposits_for_period(bank_id: str, period_from: date, period_to: date) -> List[Deposit]:
+    period_start_iso = datetime.combine(period_from, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    period_end_iso = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    documents = await db.deposits.find(with_organization({
+        "bank_id": bank_id,
+        "creation_datetime": {"$lt": period_end_iso},
+        "maturity_datetime": {"$gt": period_start_iso},
+        "status": {"$ne": "closed"},
+    }), {"_id": 0}).sort("creation_datetime", 1).to_list(100000)
+    return [Deposit(**hydrate_deposit(document)) for document in documents]
+
+
+async def generate_deposit_renewal_note(previous_deposit: dict, new_deposit: Deposit) -> str:
+    return (
+        f"تم إعادة ربط الوديعة رقم {previous_deposit.get('deposit_number')} "
+        f"بتاريخ {new_deposit.creation_datetime.date().isoformat().replace('-', '/')} "
+        f"كوديعة جديدة رقم {new_deposit.deposit_number} بمبلغ {round(float(new_deposit.amount), 2)} "
+        f"ومعدل فائدة {round(float(new_deposit.monthly_interest_rate), 4)}%."
+    )
+
+
 async def calculate_total_deposit_interest_for_period(organization_id: str, period_from: Optional[date], period_to: Optional[date], bank_id: Optional[str] = None) -> float:
     if not period_from or not period_to:
         return 0.0
@@ -4915,6 +4988,7 @@ async def calculate_total_deposit_interest_for_period(organization_id: str, peri
     period_end_iso = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
     query_body = {
         "maturity_datetime": {"$gt": period_start_iso},
+        "status": {"$ne": "closed"},
         "$or": [
             {"accounting_start_datetime": {"$lt": period_end_iso}},
             {"creation_datetime": {"$lt": period_end_iso}},
@@ -5013,6 +5087,12 @@ async def get_bank_deposits(bank_id: str) -> List[Deposit]:
 def calculate_year_total(deposit: Deposit, year: int) -> float:
     rows, _, total = calculate_interest_rows(deposit, year)
     return round(sum(row.interest_amount for row in rows), 2) if rows else total
+
+
+def statement_period_bounds(period_type: str, year: int, month: int) -> tuple[date, date]:
+    if period_type == "monthly":
+        return month_bounds(year, month)
+    return date(year, 1, 1), date(year, 12, 31)
 
 
 def calculate_previous_years(deposit: Deposit, current_year: int) -> tuple[List[PreviousYearBreakdown], float]:
@@ -5588,6 +5668,19 @@ async def create_deposit(
     if maturity_datetime <= creation_datetime:
         raise HTTPException(status_code=400, detail="تاريخ الاستحقاق يجب أن يكون بعد تاريخ إنشاء الوديعة")
 
+    renewed_from_deposit_id = (payload.renewed_from_deposit_id or "").strip() or None
+    previous_deposit = None
+    if renewed_from_deposit_id:
+        previous_deposit = await db.deposits.find_one(with_organization({"id": renewed_from_deposit_id, "bank_id": bank_id}), {"_id": 0})
+        if not previous_deposit:
+            raise HTTPException(status_code=404, detail="الوديعة السابقة المختارة للتجديد غير موجودة")
+        previous_maturity_value = previous_deposit.get("maturity_datetime")
+        if isinstance(previous_maturity_value, str):
+            previous_maturity_value = datetime.fromisoformat(previous_maturity_value)
+        previous_maturity = normalize_datetime(previous_maturity_value)
+        if creation_datetime.date() < previous_maturity.date():
+            raise HTTPException(status_code=400, detail="لا يمكن إعادة ربط الوديعة قبل تاريخ استحقاق الوديعة السابقة")
+
     now = datetime.now(timezone.utc)
     deposit = Deposit(
         id=str(uuid.uuid4()),
@@ -5600,15 +5693,25 @@ async def create_deposit(
         monthly_interest_rate=payload.monthly_interest_rate,
         is_opening_balance_deposit=is_opening_balance_deposit,
         accounting_start_datetime=accounting_start_datetime,
+        renewed_from_deposit_id=renewed_from_deposit_id,
+        renewal_notes=(payload.renewal_notes or "").strip() or None,
+        status="active",
         created_at=now,
         updated_at=now,
     )
+    if previous_deposit:
+        deposit.renewal_notes = deposit.renewal_notes or await generate_deposit_renewal_note(previous_deposit, deposit)
     document = deposit.model_dump()
     attach_organization(document)
     for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         document[field_name] = serialize_datetime(document[field_name])
 
     await db.deposits.insert_one(document)
+    if previous_deposit:
+        await db.deposits.update_one(
+            with_organization({"id": previous_deposit.get("id"), "bank_id": bank_id}),
+            {"$set": {"status": "renewed", "renewal_notes": deposit.renewal_notes, "updated_at": serialize_datetime(now)}},
+        )
     await journal_for_deposit_principal(document, current_user)
     await journal_for_deposit_interest(document, current_user)
     return deposit
@@ -5661,6 +5764,8 @@ async def update_deposit(
         "is_opening_balance_deposit": is_opening_balance_deposit,
         "accounting_start_datetime": serialize_datetime(accounting_start_datetime),
         "monthly_interest_rate": payload.monthly_interest_rate,
+        "renewed_from_deposit_id": (payload.renewed_from_deposit_id or "").strip() or None,
+        "renewal_notes": (payload.renewal_notes or "").strip() or None,
         "updated_at": serialize_datetime(datetime.now(timezone.utc)),
     }
     result = await db.deposits.update_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"$set": updates})
@@ -5735,7 +5840,8 @@ async def get_detailed_statement(
     target_month = month or datetime.now(timezone.utc).month
     previous_target_year = previous_year or current_year - 1
     previous_target_month = previous_month or target_month
-    deposits = await get_bank_deposits(bank_id)
+    current_period_from, current_period_to = statement_period_bounds(period_type, current_year, target_month)
+    deposits = await active_deposits_for_period(bank_id, current_period_from, current_period_to)
     rows = []
     total_volume = 0.0
     total_current = 0.0
@@ -5770,6 +5876,8 @@ async def get_detailed_statement(
                 previous_years_interest=previous_total,
                 total_due_interest=round(current_total + previous_total, 2),
                 previous_years_breakdown=previous_breakdown,
+                status=deposit.status,
+                renewal_notes=deposit.renewal_notes,
             )
         )
 
@@ -5786,9 +5894,18 @@ async def get_detailed_statement(
 
 
 @api_router.get("/banks/{bank_id}/statements/volume", response_model=DepositVolumeStatement)
-async def get_volume_statement(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
+async def get_volume_statement(
+    bank_id: str,
+    period_type: Literal["yearly", "monthly"] = Query(default="yearly"),
+    year: Optional[int] = Query(default=None, ge=2020, le=2200),
+    month: Optional[int] = Query(default=None, ge=1, le=12),
+    _: dict = Depends(require_permission("view_reports")),
+):
     bank = await ensure_bank_async(bank_id)
-    deposits = await get_bank_deposits(bank_id)
+    target_year = year or datetime.now(timezone.utc).year
+    target_month = month or datetime.now(timezone.utc).month
+    period_from, period_to = statement_period_bounds(period_type, target_year, target_month)
+    deposits = await active_deposits_for_period(bank_id, period_from, period_to)
     rows = []
     total_volume = 0.0
 
@@ -5804,6 +5921,8 @@ async def get_volume_statement(bank_id: str, _: dict = Depends(require_permissio
                 amount=deposit.amount,
                 monthly_interest_rate=deposit.monthly_interest_rate,
                 monthly_interest_amount=annual_interest,
+                status=deposit.status,
+                renewal_notes=deposit.renewal_notes,
             )
         )
 
@@ -7105,7 +7224,13 @@ async def get_general_ledger(
     if not account:
         raise HTTPException(status_code=404, detail="الحساب غير موجود")
     opening_balance = round(float(account.get("opening_balance") or 0), 2)
-    if from_date:
+    if account.get("system_key") == "term_deposits":
+        opening_balance = await active_deposit_principal_total(organization_id, from_date or to_date or date.today())
+        for entry in opening_entries_inside_period:
+            for line in entry.get("lines", []):
+                if line.get("account_id") == account.get("id") or line.get("account_code") == account.get("code"):
+                    opening_balance = round(opening_balance + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+    elif from_date:
         prior_entries = await db.journal_entries.find(with_organization({"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
         for entry in prior_entries + opening_entries_inside_period:
             for line in entry.get("lines", []):
@@ -7117,7 +7242,16 @@ async def get_general_ledger(
     total_debit = 0.0
     total_credit = 0.0
     serial = 1
+    deposit_cache: dict[str, Optional[Deposit]] = {}
     for entry in movement_entries:
+        if account.get("system_key") == "term_deposits" and entry.get("source_type") == "deposit" and (from_date or to_date):
+            source_id = entry.get("source_id")
+            if source_id not in deposit_cache:
+                deposit_document = await db.deposits.find_one(with_organization({"id": source_id}, organization_id), {"_id": 0}) if source_id else None
+                deposit_cache[source_id] = Deposit(**hydrate_deposit(deposit_document)) if deposit_document else None
+            linked_deposit = deposit_cache.get(source_id)
+            if linked_deposit and not deposit_is_active_in_period(linked_deposit, from_date or date.min, to_date or date.max):
+                continue
         entry_date = date.fromisoformat(str(entry.get("entry_date")))
         for line in entry.get("lines", []):
             if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):

@@ -24,6 +24,7 @@ const monthOptions = [
   ["12", "ديسمبر"],
 ];
 const monthLabels = Object.fromEntries(monthOptions);
+const statusLabels = { active: "نشطة", matured: "مستحقة", renewed: "مجددة", closed: "مغلقة" };
 const currentDate = new Date();
 const firstReportYear = 2025;
 const yearOptions = Array.from({ length: Math.max(currentDate.getFullYear() + 10, 2035) - firstReportYear + 1 }, (_, index) => String(firstReportYear + index));
@@ -92,7 +93,7 @@ export default function StatementsPage() {
     if (previousFilter.period_type === "monthly") params.set("previous_month", String(Number(previousFilter.month)));
     Promise.all([
       api.get(`/banks/${bankId}/statements/detailed?${params.toString()}`),
-      api.get(`/banks/${bankId}/statements/volume`),
+      api.get(`/banks/${bankId}/statements/volume?${new URLSearchParams({ period_type: detailedFilter.period_type, year: detailedFilter.year, ...(detailedFilter.period_type === "monthly" ? { month: String(Number(detailedFilter.month)) } : {}) }).toString()}`),
       api.get(`/banks/${bankId}/deposits`),
     ]).then(([detailedResponse, volumeResponse, depositsResponse]) => {
       setDetailed(detailedResponse.data);
@@ -257,7 +258,7 @@ export default function StatementsPage() {
                 <Table data-testid="detailed-interest-table">
                   <TableHeader className="bg-slate-950">
                     <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', `عائد ${detailedPeriodLabel}`, `مستحق ${previousPeriodLabel}`, 'الإجمالي المستحق للفترات المختارة'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'الحالة', 'رقم الحساب', 'مبلغ الوديعة', 'العائد السنوي', `عائد ${detailedPeriodLabel}`, `مستحق ${previousPeriodLabel}`, 'الإجمالي المستحق للفترات المختارة', 'ملاحظات'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`detailed-interest-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>
@@ -267,12 +268,14 @@ export default function StatementsPage() {
                       <TableRow key={row.deposit_id} data-testid={`detailed-interest-row-${row.deposit_id}`}>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`detailed-interest-row-${row.deposit_id}-deposit-number`}>{row.deposit_number}</TableCell>
+                        <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-status`}>{statusLabels[row.status] || "نشطة"}</TableCell>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-account-number`}>{row.account_number}</TableCell>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-amount`}>{formatCurrency(row.amount)}</TableCell>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-monthly-interest`}>{formatCurrency(row.monthly_interest_amount)}</TableCell>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-current-interest`}>{formatCurrency(row.current_year_interest)}</TableCell>
                         <TableCell data-testid={`detailed-interest-row-${row.deposit_id}-previous-interest`}>{formatCurrency(row.previous_years_interest)}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`detailed-interest-row-${row.deposit_id}-total-due`}>{formatCurrency(row.total_due_interest)}</TableCell>
+                        <TableCell className="max-w-xs whitespace-pre-wrap text-xs font-bold" data-testid={`detailed-interest-row-${row.deposit_id}-notes`}>{row.renewal_notes || "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -299,7 +302,7 @@ export default function StatementsPage() {
                 <Table data-testid="volume-table">
                   <TableHeader className="bg-emerald-700">
                     <TableRow className="hover:bg-emerald-700" data-testid="volume-header-row">
-                      {['مسلسل', 'رقم الوديعة', 'رقم الحساب', 'مبلغ الوديعة', 'نسبة الفائدة السنوية', 'العائد السنوي'].map((title) => (
+                      {['مسلسل', 'رقم الوديعة', 'الحالة', 'رقم الحساب', 'مبلغ الوديعة', 'نسبة الفائدة السنوية', 'العائد السنوي', 'ملاحظات'].map((title) => (
                         <TableHead key={title} className="text-right font-extrabold text-white" data-testid={`volume-header-${title}`}>{title}</TableHead>
                       ))}
                     </TableRow>
@@ -309,10 +312,12 @@ export default function StatementsPage() {
                       <TableRow key={row.deposit_id} data-testid={`volume-row-${row.deposit_id}`}>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`volume-row-${row.deposit_id}-deposit-number`}>{row.deposit_number}</TableCell>
+                        <TableCell data-testid={`volume-row-${row.deposit_id}-status`}>{statusLabels[row.status] || "نشطة"}</TableCell>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-account-number`}>{row.account_number}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`volume-row-${row.deposit_id}-amount`}>{formatCurrency(row.amount)}</TableCell>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-rate`}>{formatNumber(row.monthly_interest_rate)}%</TableCell>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-monthly-interest`}>{formatCurrency(row.monthly_interest_amount)}</TableCell>
+                        <TableCell className="max-w-xs whitespace-pre-wrap text-xs font-bold" data-testid={`volume-row-${row.deposit_id}-notes`}>{row.renewal_notes || "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
