@@ -1,4 +1,4 @@
-"""Reconciliation save integrity: calculated balance must match computed breakdown balance."""
+"""Reconciliation save integrity: automatic balance is before checks, then checks are applied once."""
 
 import os
 import uuid
@@ -57,7 +57,7 @@ def cleanup_iter71_reconciliation_data():
     client.close()
 
 
-# Modules/features: save/update reconciliation should keep calculated_balance equal to breakdown.reconciliation_balance.
+# Modules/features: save/update reconciliation should store pre-check automatic balance, then apply saved checks once.
 def test_reconciliation_save_uses_breakdown_balance_without_double_check_application(base_url, admin_token):
     period_label = f"{ITER_PREFIX} أبريل 2199"
     payload = {
@@ -82,14 +82,15 @@ def test_reconciliation_save_uses_breakdown_balance_without_double_check_applica
     assert create.status_code == 200, create.text
     created = create.json()
 
-    expected = round(float(created["balance_breakdown"]["reconciliation_balance"]), 2)
-    assert round(float(created["book_balance"]), 2) == expected
-    assert round(float(created["calculated_balance"]), 2) == expected
+    expected_book = round(float(created["balance_breakdown"]["book_balance"]), 2)
+    expected_calculated = round(expected_book + 100.0 - 50.0, 2)
+    assert round(float(created["book_balance"]), 2) == expected_book
+    assert round(float(created["calculated_balance"]), 2) == expected_calculated
 
     update_payload = {
         **payload,
         "book_balance": 999999,
-        "bank_statement_balance": expected,
+        "bank_statement_balance": expected_calculated,
     }
     update = requests.put(
         f"{base_url}/api/banks/{BANK_ID}/reconciliations/{created['id']}",
@@ -100,6 +101,7 @@ def test_reconciliation_save_uses_breakdown_balance_without_double_check_applica
     assert update.status_code == 200, update.text
     updated = update.json()
 
-    updated_expected = round(float(updated["balance_breakdown"]["reconciliation_balance"]), 2)
-    assert round(float(updated["book_balance"]), 2) == updated_expected
-    assert round(float(updated["calculated_balance"]), 2) == updated_expected
+    updated_expected_book = round(float(updated["balance_breakdown"]["book_balance"]), 2)
+    updated_expected_calculated = round(updated_expected_book + 100.0 - 50.0, 2)
+    assert round(float(updated["book_balance"]), 2) == updated_expected_book
+    assert round(float(updated["calculated_balance"]), 2) == updated_expected_calculated

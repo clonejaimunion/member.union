@@ -4505,7 +4505,7 @@ def hydrate_custody_advance(document: dict) -> dict:
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
     total_outstanding = round(sum(item.amount for item in payload.outstanding_checks), 2)
     total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
-    calculated_balance = round(payload.book_balance, 2)
+    calculated_balance = round(payload.book_balance + total_outstanding - total_collection, 2)
     difference = round(calculated_balance - payload.bank_statement_balance, 2)
     is_matched = abs(difference) < 0.01
     return {
@@ -6087,7 +6087,7 @@ async def create_bank_reconciliation(
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
     balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
-    payload = payload.model_copy(update={"book_balance": balance_breakdown.reconciliation_balance})
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
     computed = calculate_reconciliation(payload)
     document = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks"]:
@@ -6168,7 +6168,7 @@ async def update_bank_reconciliation(
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
     balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
-    payload = payload.model_copy(update={"book_balance": balance_breakdown.reconciliation_balance})
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
     computed = calculate_reconciliation(payload)
     updates = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks"]:

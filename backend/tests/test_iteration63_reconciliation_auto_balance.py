@@ -56,15 +56,18 @@ def _assert_breakdown_formula(breakdown: dict):
     deposit_settlements = round(float(breakdown.get("deposit_settlements") or 0), 2)
     checks_under_collection = round(float(breakdown.get("checks_under_collection") or 0), 2)
     gross_total = round(float(breakdown.get("gross_total") or 0), 2)
+    book_balance = round(float(breakdown.get("book_balance") or 0), 2)
     monthly_expenses = round(float(breakdown.get("monthly_expenses") or 0), 2)
     checks_not_presented = round(float(breakdown.get("checks_not_presented") or 0), 2)
     bank_expenses = round(float(breakdown.get("bank_expenses") or 0), 2)
     reconciliation_balance = round(float(breakdown.get("reconciliation_balance") or 0), 2)
 
-    expected_gross = round(opening_balance + monthly_revenues + deposit_settlements + checks_under_collection, 2)
-    expected_reconciliation = round(expected_gross - monthly_expenses - checks_not_presented - bank_expenses, 2)
+    expected_gross = round(opening_balance + monthly_revenues + deposit_settlements, 2)
+    expected_book = round(expected_gross - monthly_expenses - bank_expenses, 2)
+    expected_reconciliation = round(expected_book + checks_not_presented - checks_under_collection, 2)
 
     assert gross_total == expected_gross
+    assert book_balance == expected_book
     assert reconciliation_balance == expected_reconciliation
 
 
@@ -123,7 +126,7 @@ def test_create_reconciliation_ignores_payload_book_balance_and_persists_breakdo
         "period_label": period_label,
         "administration": "مشروع التكافل الاجتماعي",
         "book_balance": 99999999,
-        "bank_statement_balance": float(breakdown["reconciliation_balance"]),
+        "bank_statement_balance": float(breakdown["book_balance"]) + 10 - 5,
         "outstanding_checks": [
             {"check_number": "123456", "amount": 10, "check_date": "2026-02-05T00:00:00Z"}
         ],
@@ -142,7 +145,8 @@ def test_create_reconciliation_ignores_payload_book_balance_and_persists_breakdo
     created = create_response.json()
     created_reconciliation_ids["ids"].append(created["id"])
 
-    assert round(float(created["book_balance"]), 2) == round(float(breakdown["reconciliation_balance"]), 2)
+    assert round(float(created["book_balance"]), 2) == round(float(breakdown["book_balance"]), 2)
+    assert round(float(created["calculated_balance"]), 2) == round(float(breakdown["book_balance"]) + 10 - 5, 2)
     assert created.get("balance_breakdown") is not None
     _assert_breakdown_formula(created["balance_breakdown"])
 
@@ -199,12 +203,11 @@ def test_calculated_balance_equals_auto_computed_book_balance_without_double_cou
     created = create_response.json()
     created_reconciliation_ids["ids"].append(created["id"])
 
-    auto_book_balance = round(float(breakdown["reconciliation_balance"]), 2)
-    old_formula_value = round(auto_book_balance + outstanding_value - collection_value, 2)
+    auto_book_balance = round(float(breakdown["book_balance"]), 2)
+    final_formula_value = round(auto_book_balance + outstanding_value - collection_value, 2)
 
     assert round(float(created["book_balance"]), 2) == auto_book_balance
-    assert round(float(created["calculated_balance"]), 2) == auto_book_balance
-    assert round(float(created["calculated_balance"]), 2) != old_formula_value
+    assert round(float(created["calculated_balance"]), 2) == final_formula_value
 
 
 def test_update_reconciliation_keeps_auto_balance_and_breakdown(
@@ -255,7 +258,7 @@ def test_update_reconciliation_keeps_auto_balance_and_breakdown(
     )
     assert update_response.status_code == 200, update_response.text
     updated = update_response.json()
-    assert round(float(updated["book_balance"]), 2) == round(float(breakdown["reconciliation_balance"]), 2)
+    assert round(float(updated["book_balance"]), 2) == round(float(breakdown["book_balance"]), 2)
     assert updated.get("balance_breakdown") is not None
 
 

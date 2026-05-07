@@ -305,3 +305,13 @@
 - تم استدعاء testing agent لمراجعة مستقلة للتسوية وميزان المراجعة والتدفقات الأساسية؛ النتيجة iteration_71: Backend 100% وFrontend 100%، ولا توجد عيوب Blocking، مع تأكيد أن حفظ مذكرة التسوية لا يطبق الشيكات مرتين.
 - أنشأ testing agent اختبارات إضافية للمراجعة: `test_iteration71_core_smoke_endpoints.py`, `test_iteration71_auth_playbook_checks.py`, `test_iteration71_reconciliation_save_integrity.py` وتقارير pytest الخاصة بها.
 - تم بناء الواجهة بنجاح، وتحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe`، والتحقق من رابط التحميل بنجاح.
+
+## تعديل التسوية البنكية — الرصيد التلقائي قبل تسويات الشيكات بتاريخ 2026-05-07
+- بناءً على توضيح المستخدم، تم تعديل معنى حقل `رصيد التسوية البنكية التلقائي` ليكون هو نفس `الرصيد قبل تسويات الشيكات` وليس الرصيد النهائي بعد الشيكات.
+- تم تعديل واجهة `BankReconciliationPage.jsx` بحيث تعرض في حقل الرصيد المقروء فقط قيمة `book_balance` من breakdown، مع تسمية واضحة: `رصيد التسوية البنكية التلقائي قبل تسويات الشيكات`.
+- تم تعديل `calculate_reconciliation` بحيث يحسب الرصيد النهائي المحفوظ `calculated_balance = book_balance + total_outstanding_checks - total_collection_checks`، أي تطبيق الشيكات مرة واحدة بعد الرصيد التلقائي.
+- تم تعديل إنشاء/تعديل مذكرة التسوية ليحفظ `book_balance = balance_breakdown.book_balance`، وليس `reconciliation_balance`، ثم يطبق الشيكات المسجلة في النموذج للوصول إلى الرصيد النهائي.
+- تم تحديث ملخص الواجهة ونسخة الطباعة لتفرق بين `الرصيد التلقائي قبل الشيكات` و`الرصيد النهائي بعد تسويات الشيكات`.
+- تم تحديث اختبارات `test_iteration71_reconciliation_save_integrity.py` و`test_iteration63_reconciliation_auto_balance.py` لتثبيت السلوك الجديد.
+- الاختبارات نجحت: iteration72 + iteration71 + iteration63 + iteration67 = 15/15، ونجح Playwright للواجهة، وSmoke حفظ مذكرة تسوية مع شيكات ثم حذفها بنجاح.
+- تم بناء الواجهة وتحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.
