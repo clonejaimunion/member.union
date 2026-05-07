@@ -251,3 +251,11 @@
 - تم إضافة اختبارات regression: `/app/backend/tests/test_iteration73_deposit_renewal_independent_asset.py`، وأضيف بواسطة testing agent: `/app/backend/tests/test_iteration74_deposit_renewal_journal_scope.py`.
 - نتائج الاختبار: pytest محلي iteration73/71/72 = 4/4، testing agent iteration_70 = backend 5/5 وواجهة 95% ثم تم إصلاح تحذير الواجهة وإعادة Playwright بنجاح، وبعدها pytest iteration74/73/71 = 5/5.
 - نجح `yarn craco build`، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.
+
+## تعديل تقرير المصروفات — إجمالي لكل بنك بتاريخ 2026-05-07
+- تم تعديل جدول `ExpensesPage.jsx` بإزالة عمود `البنك` من صفوف المصروفات التفصيلية داخل تقرير المصروفات.
+- تم إضافة صفوف إجمالي في نهاية الجدول، صف مستقل لكل بنك، تعرض: إجمالي المبلغ الكلي، إجمالي الاستقطاعات، وإجمالي الصافي بناءً على `bank_id` المختار عند إضافة المصروف.
+- تم الحفاظ على اختيار البنك داخل نموذج إضافة المصروف لأنه مصدر التجميع المطلوب، مع إبقاء البنك داخل إذن الصرف التفصيلي والبحث عند الحاجة.
+- تم إضافة `data-testid` لصفوف التجميع: `expenses-bank-total-row-{bank_id}` وقيم الإجماليات.
+- تم اختبار الواجهة بإنشاء 3 مصروفات مؤقتة موزعة على بنكين، والتحقق من اختفاء رأس عمود البنك وظهور صف إجمالي بنك التنمية الصناعية وبنك مصر، ثم تم حذف بيانات الاختبار وقيودها.
+- نجح `yarn craco build` وpytest regression = 3/3، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.
