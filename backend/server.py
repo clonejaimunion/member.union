@@ -3419,6 +3419,7 @@ async def calculate_trial_balance_report(
 ) -> TrialBalanceReport:
     await sync_chart_accounts_for_organization(organization_id)
     await reclassify_revenue_journal_lines_for_organization(organization_id)
+    show_term_deposit_principal = await should_show_term_deposits_in_trial_balance(organization_id, to_date)
     account_query = with_organization({}, organization_id)
     if account_type:
         account_query["account_type"] = account_type
@@ -3447,11 +3448,15 @@ async def calculate_trial_balance_report(
             entry_query["entry_date"]["$gte"] = from_date.isoformat()
         if to_date:
             entry_query["entry_date"]["$lte"] = to_date.isoformat()
-    entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1}).to_list(100000)
+    entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1, "source_type": 1}).to_list(100000)
+    if not show_term_deposit_principal:
+        entries = [entry for entry in entries if not entry_has_term_deposit_principal(entry)]
     account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
     account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
     if from_date:
-        prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
+        prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1, "source_type": 1}).to_list(100000)
+        if not show_term_deposit_principal:
+            prior_entries = [entry for entry in prior_entries if not entry_has_term_deposit_principal(entry)]
         for entry in prior_entries:
             for line in entry.get("lines", []):
                 account = None
@@ -3512,7 +3517,6 @@ async def calculate_trial_balance_report(
                 else:
                     rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + deposit_period_interest, 2)
     rows = []
-    active_term_deposits_total = await active_deposit_principal_total(organization_id, to_date or date.today())
     for row in rows_by_key.values():
         signed_balance = row["total_debit"] - row["total_credit"]
         if row.get("nature") == "credit":
@@ -3525,8 +3529,11 @@ async def calculate_trial_balance_report(
         else:
             row["balance_debit"] = 0.0
             row["balance_credit"] = round(abs(signed_balance), 2)
-        if row.get("system_key") == "term_deposits":
-            row["balance_debit"] = active_term_deposits_total
+        if row.get("system_key") == "term_deposits" and not show_term_deposit_principal:
+            row["opening_balance"] = 0.0
+            row["total_debit"] = 0.0
+            row["total_credit"] = 0.0
+            row["balance_debit"] = 0.0
             row["balance_credit"] = 0.0
         if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
             continue
@@ -3704,10 +3711,13 @@ async def validate_accounting_data_flow(organization_id: str) -> dict:
     accounts_by_code = {item.get("code"): item for item in accounts if item.get("code")}
     accounts_by_name = {item.get("name"): item for item in accounts if item.get("name")}
     entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).to_list(100000)
+    show_term_deposit_principal = await should_show_term_deposits_in_trial_balance(organization_id, period_to)
     reversal_count = await db.journal_entries.count_documents(with_organization({"is_reversal": True}, organization_id))
     missing_lines = []
     ledger_totals: dict[str, dict] = {}
     for entry in entries:
+        if not show_term_deposit_principal and entry_has_term_deposit_principal(entry):
+            continue
         for index, line in enumerate(entry.get("lines", []), 1):
             account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code")) or accounts_by_name.get(line.get("account_name"))
             if not account:
@@ -5022,6 +5032,23 @@ async def active_deposit_principal_total(organization_id: str, as_of: Optional[d
         query_body["bank_id"] = bank_id
     documents = await db.deposits.find(with_organization(query_body, organization_id), {"_id": 0, "amount": 1}).to_list(100000)
     return round(sum(float(item.get("amount") or 0) for item in documents), 2)
+
+
+async def should_show_term_deposits_in_trial_balance(organization_id: str, report_to_date: Optional[date]) -> bool:
+    if not report_to_date:
+        return False
+    day_start = datetime.combine(report_to_date, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    day_end = datetime.combine(report_to_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    return await db.deposits.count_documents(with_organization({"maturity_datetime": {"$gte": day_start, "$lt": day_end}}, organization_id)) > 0
+
+
+def entry_has_term_deposit_principal(entry: dict) -> bool:
+    if entry.get("source_type") == "deposit":
+        return True
+    for line in entry.get("lines", []):
+        if str(line.get("account_code") or "") == "1250" or str(line.get("account_name") or "") == "ودائع لأجل":
+            return True
+    return False
 
 
 async def active_deposits_for_period(bank_id: str, period_from: date, period_to: date) -> List[Deposit]:

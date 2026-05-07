@@ -125,7 +125,7 @@ def test_renewed_deposit_is_independent_and_active_asset_is_period_scoped(base_u
         timeout=90,
     )
     assert jan_trial.status_code == 200, jan_trial.text
-    assert _term_deposit_balance(jan_trial.json().get("rows", [])) == 1000.0
+    assert _term_deposit_balance(jan_trial.json().get("rows", [])) == 0.0
 
     feb_trial = requests.get(
         f"{base_url}/api/trial-balance",
@@ -134,7 +134,7 @@ def test_renewed_deposit_is_independent_and_active_asset_is_period_scoped(base_u
         timeout=90,
     )
     assert feb_trial.status_code == 200, feb_trial.text
-    assert _term_deposit_balance(feb_trial.json().get("rows", [])) == 1300.0
+    assert _term_deposit_balance(feb_trial.json().get("rows", [])) == 0.0
 
     april_trial = requests.get(
         f"{base_url}/api/trial-balance",
