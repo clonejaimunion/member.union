@@ -2604,6 +2604,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "4102", "name": "إيرادات فوائد ودائع", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "deposit_interest_revenue"},
         {"code": "4103", "name": "إيرادات اشتراكات العضوية", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "membership_subscription_revenue"},
         {"code": "4104", "name": "إيرادات فوائد الحساب الجاري", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "current_account_interest_revenue"},
+        {"code": "4105", "name": "إيرادات أوامر الدفع", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "payment_order_revenue"},
         {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
@@ -2691,6 +2692,7 @@ async def resolve_journal_account(line: dict) -> dict:
         "شيكات صادرة": "issued_checks",
         "عوائد ودائع مستحقة": "accrued_deposit_interest",
         "إيرادات فوائد ودائع": "deposit_interest_revenue",
+        "إيرادات أوامر الدفع": "payment_order_revenue",
         "رصيد افتتاحي": "opening_balance_equity",
         "الخزينة": "cash_box",
         "مديونية اشتراكات العضوية": "membership_subscription_receivable",
@@ -2854,6 +2856,7 @@ async def delete_journal_for_source(source_type: str, source_id: str):
 REPORT_EXCLUDED_SOURCE_TYPES = ["deposit_interest"]
 REVENUE_DIRECT_BANK_METHODS = {"current_account_interest", "deposit_maturity"}
 REVENUE_RULE_ACCOUNT_MAP = {
+    "payment_order": {"account_name": "إيرادات أوامر الدفع", "system_key": "payment_order_revenue", "analysis_type": "أمر دفع"},
     "deposit_maturity": {"account_name": "إيرادات فوائد ودائع", "system_key": "deposit_interest_revenue", "analysis_type": "استحقاق وديعة"},
     "current_account_interest": {"account_name": "إيرادات فوائد الحساب الجاري", "system_key": "current_account_interest_revenue", "analysis_type": "فوائد الحساب الجاري"},
 }
@@ -2868,6 +2871,7 @@ def default_accounting_rules(organization_id: str) -> List[dict]:
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     defaults = [
         ("rule-income-bank", "Income", "General", "bank_transfer", "البنك", "الإيرادات", "إيراد عادي محصل بالبنك"),
+        ("rule-income-payment-order", "Income", "PaymentOrder", "payment_order", "البنك", "إيرادات أوامر الدفع", "تحصيل إيراد مستقل بأمر دفع"),
         ("rule-expense-general", "Expense", "General", "bank_transfer", "المصروفات", "البنك", "مصروف عادي مدفوع من البنك"),
         ("rule-bank-fee", "BankFee", "banking", "bank_transfer", "المصروفات البنكية", "البنك", "عمولة أو مصروف بنكي"),
         ("rule-deposit", "Deposit", "Principal", "bank_transfer", "ودائع لأجل", "البنك", "ربط وديعة لأجل"),
@@ -3016,6 +3020,40 @@ async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None
             {"account_name": revenue_rule["account_name"], "system_key": revenue_rule["system_key"], "debit": 0, "credit": amount, "notes": f"تحليل: {revenue_rule['analysis_type']}"},
         ],
     )
+
+
+async def reclassify_revenue_journal_lines_for_organization(organization_id: str):
+    revenue_methods = list(REVENUE_RULE_ACCOUNT_MAP.keys())
+    revenues = await db.revenues.find(with_organization({"collection_method": {"$in": revenue_methods}}, organization_id), {"_id": 0, "id": 1, "collection_method": 1}).to_list(100000)
+    if not revenues:
+        return
+    account_cache = {}
+    for rule in REVENUE_RULE_ACCOUNT_MAP.values():
+        if rule["system_key"] not in account_cache:
+            account_cache[rule["system_key"]] = await db.chart_accounts.find_one(with_organization({"system_key": rule["system_key"], "is_active": True}, organization_id), {"_id": 0})
+    for revenue in revenues:
+        rule = REVENUE_RULE_ACCOUNT_MAP.get(revenue.get("collection_method"))
+        account = account_cache.get(rule["system_key"]) if rule else None
+        if not account:
+            continue
+        entry = await db.journal_entries.find_one(with_organization({"source_type": "revenue", "source_id": revenue.get("id"), "is_reversal": {"$ne": True}}, organization_id), {"_id": 0})
+        if not entry:
+            continue
+        changed = False
+        lines = []
+        for line in entry.get("lines", []):
+            next_line = dict(line)
+            if float(next_line.get("credit") or 0) > 0 and next_line.get("account_type") == "revenue" and next_line.get("account_id") != account.get("id"):
+                next_line.update({
+                    "account_id": account.get("id"),
+                    "account_code": account.get("code"),
+                    "account_name": account.get("name"),
+                    "account_type": account.get("account_type"),
+                })
+                changed = True
+            lines.append(next_line)
+        if changed:
+            await db.journal_entries.update_one(with_organization({"id": entry.get("id")}, organization_id), {"$set": {"lines": lines, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
 
 
 async def journal_for_expense(expense: dict, current_user: Optional[dict] = None):
@@ -3380,10 +3418,12 @@ async def calculate_trial_balance_report(
     non_zero_only: bool = False,
 ) -> TrialBalanceReport:
     await sync_chart_accounts_for_organization(organization_id)
+    await reclassify_revenue_journal_lines_for_organization(organization_id)
     account_query = with_organization({}, organization_id)
     if account_type:
         account_query["account_type"] = account_type
     accounts = await db.chart_accounts.find(account_query, {"_id": 0}).sort("code", 1).to_list(5000)
+    accounts_by_system_key = {account.get("system_key"): account for account in accounts if account.get("system_key")}
     rows_by_key = {}
     for account in accounts:
         key = account.get("id") or account.get("code") or account.get("name")
@@ -3457,6 +3497,20 @@ async def calculate_trial_balance_report(
                 }
             rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + float(line.get("debit") or 0), 2)
             rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + float(line.get("credit") or 0), 2)
+    if from_date and to_date:
+        deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, from_date, to_date)
+        if deposit_period_interest > 0:
+            for system_key, side in [("accrued_deposit_interest", "debit"), ("deposit_interest_revenue", "credit")]:
+                account = accounts_by_system_key.get(system_key)
+                if not account or (account_type and account.get("account_type") != account_type):
+                    continue
+                key = account.get("id") or account.get("code") or account.get("name")
+                if key not in rows_by_key:
+                    continue
+                if side == "debit":
+                    rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + deposit_period_interest, 2)
+                else:
+                    rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + deposit_period_interest, 2)
     rows = []
     active_term_deposits_total = await active_deposit_principal_total(organization_id, to_date or date.today())
     for row in rows_by_key.values():
@@ -3663,6 +3717,16 @@ async def validate_accounting_data_flow(organization_id: str) -> dict:
             ledger_totals.setdefault(key, {"debit": 0.0, "credit": 0.0, "name": account.get("name")})
             ledger_totals[key]["debit"] = round(ledger_totals[key]["debit"] + float(line.get("debit") or 0), 2)
             ledger_totals[key]["credit"] = round(ledger_totals[key]["credit"] + float(line.get("credit") or 0), 2)
+    accounts_by_system_key = {item.get("system_key"): item for item in accounts if item.get("system_key")}
+    deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, period_from, period_to)
+    if deposit_period_interest > 0:
+        for system_key, side in [("accrued_deposit_interest", "debit"), ("deposit_interest_revenue", "credit")]:
+            account = accounts_by_system_key.get(system_key)
+            if not account:
+                continue
+            key = account.get("id")
+            ledger_totals.setdefault(key, {"debit": 0.0, "credit": 0.0, "name": account.get("name")})
+            ledger_totals[key][side] = round(ledger_totals[key][side] + deposit_period_interest, 2)
     trial_mismatches = []
     for row in trial.rows:
         if not row.account_id:
