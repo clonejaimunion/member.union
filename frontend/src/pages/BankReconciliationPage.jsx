@@ -52,7 +52,6 @@ export default function BankReconciliationPage() {
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
-  const organizationPrintName = (value) => value === socialName ? `${unionFullName} - ${socialName}` : unionFullName;
 
   const totals = useMemo(() => {
     const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
@@ -597,13 +596,11 @@ export default function BankReconciliationPage() {
               <div className="absolute left-0 top-0" data-testid="reconciliation-print-bank-logo">
                 <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className="h-16 w-28" testId="reconciliation-print-bank-logo-mark" />
               </div>
-              <p className="text-base font-extrabold text-slate-700" data-testid="reconciliation-print-organization">{organizationPrintName(activeReconciliation.administration)}</p>
               <p className="mt-2 text-lg font-bold text-slate-600" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
             </div>
             <div className="grid grid-cols-1 gap-4" data-testid="reconciliation-print-kpis">
               <div className="rounded-xl bg-slate-50 p-4" data-testid="print-book-balance"><p className="text-xs font-bold text-slate-500">الرصيد التلقائي قبل تسويات الشيكات</p><p className="text-xl font-extrabold">{formatEgpText(activeReconciliation.book_balance)}</p></div>
             </div>
-            {activeReconciliation.balance_breakdown && <div className="grid grid-cols-2 gap-2 text-sm" data-testid="print-balance-breakdown"><div className="rounded-lg border p-2" data-testid="print-breakdown-opening">الرصيد الافتتاحي: {formatEgpText(activeReconciliation.balance_breakdown.opening_balance)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-revenues">الإيرادات: {formatEgpText(activeReconciliation.balance_breakdown.monthly_revenues)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-deposits">فوائد الودائع الشهرية: {formatEgpText(activeReconciliation.balance_breakdown.monthly_deposit_interest ?? activeReconciliation.balance_breakdown.deposit_settlements ?? 0)}</div><div className="rounded-lg border p-2 font-extrabold" data-testid="print-breakdown-total-receipts">إجمالي الزيادة قبل المصروفات: {formatEgpText(activeReconciliation.balance_breakdown.gross_total)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-bank-expenses">المصروفات البنكية: {formatEgpText(activeReconciliation.balance_breakdown.bank_expenses)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-expenses">إجمالي مصروفات البنك: {formatEgpText(activeReconciliation.balance_breakdown.monthly_expenses)}</div><div className="rounded-lg border p-2 font-extrabold" data-testid="print-breakdown-book-balance">الرصيد قبل تسويات الشيكات: {formatEgpText(activeReconciliation.balance_breakdown.book_balance)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-outstanding">يضاف شيكات لم تقدم للصرف: {formatEgpText(activeReconciliation.balance_breakdown.checks_not_presented)}</div><div className="rounded-lg border p-2" data-testid="print-breakdown-collection">يخصم شيكات تحت التحصيل: {formatEgpText(activeReconciliation.balance_breakdown.checks_under_collection)}</div><div className="rounded-lg border p-2 font-extrabold" data-testid="print-breakdown-final">رصيد التسوية: {formatEgpText(activeReconciliation.balance_breakdown.reconciliation_balance)}</div></div>}
             {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
             {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
             <div className="flex justify-end pt-6 print:mt-auto print:justify-start" data-testid="print-status-wrapper">
