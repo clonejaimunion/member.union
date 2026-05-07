@@ -143,8 +143,11 @@ export default function DepositRegistration() {
             <div className="space-y-2 md:col-span-2" data-testid="field-renewed-from-wrapper">
               <Label htmlFor="renewed_from_deposit_id" data-testid="label-renewed-from-deposit">تم تجديد هذه الوديعة من وديعة سابقة</Label>
               <select id="renewed_from_deposit_id" value={form.renewed_from_deposit_id} onChange={(event) => updateField("renewed_from_deposit_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="select-renewed-from-deposit">
-                <option value="" data-testid="renewed-from-empty-option">وديعة جديدة مستقلة بدون تجديد</option>
-                {deposits.map((deposit) => <option key={deposit.id} value={deposit.id} data-testid={`renewed-from-option-${deposit.id}`}>{deposit.deposit_number} — {formatCurrency(deposit.amount)}</option>)}
+                <option value="" label="وديعة جديدة مستقلة بدون تجديد" data-testid="renewed-from-empty-option" />
+                {deposits.map((deposit) => {
+                  const optionLabel = `${deposit.deposit_number} — ${formatCurrency(deposit.amount)}`;
+                  return <option key={deposit.id} value={deposit.id} label={optionLabel} data-testid={`renewed-from-option-${deposit.id}`} />;
+                })}
               </select>
             </div>
             <div className="space-y-2 md:col-span-2" data-testid="field-renewal-notes-wrapper">
