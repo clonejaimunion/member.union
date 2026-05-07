@@ -278,3 +278,12 @@
 - تم توحيد فحص `data-flow-validation` مع بنود فوائد الودائع المولدة للفترة حتى يظل الفحص صحيحاً.
 - تم إضافة اختبار regression: `/app/backend/tests/test_iteration75_trial_balance_revenue_breakdown.py` للتأكد من فصل `شيكات تحت التحصيل` و`إيرادات أوامر الدفع` و`إيرادات فوائد ودائع`.
 - الاختبارات نجحت: iteration75 + iteration67 + iteration72 = 8/8، وSmoke API أكد ظهور الحسابات الثلاثة واستمرار `data-flow-validation=true`، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.
+
+## تحديث التسوية البنكية — معادلة على مرحلتين بتاريخ 2026-05-07
+- تم ضبط رصيد التسوية البنكية ليُحسب على مرحلتين:
+  1. `الرصيد الافتتاحي + الإيرادات + فوائد الودائع - المصروفات البنكية - إجمالي مصروفات البنك = الرصيد قبل تسويات الشيكات`.
+  2. `الرصيد قبل تسويات الشيكات + شيكات لم تقدم للصرف - شيكات تحت التحصيل = رصيد التسوية البنكية النهائي`.
+- تم تعديل `/api/banks/{bank_id}/reconciliation-balance` ليعيد `book_balance` كرصد المرحلة الأولى، و`reconciliation_balance` كرصد نهائي بعد تسويات الشيكات.
+- تم تحديث واجهة `BankReconciliationPage.jsx` ونسخة الطباعة لإظهار المرحلة الأولى بوضوح: الإيرادات، فوائد الودائع، المصروفات البنكية، مصروفات البنك، ثم مرحلة تسويات الشيكات.
+- تم تحديث اختبار `/app/backend/tests/test_iteration72_bank_reconciliation_monthly_formula.py` للمعادلة ذات المرحلتين.
+- الاختبارات نجحت: iteration72 + iteration75 + iteration67 = 8/8، ونجح Playwright لواجهة التسوية وSmoke API للمعادلة، وتم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التحميل.

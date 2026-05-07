@@ -3220,11 +3220,11 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     checks_not_presented = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in outstanding_checks), 2)
     manual_charges = await db.banking_manual_charges.find_one(with_organization({"bank_id": bank_id, "year": period_from.year, "month": period_from.month}, organization_id), {"_id": 0})
     bank_expenses = sum_manual_charge_items(manual_charges)
-    total_receipts = round(monthly_deposit_interest + checks_not_presented, 2)
-    total_payments = round(bank_expenses + monthly_expenses + checks_under_collection, 2)
+    total_receipts = round(monthly_revenues + monthly_deposit_interest, 2)
+    total_payments = round(bank_expenses + monthly_expenses, 2)
     gross_total = round(opening_balance + total_receipts, 2)
     book_balance = round(gross_total - total_payments, 2)
-    reconciliation_balance = book_balance
+    reconciliation_balance = round(book_balance + checks_not_presented - checks_under_collection, 2)
     return BankReconciliationBalanceBreakdown(
         bank_id=bank_id,
         period_from=period_from,
