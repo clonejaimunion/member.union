@@ -1,0 +1,833 @@
+{
+  "backup_id": "ed3814c7-e536-4a4f-98eb-154e49d167fe",
+  "created_at": "2026-05-08T06:06:17.958495+00:00",
+  "organization_id": "social-solidarity",
+  "collections": {
+    "journal_entries": [
+      {
+        "id": "30fa2f0d-09cd-40ad-a2eb-5bf8600b356a",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-06T08:06:05.329253+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي للرصيد الافتتاحي - بنك التنمية الصناعية",
+        "entry_date": "2025-01-01",
+        "entry_number": 1,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "بنك التنمية الصناعية",
+            "bank_id": "industrial-development",
+            "system_key": null,
+            "debit": 286288.0,
+            "credit": 0.0,
+            "notes": "محرك القواعد: رصيد افتتاحي للبنك",
+            "account_id": "7982efdb-ef76-4bfe-943e-be0097584bab",
+            "account_code": "1101",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "رصيد افتتاحي",
+            "bank_id": null,
+            "system_key": "opening_balance_equity",
+            "debit": 0.0,
+            "credit": 286288.0,
+            "notes": "القيد المقابل للرصيد الافتتاحي",
+            "account_id": "8e7860d4-4065-4f7d-b4bf-6e6f4d4b2c73",
+            "account_code": "3100",
+            "account_type": "equity"
+          }
+        ],
+        "reference": "OB-industrial-development",
+        "source_id": "industrial-development",
+        "source_type": "opening_balance",
+        "status": "approved",
+        "total_credit": 286288.0,
+        "total_debit": 286288.0,
+        "updated_at": "2026-05-06T08:06:05.329253+00:00"
+      },
+      {
+        "id": "4ed65d34-d823-486e-995a-970820d6ce66",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-06T08:06:55.492069+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لرصيد افتتاحي وديعة قائمة رقم 7724000007",
+        "entry_date": "2025-01-01",
+        "entry_number": 2,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 800000.0,
+            "credit": 0.0,
+            "notes": "وديعة قائمة أول الفترة: إثبات أصل وديعة بدون حركة بنك تاريخية",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "رصيد افتتاحي",
+            "bank_id": null,
+            "system_key": "opening_balance_equity",
+            "debit": 0.0,
+            "credit": 800000.0,
+            "notes": "القيد المقابل لوديعة قائمة عند بداية الفترة",
+            "account_id": "8e7860d4-4065-4f7d-b4bf-6e6f4d4b2c73",
+            "account_code": "3100",
+            "account_type": "equity"
+          }
+        ],
+        "reference": "7724000007",
+        "source_id": "223c83cb-a1d1-439f-ad21-4d9558a482a1",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 800000.0,
+        "total_debit": 800000.0,
+        "updated_at": "2026-05-06T08:06:55.492069+00:00"
+      },
+      {
+        "id": "23ecbdc5-e898-44e6-9ef2-3409431696da",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-06T08:06:55.493717+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لإثبات عوائد وديعة رقم 7724000007",
+        "entry_date": "2025-01-01",
+        "entry_number": 3,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "عوائد ودائع مستحقة",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 156000.0,
+            "credit": 0.0,
+            "notes": null,
+            "account_id": "25c82ffb-50f6-4f67-a755-a641471e8580",
+            "account_code": "1300",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "إيرادات فوائد ودائع",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 156000.0,
+            "notes": null,
+            "account_id": "d4355a33-3483-469e-8fe6-63b6fea250ce",
+            "account_code": "4102",
+            "account_type": "revenue"
+          }
+        ],
+        "reference": "7724000007",
+        "source_id": "223c83cb-a1d1-439f-ad21-4d9558a482a1",
+        "source_type": "deposit_interest",
+        "status": "approved",
+        "total_credit": 156000.0,
+        "total_debit": 156000.0,
+        "updated_at": "2026-05-06T08:06:55.493717+00:00"
+      },
+      {
+        "id": "f3132af9-8f24-4fe2-9065-f97fb1cd1551",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-06T08:08:19.802632+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لرصيد افتتاحي وديعة قائمة رقم OBD054899",
+        "entry_date": "2026-07-01",
+        "entry_number": 5,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 2000.0,
+            "credit": 0.0,
+            "notes": "وديعة قائمة أول الفترة: إثبات أصل وديعة بدون حركة بنك تاريخية",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "رصيد افتتاحي",
+            "bank_id": null,
+            "system_key": "opening_balance_equity",
+            "debit": 0.0,
+            "credit": 2000.0,
+            "notes": "القيد المقابل لوديعة قائمة عند بداية الفترة",
+            "account_id": "8e7860d4-4065-4f7d-b4bf-6e6f4d4b2c73",
+            "account_code": "3100",
+            "account_type": "equity"
+          }
+        ],
+        "reference": "OBD054899",
+        "source_id": "5cf8613a-5ba9-4d84-8e8f-aed0e779de07",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 2000.0,
+        "total_debit": 2000.0,
+        "updated_at": "2026-05-06T08:08:19.802632+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "a6bdbe6f-4578-45f1-af27-62bcb0014684",
+        "created_at": "2026-05-06T08:08:19.804347+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لإثبات عوائد وديعة رقم OBD054899",
+        "entry_date": "2026-07-01",
+        "entry_number": 6,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "عوائد ودائع مستحقة",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 80.0,
+            "credit": 0.0,
+            "notes": null,
+            "account_id": "25c82ffb-50f6-4f67-a755-a641471e8580",
+            "account_code": "1300",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "إيرادات فوائد ودائع",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 80.0,
+            "notes": null,
+            "account_id": "d4355a33-3483-469e-8fe6-63b6fea250ce",
+            "account_code": "4102",
+            "account_type": "revenue"
+          }
+        ],
+        "reference": "OBD054899",
+        "source_id": "5cf8613a-5ba9-4d84-8e8f-aed0e779de07",
+        "source_type": "deposit_interest",
+        "status": "approved",
+        "total_credit": 80.0,
+        "total_debit": 80.0,
+        "updated_at": "2026-05-06T08:08:19.804347+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "128a7a32-c563-4574-9389-83d2ec2f538c",
+        "created_at": "2026-05-06T08:10:35.421257+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لرصيد افتتاحي وديعة قائمة رقم DEP-I65-432d2f",
+        "entry_date": "2026-09-03",
+        "entry_number": 8,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 4000.0,
+            "credit": 0.0,
+            "notes": "وديعة قائمة أول الفترة: إثبات أصل وديعة بدون حركة بنك تاريخية",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "رصيد افتتاحي",
+            "bank_id": null,
+            "system_key": "opening_balance_equity",
+            "debit": 0.0,
+            "credit": 4000.0,
+            "notes": "القيد المقابل لوديعة قائمة عند بداية الفترة",
+            "account_id": "8e7860d4-4065-4f7d-b4bf-6e6f4d4b2c73",
+            "account_code": "3100",
+            "account_type": "equity"
+          }
+        ],
+        "reference": "DEP-I65-432d2f",
+        "source_id": "c6902f18-c85a-4ce5-8f52-00ad39b91daf",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 4000.0,
+        "total_debit": 4000.0,
+        "updated_at": "2026-05-06T08:10:35.691891+00:00",
+        "reversal_entry_id": "478a2ab4-bd91-41b7-aae4-721e3943e6f9",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة",
+        "reversed_at": "2026-05-06T08:10:35.691884+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "b1522fd6-e0bc-470a-96a7-8756dff92336",
+        "created_at": "2026-05-06T08:10:35.423321+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لإثبات عوائد وديعة رقم DEP-I65-432d2f",
+        "entry_date": "2026-09-03",
+        "entry_number": 9,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "عوائد ودائع مستحقة",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 48.0,
+            "credit": 0.0,
+            "notes": null,
+            "account_id": "25c82ffb-50f6-4f67-a755-a641471e8580",
+            "account_code": "1300",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "إيرادات فوائد ودائع",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 48.0,
+            "notes": null,
+            "account_id": "d4355a33-3483-469e-8fe6-63b6fea250ce",
+            "account_code": "4102",
+            "account_type": "revenue"
+          }
+        ],
+        "reference": "DEP-I65-432d2f",
+        "source_id": "c6902f18-c85a-4ce5-8f52-00ad39b91daf",
+        "source_type": "deposit_interest",
+        "status": "approved",
+        "total_credit": 48.0,
+        "total_debit": 48.0,
+        "updated_at": "2026-05-06T08:10:35.695084+00:00",
+        "reversal_entry_id": "491940d3-f47c-45de-b344-92875262aa86",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة",
+        "reversed_at": "2026-05-06T08:10:35.695076+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "478a2ab4-bd91-41b7-aae4-721e3943e6f9",
+        "created_at": "2026-05-06T08:10:35.690703+00:00",
+        "created_by": null,
+        "created_by_name": null,
+        "description": "قيد عكسي: قيد تلقائي لرصيد افتتاحي وديعة قائمة رقم DEP-I65-432d2f",
+        "entry_date": "2026-05-06",
+        "entry_number": 10,
+        "is_auto": true,
+        "is_reversal": true,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 0.0,
+            "credit": 4000.0,
+            "notes": "قيد عكسي للقيد رقم 8 - إلغاء/حذف عملية مرحلة",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "رصيد افتتاحي",
+            "bank_id": null,
+            "system_key": "opening_balance_equity",
+            "debit": 4000.0,
+            "credit": 0.0,
+            "notes": "قيد عكسي للقيد رقم 8 - إلغاء/حذف عملية مرحلة",
+            "account_id": "8e7860d4-4065-4f7d-b4bf-6e6f4d4b2c73",
+            "account_code": "3100",
+            "account_type": "equity"
+          }
+        ],
+        "reference": "REV-8",
+        "source_id": "c6902f18-c85a-4ce5-8f52-00ad39b91daf",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 4000.0,
+        "total_debit": 4000.0,
+        "updated_at": "2026-05-06T08:10:35.690703+00:00",
+        "reversal_of_entry_id": "128a7a32-c563-4574-9389-83d2ec2f538c",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة"
+      },
+      {
+        "id": "491940d3-f47c-45de-b344-92875262aa86",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-06T08:10:35.693345+00:00",
+        "created_by": null,
+        "created_by_name": null,
+        "description": "قيد عكسي: قيد تلقائي لإثبات عوائد وديعة رقم DEP-I65-432d2f",
+        "entry_date": "2026-05-06",
+        "entry_number": 11,
+        "is_auto": true,
+        "is_reversal": true,
+        "lines": [
+          {
+            "account_name": "عوائد ودائع مستحقة",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 48.0,
+            "notes": "قيد عكسي للقيد رقم 9 - إلغاء/حذف عملية مرحلة",
+            "account_id": "25c82ffb-50f6-4f67-a755-a641471e8580",
+            "account_code": "1300",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "إيرادات فوائد ودائع",
+            "bank_id": null,
+            "system_key": null,
+            "debit": 48.0,
+            "credit": 0.0,
+            "notes": "قيد عكسي للقيد رقم 9 - إلغاء/حذف عملية مرحلة",
+            "account_id": "d4355a33-3483-469e-8fe6-63b6fea250ce",
+            "account_code": "4102",
+            "account_type": "revenue"
+          }
+        ],
+        "reference": "REV-9",
+        "source_id": "c6902f18-c85a-4ce5-8f52-00ad39b91daf",
+        "source_type": "deposit_interest",
+        "status": "approved",
+        "total_credit": 48.0,
+        "total_debit": 48.0,
+        "updated_at": "2026-05-06T08:10:35.693345+00:00",
+        "reversal_of_entry_id": "b1522fd6-e0bc-470a-96a7-8756dff92336",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة"
+      },
+      {
+        "id": "9834bdd2-a4db-42b1-86c8-17cd18f0fc59",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-07T05:34:25.101188+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لربط وديعة رقم DEP-ITER62-b93456",
+        "entry_date": "2026-05-05",
+        "entry_number": 325,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 2222.0,
+            "credit": 0.0,
+            "notes": "محرك القواعد: DepositEvent",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "TEST_ITER62_BANK_4df47aa8",
+            "bank_id": "test_iter62_bank_4df47aa8",
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 2222.0,
+            "notes": "محرك القواعد: DepositEvent",
+            "account_id": "a1e4df5d-ae8a-45cc-9105-4cf828750ec9",
+            "account_code": "1107",
+            "account_type": "asset"
+          }
+        ],
+        "reference": "DEP-ITER62-b93456",
+        "source_id": "8e203964-7ac5-44e5-b7a0-3f789f690bdc",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 2222.0,
+        "total_debit": 2222.0,
+        "updated_at": "2026-05-07T05:34:25.735885+00:00",
+        "reversal_entry_id": "93a6c57d-a4c8-400c-a947-caf2256302e6",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة",
+        "reversed_at": "2026-05-07T05:34:25.735878+00:00"
+      },
+      {
+        "id": "93a6c57d-a4c8-400c-a947-caf2256302e6",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-07T05:34:25.734384+00:00",
+        "created_by": null,
+        "created_by_name": null,
+        "description": "قيد عكسي: قيد تلقائي لربط وديعة رقم DEP-ITER62-b93456",
+        "entry_date": "2026-05-07",
+        "entry_number": 326,
+        "is_auto": true,
+        "is_reversal": true,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 0.0,
+            "credit": 2222.0,
+            "notes": "قيد عكسي للقيد رقم 325 - إلغاء/حذف عملية مرحلة",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "TEST_ITER62_BANK_4df47aa8",
+            "bank_id": "test_iter62_bank_4df47aa8",
+            "system_key": null,
+            "debit": 2222.0,
+            "credit": 0.0,
+            "notes": "قيد عكسي للقيد رقم 325 - إلغاء/حذف عملية مرحلة",
+            "account_id": "a1e4df5d-ae8a-45cc-9105-4cf828750ec9",
+            "account_code": "1107",
+            "account_type": "asset"
+          }
+        ],
+        "reference": "REV-325",
+        "source_id": "8e203964-7ac5-44e5-b7a0-3f789f690bdc",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 2222.0,
+        "total_debit": 2222.0,
+        "updated_at": "2026-05-07T05:34:25.734384+00:00",
+        "reversal_of_entry_id": "9834bdd2-a4db-42b1-86c8-17cd18f0fc59",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة"
+      },
+      {
+        "id": "d3401f07-5c37-4ffb-8992-be9c1dfc0d56",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-07T05:34:51.221039+00:00",
+        "created_by": "bcb9af2c-3f7f-4d46-a20d-b332d0a2f519",
+        "created_by_name": "مدير النظام العام",
+        "description": "قيد تلقائي لربط وديعة رقم DEP-ITER62-79f2bf",
+        "entry_date": "2026-05-05",
+        "entry_number": 328,
+        "is_auto": true,
+        "is_reversal": false,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 2222.0,
+            "credit": 0.0,
+            "notes": "محرك القواعد: DepositEvent",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "TEST_ITER62_BANK_eae75a5f",
+            "bank_id": "test_iter62_bank_eae75a5f",
+            "system_key": null,
+            "debit": 0.0,
+            "credit": 2222.0,
+            "notes": "محرك القواعد: DepositEvent",
+            "account_id": "a1e4df5d-ae8a-45cc-9105-4cf828750ec9",
+            "account_code": "1107",
+            "account_type": "asset"
+          }
+        ],
+        "reference": "DEP-ITER62-79f2bf",
+        "source_id": "4c1260e7-0bae-4cda-86e8-971101778deb",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 2222.0,
+        "total_debit": 2222.0,
+        "updated_at": "2026-05-07T05:34:51.793857+00:00",
+        "reversal_entry_id": "ba648416-261d-4611-b891-27fff06350a9",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة",
+        "reversed_at": "2026-05-07T05:34:51.793848+00:00"
+      },
+      {
+        "id": "ba648416-261d-4611-b891-27fff06350a9",
+        "organization_id": "social-solidarity",
+        "created_at": "2026-05-07T05:34:51.792376+00:00",
+        "created_by": null,
+        "created_by_name": null,
+        "description": "قيد عكسي: قيد تلقائي لربط وديعة رقم DEP-ITER62-79f2bf",
+        "entry_date": "2026-05-07",
+        "entry_number": 329,
+        "is_auto": true,
+        "is_reversal": true,
+        "lines": [
+          {
+            "account_name": "ودائع لأجل",
+            "bank_id": null,
+            "system_key": "term_deposits",
+            "debit": 0.0,
+            "credit": 2222.0,
+            "notes": "قيد عكسي للقيد رقم 328 - إلغاء/حذف عملية مرحلة",
+            "account_id": "eedecf79-5376-4db0-8697-af550a7031cf",
+            "account_code": "1250",
+            "account_type": "asset"
+          },
+          {
+            "account_name": "TEST_ITER62_BANK_eae75a5f",
+            "bank_id": "test_iter62_bank_eae75a5f",
+            "system_key": null,
+            "debit": 2222.0,
+            "credit": 0.0,
+            "notes": "قيد عكسي للقيد رقم 328 - إلغاء/حذف عملية مرحلة",
+            "account_id": "a1e4df5d-ae8a-45cc-9105-4cf828750ec9",
+            "account_code": "1107",
+            "account_type": "asset"
+          }
+        ],
+        "reference": "REV-328",
+        "source_id": "4c1260e7-0bae-4cda-86e8-971101778deb",
+        "source_type": "deposit",
+        "status": "approved",
+        "total_credit": 2222.0,
+        "total_debit": 2222.0,
+        "updated_at": "2026-05-07T05:34:51.792376+00:00",
+        "reversal_of_entry_id": "d3401f07-5c37-4ffb-8992-be9c1dfc0d56",
+        "reversal_reason": "إلغاء/حذف عملية مرحلة"
+      }
+    ],
+    "journal_counters": [
+      {
+        "organization_id": "social-solidarity",
+        "next_number": 430
+      }
+    ],
+    "deposits": [
+      {
+        "account_number": "562464",
+        "deposit_number": "7724000007",
+        "amount": 800000.0,
+        "creation_datetime": "2024-04-21T00:00:00+00:00",
+        "maturity_datetime": "2025-04-21T00:00:00+00:00",
+        "monthly_interest_rate": 19.5,
+        "is_opening_balance_deposit": true,
+        "accounting_start_datetime": "2025-01-01T00:00:00+00:00",
+        "id": "223c83cb-a1d1-439f-ad21-4d9558a482a1",
+        "bank_id": "industrial-development",
+        "created_at": "2026-05-06T08:06:55.490678+00:00",
+        "updated_at": "2026-05-06T08:06:55.490678+00:00",
+        "organization_id": "social-solidarity"
+      },
+      {
+        "account_number": "N054899",
+        "deposit_number": "OBD054899",
+        "amount": 2000.0,
+        "creation_datetime": "2026-06-15T00:00:00+00:00",
+        "maturity_datetime": "2026-08-15T00:00:00+00:00",
+        "monthly_interest_rate": 4.0,
+        "is_opening_balance_deposit": true,
+        "accounting_start_datetime": "2026-07-01T00:00:00+00:00",
+        "id": "5cf8613a-5ba9-4d84-8e8f-aed0e779de07",
+        "bank_id": "----054899",
+        "created_at": "2026-05-06T08:08:19.801276+00:00",
+        "updated_at": "2026-05-06T08:08:19.801276+00:00",
+        "organization_id": "social-solidarity"
+      }
+    ],
+    "revenues": [],
+    "expenses": [],
+    "fixed_assets": [],
+    "fixed_asset_depreciations": [],
+    "custody_advances": [],
+    "memberships": [],
+    "membership_import_previews": [],
+    "membership_batch_payments": [],
+    "reconciliations": [],
+    "banking_manual_charges": [],
+    "electronic_invoices": [],
+    "financial_periods": [],
+    "report_approvals": [],
+    "inventory_items": [],
+    "inventory_movements": [],
+    "misc_creditors": [],
+    "misc_creditor_movements": [],
+    "banks": [
+      {
+        "id": "---880844",
+        "organization_id": "social-solidarity",
+        "name": "بنك اختبار تاريخ 880844",
+        "short_name": "T880844",
+        "code": "T880844",
+        "swift_code": null,
+        "logo_url": null,
+        "color": "#0f172a",
+        "opening_balance": 0.0,
+        "opening_balance_date": "2026-05-10",
+        "created_at": "2026-05-04T07:47:24.536629+00:00",
+        "updated_at": "2026-05-04T07:47:24.536629+00:00"
+      },
+      {
+        "id": "---881241",
+        "organization_id": "social-solidarity",
+        "name": "بنك صيغة تاريخ 881241",
+        "short_name": "D881241",
+        "code": "D881241",
+        "swift_code": null,
+        "logo_url": null,
+        "color": "#0f172a",
+        "opening_balance": 0.0,
+        "opening_balance_date": "2026-06-01",
+        "created_at": "2026-05-04T07:54:01.263234+00:00",
+        "updated_at": "2026-05-04T07:54:01.263234+00:00"
+      },
+      {
+        "id": "----054899",
+        "organization_id": "social-solidarity",
+        "name": "بنك اختبار وديعة قائمة 054899",
+        "short_name": "OB054899",
+        "code": "OB054899",
+        "swift_code": null,
+        "logo_url": null,
+        "color": "#0f172a",
+        "opening_balance": 1500.0,
+        "opening_balance_date": "2026-07-01",
+        "created_at": "2026-05-06T08:08:19.508415+00:00",
+        "updated_at": "2026-05-06T08:08:20.168971+00:00"
+      }
+    ],
+    "bank_settings": [
+      {
+        "bank_id": "test_iter62_bank_5e088d62",
+        "organization_id": "social-solidarity",
+        "opening_balance": 1500.75,
+        "opening_balance_date": "2026-05-02",
+        "updated_at": "2026-05-04T07:51:23.307683+00:00"
+      },
+      {
+        "bank_id": "----054899",
+        "organization_id": "social-solidarity",
+        "opening_balance": 1500.0,
+        "opening_balance_date": "2026-07-01",
+        "updated_at": "2026-05-06T08:08:20.168971+00:00"
+      },
+      {
+        "bank_id": "test_iter65_47659608",
+        "organization_id": "social-solidarity",
+        "opening_balance": 2600.0,
+        "opening_balance_date": "2026-09-08",
+        "updated_at": "2026-05-06T08:10:35.631078+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "bank_id": "test_iter62_bank_4df47aa8",
+        "opening_balance": 1500.75,
+        "opening_balance_date": "2026-05-05",
+        "updated_at": "2026-05-07T05:34:24.810563+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "bank_id": "test_iter62_bank_eae75a5f",
+        "opening_balance": 1500.75,
+        "opening_balance_date": "2026-05-05",
+        "updated_at": "2026-05-07T05:34:50.994075+00:00"
+      }
+    ],
+    "deleted_banks": [
+      {
+        "organization_id": "social-solidarity",
+        "id": "test_iter62_bank_5e088d62",
+        "deleted_at": "2026-05-04T07:51:24.321198+00:00",
+        "name": "TEST_ITER62_BANK_5e088d62"
+      },
+      {
+        "id": "test_iter64_34e887e4",
+        "organization_id": "social-solidarity",
+        "deleted_at": "2026-05-06T07:40:34.475869+00:00",
+        "name": "TEST_ITER64_34e887e4"
+      },
+      {
+        "id": "test_iter64_621f3655",
+        "organization_id": "social-solidarity",
+        "deleted_at": "2026-05-06T07:40:34.659386+00:00",
+        "name": "TEST_ITER64_621f3655"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "test_iter64_2a754e35",
+        "deleted_at": "2026-05-06T07:40:34.903831+00:00",
+        "name": "TEST_ITER64_2a754e35"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "id": "test_iter64_d592f949",
+        "deleted_at": "2026-05-06T07:40:35.327289+00:00",
+        "name": "TEST_ITER64_d592f949"
+      },
+      {
+        "id": "test_iter65_47659608",
+        "organization_id": "social-solidarity",
+        "deleted_at": "2026-05-06T08:10:35.744132+00:00",
+        "name": "TEST_ITER65_47659608"
+      },
+      {
+        "id": "test_iter62_bank_4df47aa8",
+        "organization_id": "social-solidarity",
+        "deleted_at": "2026-05-07T05:34:25.796619+00:00",
+        "name": "TEST_ITER62_BANK_4df47aa8"
+      },
+      {
+        "id": "test_iter62_bank_eae75a5f",
+        "organization_id": "social-solidarity",
+        "deleted_at": "2026-05-07T05:34:51.848345+00:00",
+        "name": "TEST_ITER62_BANK_eae75a5f"
+      }
+    ],
+    "chart_accounts": [
+      {
+        "organization_id": "social-solidarity",
+        "code": "1105",
+        "name": "بنك صيغة تاريخ 881241",
+        "account_type": "asset",
+        "nature": "debit",
+        "parent_id": "e95c46b0-723f-44fd-9a0d-951269a9e760",
+        "parent_code": "1100",
+        "parent_name": "البنوك",
+        "level": 2,
+        "is_postable": true,
+        "is_active": true,
+        "opening_balance": 0.0,
+        "system_key": "bank:---881241",
+        "bank_id": "---881241",
+        "updated_at": "2026-05-08T05:49:04.910160+00:00",
+        "id": "dd099c61-07ba-4ff7-b75f-3eb5b7c74996",
+        "created_at": "2026-05-04T07:51:23.073468+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "code": "1104",
+        "name": "بنك اختبار تاريخ 880844",
+        "account_type": "asset",
+        "nature": "debit",
+        "parent_id": "e95c46b0-723f-44fd-9a0d-951269a9e760",
+        "parent_code": "1100",
+        "parent_name": "البنوك",
+        "level": 2,
+        "is_postable": true,
+        "is_active": true,
+        "opening_balance": 0.0,
+        "system_key": "bank:---880844",
+        "bank_id": "---880844",
+        "updated_at": "2026-05-08T05:49:04.910160+00:00",
+        "id": "5b944720-ecb8-4dc5-82a9-51afaf84b6ee",
+        "created_at": "2026-05-06T12:58:34.216569+00:00"
+      },
+      {
+        "organization_id": "social-solidarity",
+        "code": "1106",
+        "name": "بنك اختبار وديعة قائمة 054899",
+        "account_type": "asset",
+        "nature": "debit",
+        "parent_id": "e95c46b0-723f-44fd-9a0d-951269a9e760",
+        "parent_code": "1100",
+        "parent_name": "البنوك",
+        "level": 2,
+        "is_postable": true,
+        "is_active": true,
+        "opening_balance": 0.0,
+        "system_key": "bank:----054899",
+        "bank_id": "----054899",
+        "updated_at": "2026-05-08T05:49:04.910160+00:00",
+        "id": "cbcd7872-529f-46ab-9a55-ec7dbd60b87e",
+        "created_at": "2026-05-06T12:58:34.216569+00:00"
+      }
+    ]
+  }
+}

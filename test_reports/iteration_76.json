@@ -1,0 +1,54 @@
+{
+  "summary": "Executed backend+frontend verification for ERP reset/seed/report scope on public preview. Core ERP health flow works (score 93, PDF links work, audit logs include reset-correction path), but two backend regressions remain in seeded accounting dataset and expense retrieval.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/expenses/{expense_id}",
+        "issue": "Returns 500 for seeded clean expense document. Backend log shows Pydantic ValidationError: missing required field total_deductions when hydrating Expense response.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "/api/journal-entries",
+        "issue": "Seed clean dataset currently returns 4 active entries instead of required 5; source_type=deposit_interest entry is missing.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/api/auth/login",
+        "issue": "Lockout policy observed as 3 failed attempts -> 429 on 4th attempt. If expected policy is 5 attempts, this is a mismatch; if expected policy is 3 (current docs), behavior is correct."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration82_erp_reset_seed_health_report.py",
+    "/app/test_reports/pytest/pytest_results_iter82_backend.xml"
+  ],
+  "action_items": [
+    "Fix seeded expense document shape or hydration defaults so GET /api/expenses/{id} never 500s (ensure total_deductions/net_amount exist or are derived safely).",
+    "Regenerate/repair clean dataset to include exactly 5 active entries with required source types: opening_balance, deposit, deposit_interest, revenue, expense.",
+    "After fixes, rerun /app/backend/tests/test_iteration82_erp_reset_seed_health_report.py and confirm 9/9 passing."
+  ],
+  "critical_code_review_comments": [
+    "server.py remains very large (>700 lines, currently ~9800), increasing regression risk. Prioritize modular split to routers/services for accounting, auth, reporting.",
+    "Expense response model is stricter than real stored documents; add migration/backfill or defensive hydration to prevent runtime validation 500s on historical/seeded data."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration82_erp_reset_seed_health_report.py",
+    "/app/test_reports/iteration_76.json"
+  ],
+  "success_rate": {
+    "backend": "78%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "No new seed data created.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression test file already added for this request. Re-run the same file after main-agent fixes. UI ERP page currently loads and shows score/metrics/recommendations with visible direct download button.",
+  "rca of the issue": "RCA-1 (/api/expenses/{id}): Repro by logging in as admin and GET seeded expense id from journal entry source_id. API crashes in get_expense -> Expense(**hydrate_expense(document)) because stored seeded expense lacks required total_deductions field (ValidationError). Mitigation: backfill missing fields in seeded docs and/or make hydration compute defaults. RCA-2 (Seed count mismatch): Repro by GET /api/journal-entries in social-solidarity after reset. Returned 4 approved active entries only; required deposit_interest source_type not present. Mitigation: include deposit_interest journal entry generation in reset/seed pipeline and verify via regression test before handoff."
+}
