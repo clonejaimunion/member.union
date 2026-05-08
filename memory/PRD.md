@@ -488,3 +488,12 @@
 - تم ضبط حجم بطاقة الشعار إلى 300x300 وتثبيت `object-position:center center` و`margin:auto` للحفاظ على الصورة الرسمية كما هي مع عرضها في المنتصف.
 - تم ضبط منطقة الحالة `status-area` بعرض ثابت متوسط ومركزي، وجعل رسالة الحالة والنسبة وشريط التحميل في منتصف الشاشة.
 - تم إعادة بناء ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من أن `splash.hta` داخل release يحتوي على توسيط Flex وأن رابط `/api/download/setup` يعمل 200.
+
+## إصلاح توقف Splash Screen عند 92% بتاريخ 2026-05-08
+- تم إصلاح سلسلة تشغيل Windows الصامتة التي كانت قد تتوقف عند 92% بسبب تثبيت المتطلبات عبر الشبكة أثناء التشغيل المخفي.
+- تم إضافة `requirements-runtime.txt` خفيف لتشغيل البرنامج فقط، وتجهيز حزم Windows محلية `backend/wheels_win` مخصصة لـ Python 3.11 amd64 مع ملف جاهزية `WINDOWS_WHEELS_READY.txt`.
+- تم تعديل `start_system_worker.bat` ليستخدم `pip install --no-index --find-links` من الحزم المحلية، ويتخطى التثبيت المتكرر عبر marker بعد نجاح فحص import للتبعيات، مع fallback شبكي قصير `timeout=15/retries=1` فقط عند غياب الحزم.
+- تم جعل قفل/تشفير ملفات التثبيت يعمل مرة واحدة فقط عبر marker لتقليل زمن التشغيل المتكرر.
+- تم إضافة endpoint خفيف `/api/health` وتعديل `splash.hta` لانتظاره بدلاً من `/api/app-settings/public`، مع حد انتظار 180 ثانية ورسالة سجل واضحة بدلاً من التعليق بلا نهاية.
+- تم تحديث ملفات release وإعادة بناء `/app/dist/BankDepositSystemSetup.exe` بحجم `23038002` bytes، والتحقق من رابط `/api/download/setup` بحجم مطابق.
+- الاختبارات: lint للباك إند ناجح، اختبار smoke للواجهة ناجح، pytest التغليف `14/14` ناجح عبر Testing Agent iteration_81. ملاحظة: التأكيد النهائي لسلوك HTA/BAT الصامت يحتاج تجربة على جهاز Windows فعلي.
