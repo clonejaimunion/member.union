@@ -8346,7 +8346,7 @@ async def get_treasury_banks_report(
 
 
 @api_router.get("/erp-health-report", response_model=ErpHealthReportResponse)
-async def generate_erp_health_report(request: Request, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+async def generate_erp_health_report(request: Request, _: dict = Depends(require_super_admin)):
     organization_id = organization_id_or_default()
     report_id = str(uuid.uuid4())
     direct_download_url = f"{public_app_base_url(request)}/api/erp-health-report/files/{report_id}"
@@ -8356,7 +8356,7 @@ async def generate_erp_health_report(request: Request, _: dict = Depends(require
 
 
 @api_router.get("/erp-health-report/pdf")
-async def download_new_erp_health_report_pdf(request: Request, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+async def download_new_erp_health_report_pdf(request: Request, _: dict = Depends(require_super_admin)):
     organization_id = organization_id_or_default()
     report_id = str(uuid.uuid4())
     direct_download_url = f"{public_app_base_url(request)}/api/erp-health-report/files/{report_id}"
@@ -8367,7 +8367,7 @@ async def download_new_erp_health_report_pdf(request: Request, _: dict = Depends
 
 
 @api_router.get("/erp-health-report/files/{report_id}")
-async def download_generated_erp_health_report(report_id: str):
+async def download_generated_erp_health_report(report_id: str, _: dict = Depends(require_super_admin)):
     if not re.fullmatch(r"[a-f0-9\-]{36}", report_id):
         raise HTTPException(status_code=404, detail="التقرير غير موجود")
     output_path = GENERATED_REPORTS_DIR / f"{report_id}.pdf"
