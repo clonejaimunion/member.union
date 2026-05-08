@@ -1232,7 +1232,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor", "tax_invoice"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -2018,8 +2018,6 @@ def organization_id_or_default() -> str:
 
 def default_modules_for_organization(organization_id: str) -> Dict[str, bool]:
     modules = {key: True for key in MODULE_DEFINITIONS}
-    if organization_id == "social-solidarity":
-        modules["electronic_invoice"] = False
     if organization_id == "general-union":
         modules["membership"] = False
     return modules
@@ -8145,6 +8143,7 @@ async def list_journal_entries(
         "reconciliations": ["reconciliation"],
         "inventory": ["inventory"],
         "misc_creditors": ["misc_creditor"],
+        "tax_engine": ["tax_invoice"],
     }
     if entry_category and entry_category != "all" and not source_type:
         query["source_type"] = {"$in": category_sources.get(entry_category, [])}
@@ -8174,6 +8173,7 @@ async def journal_entry_classifications(_: dict = Depends(require_any_permission
             {"key": "reconciliations", "label": "التسويات البنكية", "items": [{"key": "all", "label": "الكل"}, {"key": "تسوية", "label": "تسويات بنكية"}]},
             {"key": "inventory", "label": "المخزون", "items": [{"key": "all", "label": "الكل"}, {"key": "وارد", "label": "وارد مخزون"}, {"key": "صرف", "label": "منصرف مخزون"}, {"key": "المخزون", "label": "حساب المخزون"}]},
             {"key": "misc_creditors", "label": "الدائنون المتنوعون", "items": [{"key": "all", "label": "الكل"}, {"key": "إثبات", "label": "إثبات الالتزام"}, {"key": "سداد", "label": "سداد الدائن"}, {"key": "دائنون متنوعون", "label": "حساب الدائنين"}]},
+            {"key": "tax_engine", "label": "محرك الضريبة", "items": [{"key": "all", "label": "الكل"}, {"key": "فاتورة ضريبية", "label": "فواتير ضريبية"}]},
         ]
     }
 

@@ -1232,7 +1232,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor", "tax_invoice"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -1376,6 +1376,42 @@ class ElectronicInvoiceSettingsResponse(ElectronicInvoiceSettings):
     updated_at: datetime
 
 
+class TenantTaxRule(BaseModel):
+    id: str = Field(..., min_length=1)
+    tax_type: str = Field(..., min_length=1)
+    tax_status: Literal["standard", "exempt", "zero", "schedule"] = "standard"
+    rate: float = Field(..., ge=0, le=100)
+    item_code: str = Field(..., min_length=1)
+    activity_code: Optional[str] = None
+    effective_from: date
+    effective_to: Optional[date] = None
+    is_default: bool = False
+    description: Optional[str] = None
+
+
+class TenantTaxProfile(BaseModel):
+    tax_registration_id: Optional[str] = None
+    taxpayer_name: Optional[str] = None
+    country_code: str = "EG"
+    currency: str = "EGP"
+    eta_environment: Literal["offline_ready", "preprod", "production"] = "offline_ready"
+    tax_rules: List[TenantTaxRule] = Field(default_factory=list)
+    document_type_codes: Dict[str, str] = Field(default_factory=dict)
+    journal_accounts: Dict[str, str] = Field(default_factory=dict)
+    eta_payload_schema: Dict[str, object] = Field(default_factory=dict)
+    auto_create_journal_on_approval: bool = True
+    updated_at: Optional[datetime] = None
+
+
+class TenantTaxProfileResponse(TenantTaxProfile):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    is_configured: bool = False
+    configuration_errors: List[str] = Field(default_factory=list)
+
+
 class EtaIntegrationSettings(BaseModel):
     environment: Literal["preprod", "production"] = "preprod"
     issuer_tax_number: Optional[str] = None
@@ -1479,7 +1515,10 @@ class ElectronicInvoice(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
-    revenue_id: str
+    revenue_id: Optional[str] = None
+    source_document_type: Optional[Literal["revenue", "expense", "manual"]] = "revenue"
+    source_document_id: Optional[str] = None
+    invoice_type: Optional[Literal["sales", "purchase"]] = "sales"
     invoice_number: str
     issue_date: date
     customer_name: str
@@ -1501,12 +1540,45 @@ class ElectronicInvoice(BaseModel):
     eta_submission_id: Optional[str] = None
     eta_portal_url: Optional[str] = None
     eta_last_response: Optional[dict] = None
+    journal_entry_id: Optional[str] = None
+    tax_invoice_entity_id: Optional[str] = None
+    tax_engine_snapshot: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
 
 class ElectronicInvoiceStatusUpdate(BaseModel):
     status: Literal["draft", "ready", "needs_review", "submitted", "accepted", "rejected"]
+
+
+class TaxInvoiceLineCreate(BaseModel):
+    description: str = Field(..., min_length=1)
+    quantity: float = Field(default=1, gt=0)
+    unit_price: float = Field(..., ge=0)
+    item_code: str = Field(..., min_length=1)
+    tax_status: Literal["standard", "exempt", "zero", "schedule"] = "standard"
+    discount_amount: float = Field(default=0, ge=0)
+
+
+class TaxEngineInvoiceCreate(BaseModel):
+    invoice_type: Literal["sales", "purchase"]
+    invoice_number: str = Field(..., min_length=1)
+    issue_date: date
+    customer_name: str = Field(..., min_length=1)
+    customer_tax_number: Optional[str] = None
+    customer_type: Literal["person", "company", "government", "union"] = "person"
+    payment_method: str = "bank_transfer"
+    bank_id: str
+    lines: List[TaxInvoiceLineCreate] = Field(..., min_length=1)
+    source_document_type: Literal["revenue", "expense", "manual"] = "manual"
+    source_document_id: Optional[str] = None
+
+
+class TaxEngineApprovalResponse(BaseModel):
+    invoice: ElectronicInvoice
+    journal_entry_id: str
+    tax_invoice_entity_id: str
+    message: str
 
 
 class PeriodLockCreate(BaseModel):
@@ -1946,8 +2018,6 @@ def organization_id_or_default() -> str:
 
 def default_modules_for_organization(organization_id: str) -> Dict[str, bool]:
     modules = {key: True for key in MODULE_DEFINITIONS}
-    if organization_id == "social-solidarity":
-        modules["electronic_invoice"] = False
     if organization_id == "general-union":
         modules["membership"] = False
     return modules
@@ -4668,6 +4738,206 @@ async def get_einvoice_settings_document() -> dict:
     })
 
 
+def validate_tax_profile_document(profile: dict) -> List[str]:
+    errors = []
+    if not str(profile.get("tax_registration_id") or "").strip():
+        errors.append("رقم التسجيل الضريبي المصري غير مسجل")
+    if not profile.get("tax_rules"):
+        errors.append("لا توجد قواعد ضريبية مفعلة في ملف الجهة")
+    document_types = profile.get("document_type_codes") or {}
+    for invoice_type in ["sales", "purchase"]:
+        if not document_types.get(invoice_type):
+            errors.append(f"كود نوع المستند غير محدد لـ {invoice_type}")
+    accounts = profile.get("journal_accounts") or {}
+    for key in ["sales_debit", "sales_revenue", "sales_output_tax", "purchase_expense", "purchase_input_tax", "purchase_credit"]:
+        if not accounts.get(key):
+            errors.append(f"حساب القيد الضريبي غير محدد: {key}")
+    return errors
+
+
+def tax_profile_response(document: dict) -> TenantTaxProfileResponse:
+    clean = hydrate_einvoice_document(document)
+    clean.setdefault("id", "default")
+    clean.setdefault("organization_id", organization_id_or_default())
+    clean.setdefault("tax_rules", [])
+    clean.setdefault("document_type_codes", {})
+    clean.setdefault("journal_accounts", {})
+    clean.setdefault("eta_payload_schema", {})
+    clean.setdefault("auto_create_journal_on_approval", True)
+    clean["configuration_errors"] = validate_tax_profile_document(clean)
+    clean["is_configured"] = len(clean["configuration_errors"]) == 0
+    return TenantTaxProfileResponse(**clean)
+
+
+async def get_tax_profile_document() -> dict:
+    document = await db.tax_profiles.find_one(with_organization({"id": "default"}), {"_id": 0})
+    if document:
+        return document
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    organization = await get_organization_document()
+    settings = await get_einvoice_settings_document()
+    return attach_organization({
+        "id": "default",
+        "tax_registration_id": settings.get("tax_registration_number"),
+        "taxpayer_name": settings.get("organization_name") or organization.get("name"),
+        "country_code": "EG",
+        "currency": "EGP",
+        "eta_environment": "offline_ready",
+        "tax_rules": [],
+        "document_type_codes": {},
+        "journal_accounts": {},
+        "eta_payload_schema": {},
+        "auto_create_journal_on_approval": True,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+
+
+async def tax_engine_audit(action: str, description: str, current_user: Optional[dict], before: Optional[dict] = None, after: Optional[dict] = None):
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "username": (current_user or {}).get("username") or "system",
+        "actor_full_name": real_name_for_user(current_user or {}) if current_user else "Tax Engine",
+        "user_id": (current_user or {}).get("id") or "system",
+        "organization_id": organization_id_or_default(),
+        "method": "SYSTEM",
+        "path": "/system/tax-engine",
+        "action": action,
+        "arabic_description": description,
+        "status_code": 200,
+        "request_body": None,
+        "before_document": before,
+        "after_document": after,
+        "ip_address": None,
+        "created_at": now_iso,
+    })
+
+
+def select_tax_rule(profile: dict, *, invoice_type: str, item_code: str, tax_status: str, issue_date: date) -> dict:
+    candidates = []
+    for rule in profile.get("tax_rules") or []:
+        effective_from = date.fromisoformat(rule["effective_from"]) if isinstance(rule.get("effective_from"), str) else rule.get("effective_from")
+        effective_to = date.fromisoformat(rule["effective_to"]) if isinstance(rule.get("effective_to"), str) and rule.get("effective_to") else rule.get("effective_to")
+        if effective_from and issue_date < effective_from:
+            continue
+        if effective_to and issue_date > effective_to:
+            continue
+        if rule.get("tax_status") != tax_status:
+            continue
+        if rule.get("item_code") not in {item_code, "*"}:
+            continue
+        if rule.get("invoice_type") and rule.get("invoice_type") != invoice_type:
+            continue
+        candidates.append(rule)
+    exact = next((rule for rule in candidates if rule.get("item_code") == item_code), None)
+    default = next((rule for rule in candidates if rule.get("is_default")), None)
+    selected = exact or default or (candidates[0] if candidates else None)
+    if not selected:
+        raise HTTPException(status_code=400, detail=f"لا توجد قاعدة ضريبية في Tax Profile للكود {item_code} وحالة {tax_status}")
+    return selected
+
+
+def calculate_tax_invoice_from_profile(payload: TaxEngineInvoiceCreate, profile: dict) -> dict:
+    errors = validate_tax_profile_document(profile)
+    if errors:
+        raise HTTPException(status_code=400, detail="ملف الضريبة للجهة غير مكتمل: " + "، ".join(errors))
+    lines = []
+    net_amount = 0.0
+    tax_amount = 0.0
+    for index, item in enumerate(payload.lines, 1):
+        line_gross = round(float(item.quantity) * float(item.unit_price), 2)
+        line_net = round(max(0.0, line_gross - float(item.discount_amount or 0)), 2)
+        rule = select_tax_rule(profile, invoice_type=payload.invoice_type, item_code=item.item_code, tax_status=item.tax_status, issue_date=payload.issue_date)
+        line_tax = round(line_net * float(rule.get("rate") or 0) / 100, 2)
+        net_amount = round(net_amount + line_net, 2)
+        tax_amount = round(tax_amount + line_tax, 2)
+        lines.append({
+            "line_number": index,
+            "description": item.description,
+            "quantity": item.quantity,
+            "unit_price": item.unit_price,
+            "discount_amount": item.discount_amount,
+            "item_code": item.item_code,
+            "tax_status": item.tax_status,
+            "tax_rule_id": rule.get("id"),
+            "tax_type": rule.get("tax_type"),
+            "tax_rate": float(rule.get("rate") or 0),
+            "line_net_amount": line_net,
+            "line_tax_amount": line_tax,
+            "line_total_amount": round(line_net + line_tax, 2),
+        })
+    return {
+        "lines": lines,
+        "net_amount": net_amount,
+        "tax_amount": tax_amount,
+        "total_amount": round(net_amount + tax_amount, 2),
+        "tax_engine_snapshot": {
+            "profile_id": profile.get("id"),
+            "tax_registration_id": profile.get("tax_registration_id"),
+            "currency": profile.get("currency"),
+            "document_type_code": (profile.get("document_type_codes") or {}).get(payload.invoice_type),
+            "eta_schema": profile.get("eta_payload_schema") or {},
+            "rules_used": sorted({line["tax_rule_id"] for line in lines}),
+            "calculation_mode": "config_driven_offline_eta_ready",
+        },
+    }
+
+
+async def account_line_from_tax_profile(profile: dict, key: str, debit: float, credit: float, notes: str) -> dict:
+    accounts = profile.get("journal_accounts") or {}
+    account_ref = accounts.get(key)
+    if not account_ref:
+        raise HTTPException(status_code=400, detail=f"الحساب غير مضبوط في Tax Profile: {key}")
+    query = {"is_active": True, "is_postable": True, "$or": [{"id": account_ref}, {"code": account_ref}, {"system_key": account_ref}, {"name": account_ref}]}
+    account = await db.chart_accounts.find_one(with_organization(query), {"_id": 0})
+    if not account:
+        raise HTTPException(status_code=400, detail=f"حساب Tax Profile غير موجود في دليل الحسابات: {key}")
+    return {"account_name": account.get("name"), "account_code": account.get("code"), "account_id": account.get("id"), "system_key": account.get("system_key"), "debit": round(debit, 2), "credit": round(credit, 2), "notes": notes}
+
+
+async def approve_tax_engine_invoice(invoice: dict, profile: dict, current_user: dict) -> tuple[dict, dict]:
+    if invoice.get("journal_entry_id"):
+        existing = await db.journal_entries.find_one(with_organization({"id": invoice["journal_entry_id"]}), {"_id": 0})
+        tax_entity = await db.tax_invoices.find_one(with_organization({"source_invoice_id": invoice["id"]}), {"_id": 0})
+        return existing, tax_entity
+    if not profile.get("auto_create_journal_on_approval", True):
+        raise HTTPException(status_code=400, detail="إنشاء القيد التلقائي غير مفعل في Tax Profile")
+    net_amount = round(float(invoice.get("net_amount") or 0), 2)
+    tax_amount = round(float(invoice.get("tax_amount") or 0), 2)
+    total_amount = round(float(invoice.get("total_amount") or 0), 2)
+    invoice_type = invoice.get("invoice_type") or "sales"
+    if invoice_type == "sales":
+        lines = [
+            await account_line_from_tax_profile(profile, "sales_debit", total_amount, 0, f"فاتورة ضريبية بيع {invoice.get('invoice_number')}") ,
+            await account_line_from_tax_profile(profile, "sales_revenue", 0, net_amount, f"صافي فاتورة بيع {invoice.get('invoice_number')}") ,
+            await account_line_from_tax_profile(profile, "sales_output_tax", 0, tax_amount, f"ضريبة مخرجات {invoice.get('invoice_number')}") ,
+        ]
+    else:
+        lines = [
+            await account_line_from_tax_profile(profile, "purchase_expense", net_amount, 0, f"صافي فاتورة شراء {invoice.get('invoice_number')}") ,
+            await account_line_from_tax_profile(profile, "purchase_input_tax", tax_amount, 0, f"ضريبة مدخلات {invoice.get('invoice_number')}") ,
+            await account_line_from_tax_profile(profile, "purchase_credit", 0, total_amount, f"فاتورة ضريبية شراء {invoice.get('invoice_number')}") ,
+        ]
+    journal = await save_journal_entry_document(entry_date=date.fromisoformat(invoice["issue_date"]) if isinstance(invoice.get("issue_date"), str) else invoice.get("issue_date"), description=f"قيد ضريبي تلقائي للفاتورة {invoice.get('invoice_number')}", lines=lines, reference=invoice.get("invoice_number"), source_type="tax_invoice", source_id=invoice.get("id"), is_auto=True, current_user=current_user, force_new=True)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    tax_entity = attach_organization({
+        "id": str(uuid.uuid4()),
+        "source_invoice_id": invoice["id"],
+        "source_document_type": invoice.get("source_document_type"),
+        "source_document_id": invoice.get("source_document_id") or invoice.get("revenue_id"),
+        "journal_entry_id": journal.get("id"),
+        "invoice_type": invoice_type,
+        "eta_status": "offline_ready",
+        "eta_payload_preview": build_eta_invoice_payload(invoice, await get_einvoice_settings_document(), await get_eta_integration_document()),
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.tax_invoices.insert_one(tax_entity.copy())
+    await db.electronic_invoices.update_one(with_organization({"id": invoice["id"]}), {"$set": {"status": "ready", "journal_entry_id": journal.get("id"), "tax_invoice_entity_id": tax_entity["id"], "updated_at": now_iso}})
+    return journal, tax_entity
+
+
 def eta_urls(environment: str) -> dict:
     if environment == "production":
         return {
@@ -4735,12 +5005,12 @@ def eta_public_response(document: dict) -> EtaIntegrationSettingsResponse:
 
 
 async def get_eta_integration_document() -> dict:
-    document = await db.eta_integration_settings.find_one({"id": "default"}, {"_id": 0})
+    document = await db.eta_integration_settings.find_one(with_organization({"id": "default"}), {"_id": 0})
     if document:
         return document
     now = serialize_datetime(datetime.now(timezone.utc))
     settings = await get_einvoice_settings_document()
-    return {
+    return attach_organization({
         "id": "default",
         "environment": "preprod",
         "issuer_tax_number": settings.get("tax_registration_number"),
@@ -4759,12 +5029,25 @@ async def get_eta_integration_document() -> dict:
         "last_connection_message": None,
         "created_at": now,
         "updated_at": now,
-    }
+    })
 
 
 def build_eta_invoice_payload(invoice: dict, settings: dict, config: dict) -> dict:
     uuid_source = f"{invoice.get('id')}|{invoice.get('invoice_number')}|{invoice.get('updated_at')}"
     internal_uuid = hashlib.sha256(uuid_source.encode()).hexdigest()
+    snapshot = invoice.get("tax_engine_snapshot") or {}
+    snapshot_lines = snapshot.get("lines") or []
+    first_line = snapshot_lines[0] if snapshot_lines else {}
+    currency = snapshot.get("currency") or "EGP"
+    document_type_code = snapshot.get("document_type_code") or ((settings or {}).get("document_type_codes") or {}).get(invoice.get("invoice_type")) or invoice.get("invoice_type") or ""
+    taxable_items = []
+    if float(invoice.get("tax_amount") or 0) > 0:
+        taxable_items.append({
+            "taxType": first_line.get("tax_type") or config.get("default_tax_type") or "",
+            "amount": float(invoice.get("tax_amount") or 0),
+            "subType": first_line.get("tax_status") or "",
+            "rate": float(first_line.get("tax_rate") or invoice.get("tax_rate") or 0),
+        })
     return {
         "issuer": {
             "type": "B",
@@ -4773,8 +5056,8 @@ def build_eta_invoice_payload(invoice: dict, settings: dict, config: dict) -> di
             "address": {"branchID": config.get("branch_code") or "0", "country": "EG", "governate": settings.get("governorate") or "", "regionCity": settings.get("address") or ""},
         },
         "receiver": {"type": "P", "id": invoice.get("customer_tax_number") or "", "name": invoice.get("customer_name")},
-        "documentType": "I",
-        "documentTypeVersion": "1.0",
+        "documentType": document_type_code,
+        "documentTypeVersion": str((snapshot.get("eta_schema") or {}).get("documentTypeVersion") or "1.0"),
         "dateTimeIssued": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "taxpayerActivityCode": config.get("activity_code") or settings.get("activity_code") or "",
         "internalID": invoice.get("invoice_number"),
@@ -4782,24 +5065,24 @@ def build_eta_invoice_payload(invoice: dict, settings: dict, config: dict) -> di
         "invoiceLines": [
             {
                 "description": invoice.get("description"),
-                "itemType": "GS1",
-                "itemCode": invoice.get("service_code") or "EGS-SERVICE-001",
-                "unitType": "EA",
-                "quantity": 1,
-                "unitValue": {"currencySold": "EGP", "amountEGP": float(invoice.get("net_amount") or 0)},
+                "itemType": (snapshot.get("eta_schema") or {}).get("itemType") or "",
+                "itemCode": first_line.get("item_code") or invoice.get("service_code") or "",
+                "unitType": (snapshot.get("eta_schema") or {}).get("unitType") or "",
+                "quantity": float(first_line.get("quantity") or 1),
+                "unitValue": {"currencySold": currency, "amountEGP": float(first_line.get("unit_price") or invoice.get("net_amount") or 0)},
                 "salesTotal": float(invoice.get("net_amount") or 0),
                 "total": float(invoice.get("total_amount") or 0),
                 "valueDifference": 0,
                 "totalTaxableFees": 0,
                 "netTotal": float(invoice.get("net_amount") or 0),
                 "itemsDiscount": 0,
-                "taxableItems": [],
+                "taxableItems": taxable_items,
             }
         ],
         "totalSalesAmount": float(invoice.get("net_amount") or 0),
         "totalDiscountAmount": 0,
         "netAmount": float(invoice.get("net_amount") or 0),
-        "taxTotals": [],
+        "taxTotals": [{"taxType": item["taxType"], "amount": item["amount"]} for item in taxable_items],
         "totalAmount": float(invoice.get("total_amount") or 0),
         "extraDiscountAmount": 0,
         "totalItemsDiscountAmount": 0,
@@ -4859,18 +5142,7 @@ async def get_default_service_code(settings: dict) -> dict:
     service = await db.einvoice_service_codes.find_one(with_organization({"is_default": True}), {"_id": 0})
     if service:
         return service
-    now = datetime.now(timezone.utc)
-    service = attach_organization({
-        "id": str(uuid.uuid4()),
-        "code": "EGS-SERVICE-001",
-        "name": "خدمة عامة",
-        "tax_rate": float(settings.get("default_tax_rate", 0) or 0),
-        "is_default": True,
-        "created_at": serialize_datetime(now),
-        "updated_at": serialize_datetime(now),
-    })
-    await db.einvoice_service_codes.insert_one(service.copy())
-    return service
+    raise HTTPException(status_code=400, detail="لا يوجد كود خدمة افتراضي مضبوط من إعدادات الجهة")
 
 
 async def find_or_create_einvoice_customer(name: str) -> dict:
@@ -7871,6 +8143,7 @@ async def list_journal_entries(
         "reconciliations": ["reconciliation"],
         "inventory": ["inventory"],
         "misc_creditors": ["misc_creditor"],
+        "tax_engine": ["tax_invoice"],
     }
     if entry_category and entry_category != "all" and not source_type:
         query["source_type"] = {"$in": category_sources.get(entry_category, [])}
@@ -7900,6 +8173,7 @@ async def journal_entry_classifications(_: dict = Depends(require_any_permission
             {"key": "reconciliations", "label": "التسويات البنكية", "items": [{"key": "all", "label": "الكل"}, {"key": "تسوية", "label": "تسويات بنكية"}]},
             {"key": "inventory", "label": "المخزون", "items": [{"key": "all", "label": "الكل"}, {"key": "وارد", "label": "وارد مخزون"}, {"key": "صرف", "label": "منصرف مخزون"}, {"key": "المخزون", "label": "حساب المخزون"}]},
             {"key": "misc_creditors", "label": "الدائنون المتنوعون", "items": [{"key": "all", "label": "الكل"}, {"key": "إثبات", "label": "إثبات الالتزام"}, {"key": "سداد", "label": "سداد الدائن"}, {"key": "دائنون متنوعون", "label": "حساب الدائنين"}]},
+            {"key": "tax_engine", "label": "محرك الضريبة", "items": [{"key": "all", "label": "الكل"}, {"key": "فاتورة ضريبية", "label": "فواتير ضريبية"}]},
         ]
     }
 
@@ -8670,6 +8944,80 @@ async def save_electronic_invoice_settings(payload: ElectronicInvoiceSettings, _
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(document))
 
 
+@api_router.get("/tax-engine/profile", response_model=TenantTaxProfileResponse)
+async def get_tenant_tax_profile(_: dict = Depends(require_einvoice_enabled)):
+    return tax_profile_response(await get_tax_profile_document())
+
+
+@api_router.put("/tax-engine/profile", response_model=TenantTaxProfileResponse)
+async def save_tenant_tax_profile(payload: TenantTaxProfile, current_user: dict = Depends(require_einvoice_admin)):
+    existing = await db.tax_profiles.find_one(with_organization({"id": "default"}), {"_id": 0})
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({"id": "default", **payload.model_dump(mode="json"), "updated_at": now_iso})
+    if not existing:
+        document["created_at"] = now_iso
+    await db.tax_profiles.update_one(with_organization({"id": "default"}), {"$set": document}, upsert=True)
+    await tax_engine_audit("TAX_PROFILE_SAVED", "تم حفظ ملف الضريبة الديناميكي للجهة Tenant Tax Profile.", current_user, before=existing, after=document)
+    return tax_profile_response(document)
+
+
+@api_router.post("/tax-engine/invoices", response_model=ElectronicInvoice)
+async def create_tax_engine_invoice(payload: TaxEngineInvoiceCreate, current_user: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues", "manage_expenses"]))):
+    profile = await get_tax_profile_document()
+    calculation = calculate_tax_invoice_from_profile(payload, profile)
+    bank = await ensure_bank_async(payload.bank_id)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    notes = validate_tax_profile_document(profile)
+    if payload.customer_type != "person" and not payload.customer_tax_number:
+        notes.append("الرقم الضريبي للطرف المقابل غير مسجل")
+    status = "needs_review" if notes else "draft"
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "revenue_id": payload.source_document_id if payload.source_document_type == "revenue" else None,
+        "source_document_type": payload.source_document_type,
+        "source_document_id": payload.source_document_id,
+        "invoice_type": payload.invoice_type,
+        "invoice_number": normalize_digit_text(payload.invoice_number),
+        "issue_date": serialize_date(payload.issue_date),
+        "customer_name": payload.customer_name.strip(),
+        "customer_tax_number": payload.customer_tax_number,
+        "customer_type": payload.customer_type,
+        "service_code": calculation["lines"][0]["item_code"],
+        "service_name": calculation["lines"][0]["description"],
+        "description": " / ".join([line["description"] for line in calculation["lines"]]),
+        "net_amount": calculation["net_amount"],
+        "tax_rate": calculation["lines"][0]["tax_rate"],
+        "tax_amount": calculation["tax_amount"],
+        "total_amount": calculation["total_amount"],
+        "payment_method": payload.payment_method,
+        "bank_id": payload.bank_id,
+        "bank_name": bank["name"],
+        "status": status,
+        "validation_notes": notes,
+        "tax_engine_snapshot": calculation["tax_engine_snapshot"] | {"lines": calculation["lines"]},
+        "journal_entry_id": None,
+        "tax_invoice_entity_id": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.electronic_invoices.insert_one(document.copy())
+    await tax_engine_audit("TAX_INVOICE_CREATED", f"تم إنشاء فاتورة ضريبية {payload.invoice_type} بمحرك ضريبي ديناميكي دون API خارجي.", current_user, after=document)
+    return ElectronicInvoice(**hydrate_einvoice_document(document))
+
+
+@api_router.post("/tax-engine/invoices/{invoice_id}/approve", response_model=TaxEngineApprovalResponse)
+async def approve_tax_engine_invoice_endpoint(invoice_id: str, current_user: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues", "manage_expenses"]))):
+    invoice = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="الفاتورة الضريبية غير موجودة")
+    profile = await get_tax_profile_document()
+    before = invoice.copy()
+    journal, tax_entity = await approve_tax_engine_invoice(invoice, profile, current_user)
+    updated = await db.electronic_invoices.find_one(with_organization({"id": invoice_id}), {"_id": 0})
+    await tax_engine_audit("TAX_INVOICE_APPROVED", f"تم اعتماد الفاتورة الضريبية وربطها بالقيد رقم {journal.get('entry_number')} وكيان Tax Invoice مستقل.", current_user, before=before, after={"invoice": updated, "journal_entry_id": journal.get("id"), "tax_invoice_entity_id": tax_entity.get("id") if tax_entity else None})
+    return TaxEngineApprovalResponse(invoice=ElectronicInvoice(**hydrate_einvoice_document(updated)), journal_entry_id=journal.get("id"), tax_invoice_entity_id=tax_entity.get("id"), message="تم اعتماد الفاتورة وإنشاء القيد والكيان الضريبي")
+
+
 @api_router.get("/admin/eta-integration", response_model=EtaIntegrationSettingsResponse)
 async def get_eta_integration_settings(_: dict = Depends(require_super_admin)):
     document = await get_eta_integration_document()
@@ -8699,8 +9047,9 @@ async def save_eta_integration_settings(payload: EtaIntegrationSettings, _: dict
     updates["token_pin_encrypted"] = existing.get("token_pin_encrypted") if payload.token_pin is None else eta_encrypt_secret(payload.token_pin.strip())
     if not existing.get("created_at"):
         updates["created_at"] = now_iso
-    await db.eta_integration_settings.update_one({"id": "default"}, {"$set": updates}, upsert=True)
-    document = await db.eta_integration_settings.find_one({"id": "default"}, {"_id": 0})
+    updates = attach_organization(updates)
+    await db.eta_integration_settings.update_one(with_organization({"id": "default"}), {"$set": updates}, upsert=True)
+    document = await db.eta_integration_settings.find_one(with_organization({"id": "default"}), {"_id": 0})
     return eta_public_response(document)
 
 
@@ -8710,16 +9059,16 @@ async def test_eta_integration_connection(_: dict = Depends(require_super_admin)
     required = eta_required_items(document)
     if required:
         message = "استكمل بيانات الربط أولاً: " + "، ".join(required)
-        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "configuration_required", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        await db.eta_integration_settings.update_one(with_organization({"id": "default"}), {"$set": {"last_connection_status": "configuration_required", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
         return EtaConnectionTestResponse(status="configuration_required", message=message, environment=document.get("environment", "preprod"), required_items=required)
     try:
         eta_get_access_token(document)
         message = "تم الاتصال بخدمة هوية منظومة الضرائب واستلام رمز وصول بنجاح"
-        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "configured", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        await db.eta_integration_settings.update_one(with_organization({"id": "default"}), {"$set": {"last_connection_status": "configured", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
         return EtaConnectionTestResponse(status="configured", message=message, environment=document.get("environment", "preprod"), token_received=True)
     except HTTPException as exc:
         message = str(exc.detail)
-        await db.eta_integration_settings.update_one({"id": "default"}, {"$set": {"last_connection_status": "error", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
+        await db.eta_integration_settings.update_one(with_organization({"id": "default"}), {"$set": {"last_connection_status": "error", "last_connection_message": message, "updated_at": serialize_datetime(datetime.now(timezone.utc))}}, upsert=True)
         return EtaConnectionTestResponse(status="error", message=message, environment=document.get("environment", "preprod"))
 
 
@@ -8750,8 +9099,6 @@ async def update_electronic_customer(customer_id: str, payload: ElectronicCustom
 
 @api_router.get("/electronic-invoice/service-codes", response_model=List[ElectronicServiceCode])
 async def list_electronic_service_codes(_: dict = Depends(require_einvoice_permission(["enter_deposits", "view_reports", "manage_revenues"]))):
-    settings = await get_einvoice_settings_document()
-    await get_default_service_code(settings)
     documents = await db.einvoice_service_codes.find(with_organization({}), {"_id": 0}).sort("is_default", -1).sort("name", 1).to_list(1000)
     return [ElectronicServiceCode(**hydrate_einvoice_document(document)) for document in documents]
 
@@ -8788,47 +9135,78 @@ async def list_electronic_invoices(
 
 @api_router.post("/electronic-invoices/generate-from-revenues", response_model=List[ElectronicInvoice])
 async def generate_electronic_invoices_from_revenues(_: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues"]))):
-    settings = await get_einvoice_settings_document()
-    service = await get_default_service_code(settings)
+    profile = await get_tax_profile_document()
+    rules = profile.get("tax_rules") or []
+    default_rule = next((rule for rule in rules if rule.get("is_default")), rules[0] if rules else None)
+    if not default_rule:
+        raise HTTPException(status_code=400, detail="لا يمكن توليد فواتير من الإيرادات قبل ضبط Tax Profile وقاعدة ضريبية افتراضية")
     revenues = await db.revenues.find(with_organization({"bank_collection_status": "collected"}), {"_id": 0}).sort("issued_at", 1).to_list(1000)
     generated = []
-    now = datetime.now(timezone.utc)
     for revenue in revenues:
-        if await db.electronic_invoices.find_one(with_organization({"revenue_id": revenue["id"]}), {"_id": 0, "id": 1}):
+        if await db.electronic_invoices.find_one(with_organization({"source_document_type": "revenue", "source_document_id": revenue["id"]}), {"_id": 0, "id": 1}):
             continue
-        bank = await ensure_bank_async(revenue["bank_id"])
         customer_name = revenue.get("supplier_name") or revenue.get("value") or "عميل غير محدد"
-        customer = await find_or_create_einvoice_customer(customer_name)
-        tax_rate = float(service.get("tax_rate", settings.get("default_tax_rate", 0)) or 0)
-        net_amount = round(float(revenue.get("amount", 0) or 0), 2)
-        tax_amount = round(net_amount * tax_rate / 100, 2)
-        status, notes = invoice_status_from_data(settings, customer, service)
-        document = {
-            "id": str(uuid.uuid4()),
-            "organization_id": organization_id_or_default(),
-            "revenue_id": revenue["id"],
-            "invoice_number": f"EINV-{revenue.get('receipt_number')}",
-            "issue_date": revenue.get("issued_at") or revenue.get("dated"),
-            "customer_name": customer["name"],
-            "customer_tax_number": customer.get("tax_number"),
-            "customer_type": customer.get("customer_type", "person"),
-            "service_code": service["code"],
-            "service_name": service["name"],
-            "description": revenue.get("value") or service["name"],
-            "net_amount": net_amount,
-            "tax_rate": tax_rate,
-            "tax_amount": tax_amount,
-            "total_amount": round(net_amount + tax_amount, 2),
-            "payment_method": revenue.get("collection_method", "cash"),
-            "bank_id": revenue["bank_id"],
-            "bank_name": bank["name"],
-            "status": status,
-            "validation_notes": notes,
-            "created_at": serialize_datetime(now),
-            "updated_at": serialize_datetime(now),
-        }
-        await db.electronic_invoices.insert_one(document.copy())
-        generated.append(ElectronicInvoice(**hydrate_einvoice_document(document)))
+        payload = TaxEngineInvoiceCreate(
+            invoice_type="sales",
+            invoice_number=f"TAX-{revenue.get('receipt_number')}",
+            issue_date=date.fromisoformat(revenue.get("issued_at") or revenue.get("dated")),
+            customer_name=customer_name,
+            customer_type="person",
+            payment_method=revenue.get("collection_method", "cash"),
+            bank_id=revenue["bank_id"],
+            source_document_type="revenue",
+            source_document_id=revenue["id"],
+            lines=[TaxInvoiceLineCreate(description=revenue.get("value") or customer_name, quantity=1, unit_price=float(revenue.get("amount", 0) or 0), item_code=default_rule["item_code"], tax_status=default_rule.get("tax_status", "standard"))],
+        )
+        generated.append(await create_tax_engine_invoice(payload, {"username": "tax-engine", "id": "system", "full_name": "Tax Engine"}))
+    return generated
+
+
+@api_router.post("/tax-engine/invoices/generate-from-operations", response_model=List[ElectronicInvoice])
+async def generate_tax_invoices_from_operations(
+    invoice_type: Literal["sales", "purchase"] = Query(default="sales"),
+    current_user: dict = Depends(require_einvoice_permission(["enter_deposits", "manage_revenues", "manage_expenses"])),
+):
+    profile = await get_tax_profile_document()
+    rules = profile.get("tax_rules") or []
+    default_rule = next((rule for rule in rules if rule.get("is_default")), rules[0] if rules else None)
+    if not default_rule:
+        raise HTTPException(status_code=400, detail="لا يمكن توليد فواتير قبل ضبط Tax Profile وقاعدة ضريبية افتراضية")
+    generated = []
+    if invoice_type == "sales":
+        source_documents = await db.revenues.find(with_organization({"bank_collection_status": "collected"}), {"_id": 0}).sort("issued_at", 1).to_list(1000)
+        for revenue in source_documents:
+            if await db.electronic_invoices.find_one(with_organization({"source_document_type": "revenue", "source_document_id": revenue["id"]}), {"_id": 0, "id": 1}):
+                continue
+            generated.append(await create_tax_engine_invoice(TaxEngineInvoiceCreate(
+                invoice_type="sales",
+                invoice_number=f"TAX-{revenue.get('receipt_number')}",
+                issue_date=date.fromisoformat(revenue.get("issued_at") or revenue.get("dated")),
+                customer_name=revenue.get("supplier_name") or revenue.get("value") or "عميل غير محدد",
+                customer_type="person",
+                payment_method=revenue.get("collection_method", "cash"),
+                bank_id=revenue["bank_id"],
+                source_document_type="revenue",
+                source_document_id=revenue["id"],
+                lines=[TaxInvoiceLineCreate(description=revenue.get("value") or "فاتورة بيع", quantity=1, unit_price=float(revenue.get("amount", 0) or 0), item_code=default_rule["item_code"], tax_status=default_rule.get("tax_status", "standard"))],
+            ), current_user))
+    else:
+        source_documents = await db.expenses.find(with_organization({}), {"_id": 0}).sort("issued_at", 1).to_list(1000)
+        for expense in source_documents:
+            if await db.electronic_invoices.find_one(with_organization({"source_document_type": "expense", "source_document_id": expense["id"]}), {"_id": 0, "id": 1}):
+                continue
+            generated.append(await create_tax_engine_invoice(TaxEngineInvoiceCreate(
+                invoice_type="purchase",
+                invoice_number=f"TAX-{expense.get('expense_number')}",
+                issue_date=date.fromisoformat(expense.get("issued_at")),
+                customer_name=expense.get("transfer_to") or expense.get("gross_statement") or "مورد غير محدد",
+                customer_type="company",
+                payment_method=expense.get("payment_method", "bank_transfer"),
+                bank_id=expense.get("bank_id") or (await get_all_banks())[0]["id"],
+                source_document_type="expense",
+                source_document_id=expense["id"],
+                lines=[TaxInvoiceLineCreate(description=expense.get("gross_statement") or "فاتورة شراء", quantity=1, unit_price=float(expense.get("gross_amount", 0) or 0), item_code=default_rule["item_code"], tax_status=default_rule.get("tax_status", "standard"))],
+            ), current_user))
     return generated
 
 
@@ -8970,8 +9348,8 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
-USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "tax_profiles", "tax_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "tax_profiles", "tax_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
 TRAINING_DIR = ROOT_DIR.parent / "training_exports"
 TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 

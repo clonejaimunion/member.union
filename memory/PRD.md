@@ -416,3 +416,19 @@
 - Testing agent iteration_76 وجد مشكلتين بعد reset؛ تم إصلاحهما، ثم نجح regression test `/app/backend/tests/test_iteration82_erp_reset_seed_health_report.py` بنتيجة 9/9 passed.
 - تقرير الأخطاء النهائي المباشر: `https://interest-calculator-12.preview.emergentagent.com/api/erp-health-report/files/341f5ddb-b473-4882-bf0f-3b9833f03914`.
 - تم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التقرير النهائي 200.
+
+## بناء Tax Engine ديناميكي متوافق مع ETA Ready بتاريخ 2026-05-08
+- تم تحويل الفاتورة الإلكترونية إلى Tax Engine هجين Config-Driven يعمل حالياً بدون ETA API حي، مع تصميم قابل لإضافة API Layer والتوقيع الإلكتروني والإرسال لاحقاً دون إعادة هيكلة.
+- تم إضافة Tenant Tax Profile مستقل لكل جهة في `tax_profiles` يشمل: رقم التسجيل الضريبي، اسم الجهة، العملة، بيئة ETA، قواعد الضرائب، أكواد أنواع المستندات، حسابات القيود، وETA payload schema.
+- تم منع الاعتماد على نسب ضريبية ثابتة داخل منطق الحساب؛ الضريبة تُحسب من `tax_rules` المخزنة في قاعدة البيانات لكل Tenant، وتم حفظ Profile التكافل الحالي كنموذج تشغيل: VAT 14% من الإعدادات وليس من الكود.
+- تم تفعيل موديول `electronic_invoice` لجهة `social-solidarity` على مستوى `default_modules_for_organization` وقاعدة `organizations/users` مع Audit Log، حتى تظهر الفاتورة الإلكترونية/Tax Engine داخل بوابة الحسابات.
+- تم إضافة endpoints: `GET/PUT /api/tax-engine/profile`، `POST /api/tax-engine/invoices`، `POST /api/tax-engine/invoices/{id}/approve`، و`POST /api/tax-engine/invoices/generate-from-operations` لدعم فواتير البيع والشراء.
+- عند اعتماد الفاتورة يتم إنشاء قيد يومية تلقائي `source_type=tax_invoice`، وتحديث الفاتورة بـ `journal_entry_id`، وإنشاء Tax Invoice Entity مستقلة في `tax_invoices` مرتبطة بالفاتورة والقيد.
+- تم إضافة `tax_engine_snapshot` داخل الفاتورة لحفظ القواعد المستخدمة والأكواد وdocument type وETA schema، بما يدعم مراجعة الحساب لاحقاً وربط ETA المستقبلي.
+- تم تحديث واجهة `ElectronicInvoicePage` بإعدادات Tax Profile، قاعدة ضريبية افتراضية، حسابات القيود من الإعدادات، أكواد المستندات، Schema مستقبلي لـ ETA، وأزرار توليد فواتير بيع/شراء واعتماد وربط.
+- تم عزل ETA Integration Settings بالجهة باستخدام `with_organization` بدلاً من إعدادات عامة، وتحويل payload preview ليقرأ أكواد المستندات والأصناف من snapshot/config.
+- تم تسجيل عمليات الحفظ والإنشاء والاعتماد والتنظيف في `audit_logs` على المسار `/system/tax-engine`.
+- Testing agent iteration_77 كشف أن الموديول غير مفعل للتكافل؛ تم إصلاح مصدر التفعيل، ثم نجح regression test `/app/backend/tests/test_iteration83_tax_engine_profile_and_invoices.py` بنتيجة 7/7 passed.
+- تم تنظيف كل بيانات الاختبار المعلّمة `TEST_TAX_ENGINE_AUTOMATION_DELETE_ME` من `electronic_invoices` و`tax_invoices` و`journal_entries` حتى لا تؤثر على بيانات التشغيل.
+- الاختبار الذاتي النهائي: `GET /api/tax-engine/profile` يعيد `is_configured=true` وبدون أخطاء، وملف التثبيت `/app/dist/BankDepositSystemSetup.exe` تم تحديثه والتحقق من رابط `/api/download/setup` 200.
+- ملاحظة: Tax Engine الداخلي ليس MOCKED، لكن إرسال ETA API الحي ما زال **MOCKED/CONFIGURATION_REQUIRED** لحين إدخال بيانات التكامل والتوقيع الإلكتروني.
