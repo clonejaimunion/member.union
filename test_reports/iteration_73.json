@@ -1,0 +1,45 @@
+{
+  "summary": "Completed backend + frontend validation for new Treasury & Banks read-only module and reconciliation smoke on public URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TreasuryBanksPage account select",
+        "issue": "Browser console logs invalid DOM nesting/hydration warning: <span> rendered inside <option> while opening /treasury-banks.",
+        "selector": "[data-testid='treasury-banks-account-select']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration73_treasury_banks_readonly.py",
+    "/app/test_reports/pytest/pytest_results_iter73_treasury_banks.xml"
+  ],
+  "action_items": [
+    "Fix TreasuryBanksPage select option rendering to avoid span/invalid option children hydration warning.",
+    "Keep treasury endpoint side-effect free; current regression confirmed no writes in journal_entries/reconciliations/bank_settings/chart_accounts across repeated calls."
+  ],
+  "critical_code_review_comments": [
+    "backend /api/treasury-banks passed strict read-only checks against journal_entries/reconciliations/bank_settings/chart_accounts under repeated calls.",
+    "Endpoint correctly validates from_date > to_date with HTTP 400 and supports required filters from_date/to_date/account_kind/account_id/movement_type/search.",
+    "backend/server.py remains very large (>700 lines), increasing future regression risk in accounting modules."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration73_treasury_banks_readonly.py",
+    "/app/test_reports/iteration_73.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "95%"
+  },
+  "seed_data_creation": "No seed data created.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Executed pytest (8/8 pass) on public URL for /api/treasury-banks: auth, response shape, source consistency with journal_entries IDs, invalid date validation, filters, allowed account scope (bank:* + cash_box), and repeated-call no-write checks. Playwright validated /accounting card presence, /treasury-banks cards+table+filters+preview/print controls, absence of CRUD buttons, and /reconciliations smoke flow still loading reconciliation core controls.",
+  "rca of the issue": "RCA (frontend warning): console reports '<span> cannot be a child of <option>' while rendering treasury account dropdown options, likely due transformed JSX wrappers around option text. Repro: login -> /accounting -> open treasury-banks. Impact: non-blocking UI functionally works, but hydration/console quality issue and potential cross-browser instability. Mitigation: render plain string/text nodes directly inside <option> and avoid wrapper spans/components in option children."
+}

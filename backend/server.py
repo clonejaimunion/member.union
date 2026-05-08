@@ -92,6 +92,7 @@ MODULE_DEFINITIONS = {
     "expenses_analysis": "تحليل المصروفات",
     "banking_expenses": "المصروفات البنكية",
     "ledger": "دفتر الأستاذ",
+    "treasury_banks": "الخزينة والبنوك",
     "electronic_invoice": "الفاتورة الإلكترونية",
 }
 
@@ -619,6 +620,55 @@ class BankReconciliationBalanceBreakdown(BaseModel):
     total_payments: float = 0
     reconciliation_balance: float = 0
     source: str = "opening_balance_plus_monthly_components"
+
+
+class TreasuryBanksAccount(BaseModel):
+    id: str
+    code: Optional[str] = None
+    name: str
+    account_kind: Literal["bank", "cash"]
+    bank_id: Optional[str] = None
+    bank_name: Optional[str] = None
+
+
+class TreasuryBanksTransaction(BaseModel):
+    serial: int
+    entry_id: str
+    entry_number: int
+    entry_date: date
+    description: str
+    reference: Optional[str] = None
+    source_type: str
+    movement_type: str
+    account_id: str
+    account_code: Optional[str] = None
+    account_name: str
+    account_kind: Literal["bank", "cash"]
+    bank_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    debit: float = 0
+    credit: float = 0
+    amount: float = 0
+    running_balance: float = 0
+
+
+class TreasuryBanksSummary(BaseModel):
+    organization_id: str
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+    opening_balance: float = 0
+    total_balance: float = 0
+    total_revenues: float = 0
+    total_expenses: float = 0
+    net_movement: float = 0
+    transactions_count: int = 0
+    source: str = "journal_entries_approved_read_only"
+
+
+class TreasuryBanksReport(BaseModel):
+    summary: TreasuryBanksSummary
+    accounts: List[TreasuryBanksAccount]
+    transactions: List[TreasuryBanksTransaction]
 
 
 class TrialBalanceRow(BaseModel):
@@ -7413,6 +7463,144 @@ async def journal_entry_classifications(_: dict = Depends(require_any_permission
             {"key": "misc_creditors", "label": "الدائنون المتنوعون", "items": [{"key": "all", "label": "الكل"}, {"key": "إثبات", "label": "إثبات الالتزام"}, {"key": "سداد", "label": "سداد الدائن"}, {"key": "دائنون متنوعون", "label": "حساب الدائنين"}]},
         ]
     }
+
+
+@api_router.get("/treasury-banks", response_model=TreasuryBanksReport)
+async def get_treasury_banks_report(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    account_id: Optional[str] = Query(default=None),
+    account_kind: Optional[Literal["all", "bank", "cash"]] = Query(default="all"),
+    movement_type: Optional[Literal["all", "revenue", "expense", "opening"]] = Query(default="all"),
+    search: Optional[str] = Query(default=None, max_length=120),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=400, detail="تاريخ البداية يجب أن يكون قبل تاريخ النهاية")
+    organization_id = organization_id_or_default()
+    await sync_chart_accounts_for_organization(organization_id)
+    banks = await get_all_banks()
+    bank_names = {bank.get("id"): bank.get("name") for bank in banks}
+    account_documents = await db.chart_accounts.find(
+        with_organization({"is_active": True, "is_postable": True, "$or": [{"system_key": "cash_box"}, {"system_key": {"$regex": "^bank:"}}]}, organization_id),
+        {"_id": 0},
+    ).sort("code", 1).to_list(1000)
+    treasury_accounts = []
+    for account in account_documents:
+        system_key = account.get("system_key") or ""
+        kind = "cash" if system_key == "cash_box" else "bank"
+        if account_kind in {"bank", "cash"} and kind != account_kind:
+            continue
+        if account_id and account_id != "all" and account.get("id") != account_id:
+            continue
+        bank_id = account.get("bank_id") or (system_key.split(":", 1)[1] if system_key.startswith("bank:") else None)
+        treasury_accounts.append({
+            "id": account.get("id"),
+            "code": account.get("code"),
+            "name": account.get("name") or (bank_names.get(bank_id) if bank_id else "الخزينة"),
+            "account_kind": kind,
+            "bank_id": bank_id,
+            "bank_name": bank_names.get(bank_id) if bank_id else None,
+        })
+    selected_ids = {item["id"] for item in treasury_accounts if item.get("id")}
+    accounts_by_id = {account.get("id"): account for account in account_documents if account.get("id") in selected_ids}
+    accounts_by_code = {account.get("code"): account for account in account_documents if account.get("id") in selected_ids}
+    accounts_by_bank_id = {account.get("bank_id") or str(account.get("system_key") or "").split(":", 1)[1]: account for account in account_documents if str(account.get("system_key") or "").startswith("bank:") and account.get("id") in selected_ids}
+    cash_account = next((account for account in account_documents if account.get("system_key") == "cash_box" and account.get("id") in selected_ids), None)
+    entry_query = {"status": "approved", "is_reversal": {"$ne": True}}
+    if to_date:
+        entry_query["entry_date"] = {"$lte": to_date.isoformat()}
+    entries = await db.journal_entries.find(
+        with_organization(entry_query, organization_id),
+        {"_id": 0, "id": 1, "entry_number": 1, "entry_date": 1, "description": 1, "reference": 1, "source_type": 1, "lines": 1},
+    ).sort("entry_date", 1).sort("entry_number", 1).to_list(100000)
+
+    def resolve_treasury_account(line: dict) -> Optional[dict]:
+        account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code"))
+        if not account and line.get("bank_id"):
+            account = accounts_by_bank_id.get(line.get("bank_id"))
+        if not account and normalize_arabic_key(line.get("account_name")) in {"الخزينه", "خزينه"}:
+            account = cash_account
+        return account if account and account.get("id") in selected_ids else None
+
+    def movement_key_for(entry: dict, debit: float, credit: float) -> str:
+        if entry.get("source_type") == "opening_balance":
+            return "opening"
+        return "revenue" if debit >= credit else "expense"
+
+    movement_labels = {"revenue": "إيراد", "expense": "مصروف", "opening": "رصيد افتتاحي"}
+    opening_balance = 0.0
+    running_by_account = {account_id_value: 0.0 for account_id_value in selected_ids}
+    transactions: List[TreasuryBanksTransaction] = []
+    total_revenues = 0.0
+    total_expenses = 0.0
+    normalized_search = normalize_arabic_key(search) if search else ""
+
+    serial = 1
+    for entry in entries:
+        entry_date = date.fromisoformat(str(entry.get("entry_date")))
+        is_prior = bool(from_date and entry_date < from_date)
+        for line in entry.get("lines", []):
+            account = resolve_treasury_account(line)
+            if not account:
+                continue
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            delta = round(debit - credit, 2)
+            if delta == 0:
+                continue
+            account_id_value = account.get("id")
+            running_by_account[account_id_value] = round(running_by_account.get(account_id_value, 0.0) + delta, 2)
+            if is_prior:
+                opening_balance = round(opening_balance + delta, 2)
+                continue
+            key = movement_key_for(entry, debit, credit)
+            if movement_type and movement_type != "all" and key != movement_type:
+                continue
+            bank_id = account.get("bank_id") or (str(account.get("system_key") or "").split(":", 1)[1] if str(account.get("system_key") or "").startswith("bank:") else line.get("bank_id"))
+            account_kind_value = "cash" if account.get("system_key") == "cash_box" else "bank"
+            bank_name = bank_names.get(bank_id) if bank_id else None
+            searchable_text = normalize_arabic_key(" ".join([str(entry.get("entry_number") or ""), entry.get("description") or "", entry.get("reference") or "", account.get("name") or "", bank_name or "", line.get("notes") or ""]))
+            if normalized_search and normalized_search not in searchable_text:
+                continue
+            if key != "opening" and delta > 0:
+                total_revenues = round(total_revenues + delta, 2)
+            if key != "opening" and delta < 0:
+                total_expenses = round(total_expenses + abs(delta), 2)
+            transactions.append(TreasuryBanksTransaction(
+                serial=serial,
+                entry_id=entry.get("id"),
+                entry_number=int(entry.get("entry_number") or 0),
+                entry_date=entry_date,
+                description=entry.get("description") or line.get("notes") or "-",
+                reference=entry.get("reference"),
+                source_type=entry.get("source_type") or "manual",
+                movement_type=movement_labels.get(key, key),
+                account_id=account_id_value,
+                account_code=account.get("code"),
+                account_name=account.get("name") or "-",
+                account_kind=account_kind_value,
+                bank_id=bank_id,
+                bank_name=bank_name,
+                debit=debit,
+                credit=credit,
+                amount=abs(delta),
+                running_balance=running_by_account.get(account_id_value, 0.0),
+            ))
+            serial += 1
+    total_balance = round(sum(running_by_account.values()), 2)
+    summary = TreasuryBanksSummary(
+        organization_id=organization_id,
+        from_date=from_date,
+        to_date=to_date,
+        opening_balance=opening_balance,
+        total_balance=total_balance,
+        total_revenues=total_revenues,
+        total_expenses=total_expenses,
+        net_movement=round(total_revenues - total_expenses, 2),
+        transactions_count=len(transactions),
+    )
+    return TreasuryBanksReport(summary=summary, accounts=[TreasuryBanksAccount(**item) for item in treasury_accounts], transactions=transactions)
 
 
 @api_router.get("/inventory/items", response_model=List[InventoryItemResponse])

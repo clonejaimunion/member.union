@@ -25,6 +25,7 @@ import JournalEntriesPage from "@/pages/JournalEntriesPage";
 import ChartAccountsPage from "@/pages/ChartAccountsPage";
 import TrialBalancePage from "@/pages/TrialBalancePage";
 import FinancialStatementsPage from "@/pages/FinancialStatementsPage";
+import TreasuryBanksPage from "@/pages/TreasuryBanksPage";
 import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import CustodyAdvancesPage from "@/pages/CustodyAdvancesPage";
 import MembershipPage from "@/pages/MembershipPage";
@@ -56,6 +57,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/chart-accounts", title: `شجرة الحسابات - ${appTitle}` },
   { test: (path) => path === "/trial-balance", title: `ميزان المراجعة - ${appTitle}` },
   { test: (path) => path === "/financial-statements", title: `القوائم المالية - ${appTitle}` },
+  { test: (path) => path === "/treasury-banks", title: `الخزينة والبنوك - ${appTitle}` },
   { test: (path) => path === "/journal-entries", title: `القيود اليومية - ${appTitle}` },
   { test: (path) => path === "/inventory", title: `دفتر المخزون - ${appTitle}` },
   { test: (path) => path === "/misc-creditors", title: `دفتر الدائنين المتنوعين - ${appTitle}` },
@@ -182,6 +184,7 @@ function App() {
               <Route path="/chart-accounts" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="chart_accounts"><ChartAccountsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/trial-balance" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="trial_balance"><TrialBalancePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/financial-statements" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="financial_statements"><FinancialStatementsPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/treasury-banks" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="treasury_banks"><TreasuryBanksPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/journal-entries" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="journal_entries"><JournalEntriesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/inventory" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="inventory"><InventoryPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/misc-creditors" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="misc_creditors"><MiscCreditorsPage /></ModuleRoute></ProtectedRoute>} />

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Handshake, Landmark, LineChart, LogOut, NotebookPen, PackageCheck, PackageSearch, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Handshake, Landmark, LineChart, LogOut, NotebookPen, PackageCheck, PackageSearch, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, Vault, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -17,6 +17,7 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
   const canUseChartAccounts = isModuleEnabled(user, "chart_accounts") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseTrialBalance = isModuleEnabled(user, "trial_balance") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseFinancialStatements = isModuleEnabled(user, "financial_statements") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseTreasuryBanks = isModuleEnabled(user, "treasury_banks") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseJournalEntries = isModuleEnabled(user, "journal_entries") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseReconciliation = isModuleEnabled(user, "reconciliations") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_reconciliations);
   const canUseRevenues = isModuleEnabled(user, "revenues") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_revenues);
@@ -118,6 +119,13 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
       path: "/journal-entries",
       icon: NotebookPen,
       testId: "module-journal-entries-card",
+    },
+    canUseTreasuryBanks && {
+      title: "الخزينة والبنوك",
+      description: "لوحة مراقبة للعرض فقط تُحسب مباشرة من القيود اليومية المرحلة بدون أي ترحيل جديد.",
+      path: "/treasury-banks",
+      icon: Vault,
+      testId: "module-treasury-banks-card",
     },
     canUseInventory && {
       title: "دفتر المخزون",

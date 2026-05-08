@@ -13,6 +13,7 @@ export const moduleDefinitions = {
   expenses_analysis: "تحليل المصروفات",
   banking_expenses: "المصروفات البنكية",
   ledger: "دفتر الأستاذ",
+  treasury_banks: "الخزينة والبنوك",
   electronic_invoice: "الفاتورة الإلكترونية",
   inventory: "دفتر المخزون",
   misc_creditors: "دفتر الدائنين المتنوعين",
