@@ -17,6 +17,13 @@
 - تم بناء المثبت الجديد بحجم `39959765` bytes، والتحقق من رابط `/api/download/setup` بحجم مطابق ومن وجود `mongod.exe` وحزم `wheels_win` داخل release.
 - الاختبارات: lint backend ناجح، smoke للواجهة ناجح، وTesting Agent iteration_82 نجح 16/16. ملاحظة: التنفيذ الفعلي لـ BAT/HTA لا يزال يتطلب تأكيداً على Windows حقيقي.
 
+## إصلاح — 2026-05-08 — فشل تثبيت المتطلبات Offline على Windows
+- تم إصلاح رسالة `Requirements installation failed. Check startup.log.` بإضافة اعتماد Windows الناقص `colorama==0.4.6` إلى `requirements-runtime.txt` وحزمته داخل `wheels_win`.
+- أصبح عدد حزم Windows المحلية داخل release هو 31، مع استمرار MongoDB المحمول داخل المثبت.
+- تم تحسين رسالة الخطأ بحيث ينسخ `start_system_worker.bat` آخر أسطر `startup.log` إلى `startup_error.txt` عند فشل pip، لتسهيل التشخيص على جهاز المستخدم.
+- تم بناء المثبت النهائي بحجم `39983826` bytes، ورابط `/api/download/setup` يعيد الحجم نفسه.
+- الاختبارات: lint backend ناجح، pytest التغليف 16/16 ناجح، وTesting Agent iteration_83 أكد إصلاح نطاق Windows offline startup.
+
 ## تحديث — 2026-05-03 — روابط PDF عامة وعضوية وتصدير ومراجعة تصحيحات
 - جعل روابط الدليل العربي والإنجليزي المنفصلين قابلة للتحميل المباشر بدون تسجيل دخول: `/api/admin/training/manual-ar.pdf` و`/api/admin/training/manual-en.pdf`.
 - إضافة تعديل وحذف العضويات من API والواجهة، مع اعتماد سجل التدقيق العام لتسجيل عمليات PUT/DELETE الخاصة بالعضوية.

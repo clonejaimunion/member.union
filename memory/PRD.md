@@ -506,3 +506,10 @@
 - تم تقليل زمن فشل الاتصال بقاعدة البيانات في `AsyncIOMotorClient` إلى 3 ثوانٍ حتى لا يطول انتظار بدء الخادم عند وجود مشكلة محلية.
 - تم إعادة بناء المثبت الجديد بحجم `39959765` bytes والتحقق من أن `/api/download/setup` يعيد الحجم نفسه.
 - الاختبارات: lint backend ناجح، smoke للواجهة ناجح، وTesting Agent iteration_82 نجح `16/16` في نطاق التغليف والتشغيل ووجود MongoDB المحمول. ما زال اختبار BAT/HTA الفعلي يحتاج جهاز Windows حقيقي.
+
+## إصلاح فشل تثبيت المتطلبات Offline بتاريخ 2026-05-08
+- بعد ظهور رسالة `Requirements installation failed. Check startup.log.` على جهاز المستخدم، تم تحديد اعتماد Windows ناقص في حزمة التشغيل المحلية: `colorama` المطلوب عبر `click/uvicorn` على Windows.
+- تم إضافة `colorama==0.4.6` إلى `backend/requirements-runtime.txt` وإضافة ملف wheel الخاص به داخل `backend/wheels_win` ونسخة release، ليصبح عدد الحزم المحلية 31.
+- تم تحسين `start_system_worker.bat` بحيث يكتب آخر 35 سطراً من `startup.log` داخل `startup_error.txt` عند فشل pip، حتى تظهر تفاصيل السبب مباشرة في شاشة البداية.
+- تم إعادة بناء المثبت النهائي بحجم `39983826` bytes والتحقق من أن رابط `/api/download/setup` يعيد الحجم نفسه.
+- الاختبارات: lint backend ناجح، pytest التغليف `16/16` ناجح، وTesting Agent iteration_83 أكد وجود `colorama` وحجم المثبت ومطابقة التنزيل.
