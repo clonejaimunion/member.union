@@ -4361,6 +4361,11 @@ def pdf_ar(value: object) -> str:
 
 def register_erp_pdf_font() -> str:
     font_candidates = [
+        str(APP_ASSETS_DIR / "Amiri-Regular.ttf"),
+        str(ROOT_DIR.parent / "app_assets" / "Amiri-Regular.ttf"),
+        "/usr/share/fonts/opentype/fonts-hosny-amiri/Amiri-Regular.ttf",
+        "/usr/share/fonts/truetype/kacst-one/KacstOne.ttf",
+        "/usr/share/fonts/truetype/kacst/KacstNaskh.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
     ]
@@ -4514,33 +4519,45 @@ async def build_erp_health_report_payload(organization_id: str, direct_download_
 def write_erp_health_pdf(report: ErpHealthReportResponse, output_path: Path):
     font_name = register_erp_pdf_font()
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("ArabicTitle", parent=styles["Title"], fontName=font_name, fontSize=20, leading=28, alignment=TA_CENTER)
-    heading_style = ParagraphStyle("ArabicHeading", parent=styles["Heading2"], fontName=font_name, fontSize=14, leading=20, alignment=TA_RIGHT)
-    body_style = ParagraphStyle("ArabicBody", parent=styles["BodyText"], fontName=font_name, fontSize=10, leading=16, alignment=TA_RIGHT)
-    document = SimpleDocTemplate(str(output_path), pagesize=A4, rightMargin=1.2 * cm, leftMargin=1.2 * cm, topMargin=1.0 * cm, bottomMargin=1.0 * cm)
+    title_style = ParagraphStyle("ArabicTitle", parent=styles["Title"], fontName=font_name, fontSize=21, leading=32, alignment=TA_CENTER, wordWrap="RTL")
+    score_style = ParagraphStyle("ArabicScore", parent=styles["Heading1"], fontName=font_name, fontSize=18, leading=28, alignment=TA_CENTER, textColor=colors.HexColor("#0f3f5f"), wordWrap="RTL")
+    heading_style = ParagraphStyle("ArabicHeading", parent=styles["Heading2"], fontName=font_name, fontSize=15, leading=24, alignment=TA_RIGHT, wordWrap="RTL")
+    body_style = ParagraphStyle("ArabicBody", parent=styles["BodyText"], fontName=font_name, fontSize=10.5, leading=17, alignment=TA_RIGHT, wordWrap="RTL")
+    small_style = ParagraphStyle("ArabicSmall", parent=body_style, fontSize=9, leading=14)
+    document = SimpleDocTemplate(str(output_path), pagesize=A4, rightMargin=1.0 * cm, leftMargin=1.0 * cm, topMargin=1.0 * cm, bottomMargin=1.0 * cm, title="ERP Health Report")
     story = [
         Paragraph(pdf_ar("تقرير تقييم شامل للنظام ERP Health Report"), title_style),
-        Paragraph(pdf_ar(f"درجة النظام الإجمالية: {report.overall_score} من 100"), heading_style),
+        Paragraph(pdf_ar(f"درجة النظام الإجمالية: {report.overall_score} من 100"), score_style),
         Paragraph(pdf_ar(f"تاريخ الإنشاء: {report.generated_at.isoformat()} | الجهة: {report.organization_id} | الوضع: تحليل فقط Read Only"), body_style),
         Spacer(1, 0.3 * cm),
     ]
-    metric_rows = [[pdf_ar("البند"), pdf_ar("Score"), pdf_ar("الحالة"), pdf_ar("التفاصيل")]]
+    metric_rows = [[pdf_ar("التفاصيل"), pdf_ar("الحالة"), pdf_ar("Score"), pdf_ar("البند")]]
     for metric in report.metrics:
-        metric_rows.append([Paragraph(pdf_ar(metric.title), body_style), pdf_ar(metric.score), pdf_ar(metric.status), Paragraph(pdf_ar(metric.details), body_style)])
-    metrics_table = PdfTable(metric_rows, colWidths=[4.2 * cm, 2.0 * cm, 2.3 * cm, 9.0 * cm], repeatRows=1)
+        metric_rows.append([Paragraph(pdf_ar(metric.details), small_style), Paragraph(pdf_ar(metric.status), body_style), pdf_ar(metric.score), Paragraph(pdf_ar(metric.title), body_style)])
+    metrics_table = PdfTable(metric_rows, colWidths=[8.4 * cm, 2.3 * cm, 1.8 * cm, 5.1 * cm], repeatRows=1, hAlign="RIGHT")
     metrics_table.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), font_name),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f3f5f")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
         ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (2, 1), (2, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
     ]))
     story.extend([metrics_table, Spacer(1, 0.4 * cm), Paragraph(pdf_ar("التوصيات التلقائية"), heading_style)])
     for index, recommendation in enumerate(report.recommendations, 1):
-        story.append(Paragraph(pdf_ar(f"{index}- {recommendation}"), body_style))
-    story.extend([Spacer(1, 0.35 * cm), Paragraph(pdf_ar("تأكيد: هذا التقرير تم إنشاؤه للقراءة والتحليل فقط، ولا يقوم بأي تعديل على القيود أو التسويات البنكية أو الأرصدة."), body_style)])
+        story.append(Paragraph(pdf_ar(f"{index} ـ {recommendation}"), body_style))
+    story.extend([
+        Spacer(1, 0.35 * cm),
+        Paragraph(pdf_ar("مصادر التحليل: القيود اليومية، دفتر الأستاذ، ميزان المراجعة، القوائم والتقارير الحالية، التسويات البنكية، وسجل الحركات."), body_style),
+        Paragraph(pdf_ar("تأكيد: هذا التقرير تم إنشاؤه للقراءة والتحليل فقط، ولا يقوم بأي تعديل على القيود أو التسويات البنكية أو الأرصدة."), body_style),
+        Paragraph(pdf_ar("الخط العربي المستخدم مدمج داخل ملف PDF لضمان عرض عربي كامل وواضح على أي جهاز."), small_style),
+    ])
     document.build(story)
 
 
