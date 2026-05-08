@@ -161,6 +161,7 @@ export default function AdminPage() {
   const [shortcutIconFile, setShortcutIconFile] = useState(null);
   const [moduleSettings, setModuleSettings] = useState({});
   const [moduleLabels, setModuleLabels] = useState(moduleDefinitions);
+  const [moduleOrganizationId, setModuleOrganizationId] = useState(user?.organization_id || "social-solidarity");
   const [fixedAssetRates, setFixedAssetRates] = useState([]);
   const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
   const [etaIntegration, setEtaIntegration] = useState(defaultEtaIntegration);
@@ -256,15 +257,16 @@ export default function AdminPage() {
     }
   }, []);
 
-  const loadModuleSettings = useCallback(async () => {
+  const loadModuleSettings = useCallback(async (targetOrganizationId = moduleOrganizationId) => {
     try {
-      const response = await api.get("/admin/organization/modules");
+      const query = isSuperAdmin && targetOrganizationId ? `?organization_id=${encodeURIComponent(targetOrganizationId)}` : "";
+      const response = await api.get(`/admin/organization/modules${query}`);
       setModuleSettings(response.data.modules || {});
       setModuleLabels(response.data.module_labels || moduleDefinitions);
     } catch (error) {
       toast.error("تعذر تحميل إعدادات الخواص");
     }
-  }, []);
+  }, [isSuperAdmin, moduleOrganizationId]);
 
   const loadFixedAssetRates = useCallback(async () => {
     try {
@@ -325,6 +327,10 @@ export default function AdminPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAdminSection, isSuperAdmin]);
+
+  useEffect(() => {
+    if (activeAdminSection === "feature-settings") loadModuleSettings(moduleOrganizationId);
+  }, [activeAdminSection, loadModuleSettings, moduleOrganizationId]);
 
   useEffect(() => {
     setAdminFullName(user?.full_name || "");
@@ -828,11 +834,12 @@ export default function AdminPage() {
   const saveModuleSettings = async () => {
     setModuleSettingsLoading(true);
     try {
-      const response = await api.put("/admin/organization/modules", { modules: moduleSettings });
+      const query = isSuperAdmin && moduleOrganizationId ? `?organization_id=${encodeURIComponent(moduleOrganizationId)}` : "";
+      const response = await api.put(`/admin/organization/modules${query}`, { modules: moduleSettings });
       setModuleSettings(response.data.modules || {});
       setModuleLabels(response.data.module_labels || moduleDefinitions);
-      await refreshMe();
-      toast.success("تم حفظ إعدادات الخواص");
+      if (!isSuperAdmin || moduleOrganizationId === user?.organization_id) await refreshMe();
+      toast.success(`تم حفظ إعدادات خواص ${response.data.organization_name || "الجهة"}`);
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حفظ إعدادات الخواص");
     } finally {
@@ -1241,7 +1248,10 @@ export default function AdminPage() {
                 <h2 className="text-2xl font-extrabold" data-testid="feature-settings-title">تفعيل وتعطيل وحدات الجهة</h2>
               </div>
             </div>
-            <p className="mb-4 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600" data-testid="feature-settings-note">التغييرات تطبق على الجهة الحالية فقط: {user?.organization_name}</p>
+            <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg bg-slate-50 p-3 md:grid-cols-[1fr_2fr]" data-testid="feature-settings-target-panel">
+              <p className="text-sm font-bold text-slate-600" data-testid="feature-settings-note">التغييرات تطبق على الجهة المحددة فقط، وتتحكم في ظهور الفاتورة الإلكترونية محاسبياً داخل هذه الجهة وحدها.</p>
+              {isSuperAdmin ? <select value={moduleOrganizationId} onChange={(event) => setModuleOrganizationId(event.target.value)} className="h-11 rounded-lg border border-slate-300 bg-white px-3 font-bold" data-testid="feature-settings-organization-select">{organizations.map((organization) => <option key={organization.id} value={organization.id} label={organization.login_label || organization.name} />)}</select> : <Badge className="w-fit bg-white px-3 py-2 text-slate-700" data-testid="feature-settings-current-organization-badge">{user?.organization_name}</Badge>}
+            </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2" data-testid="feature-settings-grid">
               {Object.entries(moduleLabels).map(([moduleKey, label]) => {
                 const enabled = moduleSettings[moduleKey] !== false;

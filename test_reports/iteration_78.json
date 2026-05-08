@@ -1,0 +1,37 @@
+{
+  "summary": "Completed backend + frontend verification for organization-scoped electronic invoice module controls. Requested behavior is working: super admin can target organization in feature settings/API, general-union keeps electronic_invoice enabled, social-solidarity keeps it disabled, UI visibility follows org state, and tax engine profile returns 200/404 accordingly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration84_org_modules_tax_engine_scope.py",
+    "/app/test_reports/pytest/pytest_results_iter84_org_modules_tax_engine.xml"
+  ],
+  "action_items": [
+    "Optional hardening: include organization_id in audit log API response model to improve tenant-level traceability in UI/API consumers.",
+    "Main agent can run self-check by rerunning /app/backend/tests/test_iteration84_org_modules_tax_engine_scope.py and spot-checking /secure-admin-control-panel > إعدادات الخواص."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py is very large (>10k LOC), which increases regression risk for tenant/module authorization paths; split by domain routers/services.",
+    "Audit log write includes organization_id, but audit log response schema currently omits it from serialized payload."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration84_org_modules_tax_engine_scope.py",
+    "/app/test_reports/iteration_78.json"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "100% (targeted scoped-flow checks passed)"
+  },
+  "seed_data_creation": "Created one temporary organization for default module check (TEST_ITER84_ORG_*) and deactivated it in teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Verified on public URL with real credentials from /app/memory/test_credentials.md. Super admin target-org module API/UI works; union sees module-electronic-invoice-card + /api/tax-engine/profile=200; social hides card + /api/tax-engine/profile=404.",
+  "rca of the issue": "No blocking issue found in this requested scope during this iteration."
+}
