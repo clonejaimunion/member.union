@@ -3610,21 +3610,24 @@ def absolute_external_url(value: Optional[str], base_url: str = BANQUE_MISR_EXTE
 
 
 def fetch_external_html(url: str) -> str:
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 BankDepositSystem/1.0; ReadOnlyBankPrints",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            content_type = response.headers.get("Content-Type", "")
-            charset_match = re.search(r"charset=([^;]+)", content_type, re.I)
-            charset = charset_match.group(1).strip() if charset_match else "utf-8"
-            return response.read().decode(charset, errors="ignore")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"تعذر جلب بيانات بنك مصر من المصدر الخارجي: {exc}")
+    last_error = None
+    for timeout_seconds in [12, 25]:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 BankDepositSystem/1.0; ReadOnlyBankPrints",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                content_type = response.headers.get("Content-Type", "")
+                charset_match = re.search(r"charset=([^;]+)", content_type, re.I)
+                charset = charset_match.group(1).strip() if charset_match else "utf-8"
+                return response.read().decode(charset, errors="ignore")
+        except Exception as exc:
+            last_error = exc
+    raise HTTPException(status_code=502, detail=f"تعذر جلب بيانات بنك مصر من المصدر الخارجي بعد إعادة المحاولة: {last_error}")
 
 
 def extract_banque_misr_rows(raw_html: str) -> List[dict]:
