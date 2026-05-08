@@ -6335,6 +6335,11 @@ async def startup_tasks():
     await db.login_attempts.create_index("identifier", unique=True)
 
 # Add your routes to the router instead of directly to app
+@api_router.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "bank-deposit-system"}
+
+
 @api_router.get("/")
 async def root():
     return {"message": "Bank deposit interest system is running"}

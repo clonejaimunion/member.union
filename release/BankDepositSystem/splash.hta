@@ -29,6 +29,7 @@
     var index = 0;
     var progress = 8;
     var startedAt = new Date().getTime();
+    var maxWaitMs = 180000;
 
     function centerWindow() {
       window.resizeTo(880, 600);
@@ -44,12 +45,17 @@
     function serverReady() {
       try {
         var http = new ActiveXObject("MSXML2.XMLHTTP");
-        http.open("GET", "http://127.0.0.1:8001/api/app-settings/public?ts=" + new Date().getTime(), false);
+        http.open("GET", "http://127.0.0.1:8001/api/health?ts=" + new Date().getTime(), false);
         http.send();
-        return http.status >= 200 && http.status < 500;
+        return http.status >= 200 && http.status < 300;
       } catch (e) {
         return false;
       }
+    }
+
+    function showStartupFailure() {
+      setStatus("تعذر إكمال تشغيل الخدمات الخلفية", 92);
+      document.getElementById("hint").innerText = "راجع ملف السجل: " + shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\BankDepositSystem\\logs\\startup_error.txt";
     }
 
     function openSystem() {
@@ -66,6 +72,10 @@
       setStatus(statuses[index], progress);
       if (serverReady() && new Date().getTime() - startedAt > 2600) {
         openSystem();
+        return;
+      }
+      if (new Date().getTime() - startedAt > maxWaitMs) {
+        showStartupFailure();
         return;
       }
       setTimeout(tick, 950);
@@ -91,7 +101,7 @@
     <section class="status-area">
       <div class="status-row"><span id="statusText">جاري تهيئة النظام...</span><span id="percentText">8%</span></div>
       <div class="progress"><div id="bar" class="bar"></div></div>
-      <div class="hint">يرجى الانتظار — يتم تشغيل قاعدة البيانات والموديولات في الخلفية بدون نوافذ أو أوامر نصية</div>
+      <div id="hint" class="hint">يرجى الانتظار — يتم تشغيل قاعدة البيانات والموديولات في الخلفية بدون نوافذ أو أوامر نصية</div>
     </section>
   </main>
 </body>

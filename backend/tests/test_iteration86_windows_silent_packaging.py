@@ -16,6 +16,31 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _assert_worker_runtime_strategy(content: str) -> None:
+    lowered = content.lower()
+    assert "backend\\wheels_win" in lowered
+    assert "requirements-runtime.txt" in lowered
+    assert "windows_wheels_ready.txt" in lowered
+    assert "--no-index --find-links" in lowered
+    assert "bank_deposit_runtime_ready_py311.flag" in lowered
+    assert 'if "%deps_ready%"=="0"' in lowered
+    assert "import fastapi, motor.motor_asyncio" in lowered
+    assert "pip install --timeout 15 --retries 1" in lowered
+    assert "pip_default_timeout=15" in lowered
+    assert "pip_retries=1" in lowered
+
+
+def _assert_splash_waits_for_health_with_timeout(content: str) -> None:
+    lowered = content.lower()
+    compact = lowered.replace(" ", "")
+    assert "/api/health" in lowered
+    assert "/api/app-settings/public" not in lowered
+    assert "varmaxwaitms=180000;" in compact
+    assert "showstartupfailure" in lowered
+    assert "تعذر إكمال تشغيل الخدمات الخلفية" in content
+    assert "startup_error.txt" in lowered
+
+
 # NSIS + launcher integration checks
 def test_nsis_shortcuts_target_wscript_and_vbs_launcher():
     content = _read_text(LOCAL_INSTALL_DIR / "BankDepositSystem.nsi")
@@ -32,6 +57,8 @@ def test_release_contains_required_silent_startup_files():
         "start_system_worker.bat",
         "run_backend_hidden.vbs",
         "run_backend_server.bat",
+        "backend/requirements-runtime.txt",
+        "backend/wheels_win/WINDOWS_WHEELS_READY.txt",
     ]
     missing = [name for name in required_files if not (RELEASE_DIR / name).exists()]
     assert missing == []
@@ -49,6 +76,20 @@ def test_batch_files_have_no_pause_or_echo_on_and_use_localappdata_logs():
         assert "%localappdata%\\bankdepositsystem\\logs" in lowered
 
 
+def test_worker_uses_offline_windows_wheels_and_skips_repeated_install():
+    content = _read_text(LOCAL_INSTALL_DIR / "start_system_worker.bat")
+    _assert_worker_runtime_strategy(content)
+    lowered = content.lower()
+
+    assert "python 3.11 is required" in lowered
+    assert "/api/health" in lowered
+
+
+def test_release_worker_keeps_same_runtime_strategy():
+    content = _read_text(RELEASE_DIR / "start_system_worker.bat")
+    _assert_worker_runtime_strategy(content)
+
+
 # Splash behavior checks
 def test_splash_hta_uses_official_logo_arabic_statuses_hidden_worker_and_localhost_open():
     content = _read_text(LOCAL_INSTALL_DIR / "splash.hta")
@@ -61,6 +102,15 @@ def test_splash_hta_uses_official_logo_arabic_statuses_hidden_worker_and_localho
     assert "جاري فتح الواجهة الرئيسية" in content
     assert 'shell.Run("cmd.exe /c \\\"" + appDir + "\\\\start_system_worker.bat\\\"", 0, false);' in content
     assert 'shell.Run("http://localhost:8001", 1, false);' in content
+    assert "/api/health" in content
+    assert "maxWaitMs" in content
+
+
+def test_splash_uses_health_wait_and_guardrails_in_local_and_release():
+    local_content = _read_text(LOCAL_INSTALL_DIR / "splash.hta")
+    release_content = _read_text(RELEASE_DIR / "splash.hta")
+    _assert_splash_waits_for_health_with_timeout(local_content)
+    _assert_splash_waits_for_health_with_timeout(release_content)
 
 
 # Official logo propagation checks
@@ -98,3 +148,27 @@ def test_download_setup_endpoint_returns_200_and_matches_installer_size():
 
     assert response.status_code == 200
     assert len(response.content) == DIST_SETUP_PATH.stat().st_size
+
+
+# Health endpoint smoke for splash lightweight wait probe
+def test_health_endpoint_returns_200_with_small_payload():
+    base_url = os.environ.get("REACT_APP_BACKEND_URL")
+    assert base_url, "REACT_APP_BACKEND_URL env var is required"
+
+    response = requests.get(f"{base_url.rstrip('/')}/api/health", timeout=15)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("status") == "ok"
+    assert payload.get("service") == "bank-deposit-system"
+    assert len(payload.keys()) <= 4
+
+
+def test_release_contains_runtime_requirements_and_windows_wheels():
+    runtime_req_path = RELEASE_DIR / "backend" / "requirements-runtime.txt"
+    wheels_dir = RELEASE_DIR / "backend" / "wheels_win"
+    marker_path = wheels_dir / "WINDOWS_WHEELS_READY.txt"
+
+    assert runtime_req_path.exists()
+    assert marker_path.exists()
+    assert len(list(wheels_dir.glob("*.whl"))) > 0
