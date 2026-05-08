@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 
 import requests
+from dotenv import dotenv_values
 
 
 ROOT_DIR = Path("/app")
@@ -14,6 +15,16 @@ DIST_SETUP_PATH = ROOT_DIR / "dist" / "BankDepositSystemSetup.exe"
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _get_base_url() -> str:
+    base_url = os.environ.get("REACT_APP_BACKEND_URL")
+    if base_url:
+        return base_url
+    env_values = dotenv_values(str(ROOT_DIR / "frontend" / ".env"))
+    fallback = env_values.get("REACT_APP_BACKEND_URL")
+    assert fallback, "REACT_APP_BACKEND_URL env var is required"
+    return str(fallback)
 
 
 def _assert_worker_runtime_strategy(content: str) -> None:
@@ -59,6 +70,7 @@ def test_release_contains_required_silent_startup_files():
         "run_backend_server.bat",
         "backend/requirements-runtime.txt",
         "backend/wheels_win/WINDOWS_WHEELS_READY.txt",
+        "mongodb/bin/mongod.exe",
     ]
     missing = [name for name in required_files if not (RELEASE_DIR / name).exists()]
     assert missing == []
@@ -85,9 +97,29 @@ def test_worker_uses_offline_windows_wheels_and_skips_repeated_install():
     assert "/api/health" in lowered
 
 
+def test_worker_starts_mongodb_before_backend_and_reports_failures():
+    content = _read_text(LOCAL_INSTALL_DIR / "start_system_worker.bat").lower()
+
+    assert "mongodb\\bin\\mongod.exe" in content
+    assert "mongo-data" in content
+    assert "mongodb.log" in content
+    assert "start-service -name mongodb" in content
+    assert "start-process -filepath $exe" in content
+    assert "--dbpath" in content
+    assert "127.0.0.1',27017" in content
+    assert "goto mongo_ready" in content
+    assert "mongodb did not start" in content
+    assert "startup_error.txt" in content
+    assert content.find("mongo_ready") < content.find("run_backend_hidden.vbs")
+
+
 def test_release_worker_keeps_same_runtime_strategy():
     content = _read_text(RELEASE_DIR / "start_system_worker.bat")
     _assert_worker_runtime_strategy(content)
+    lowered = content.lower()
+    assert "mongodb\\bin\\mongod.exe" in lowered
+    assert "start-process -filepath $exe" in lowered
+    assert "mongodb did not start" in lowered
 
 
 # Splash behavior checks
@@ -104,6 +136,8 @@ def test_splash_hta_uses_official_logo_arabic_statuses_hidden_worker_and_localho
     assert 'shell.Run("http://localhost:8001", 1, false);' in content
     assert "/api/health" in content
     assert "maxWaitMs" in content
+    assert "startup_error.txt" in content
+    assert "readStartupError" in content
 
 
 def test_splash_uses_health_wait_and_guardrails_in_local_and_release():
@@ -141,8 +175,7 @@ def test_nsis_installer_exists_in_dist():
 
 # Public API download endpoint checks
 def test_download_setup_endpoint_returns_200_and_matches_installer_size():
-    base_url = os.environ.get("REACT_APP_BACKEND_URL")
-    assert base_url, "REACT_APP_BACKEND_URL env var is required"
+    base_url = _get_base_url()
 
     response = requests.get(f"{base_url.rstrip('/')}/api/download/setup", timeout=60)
 
@@ -152,8 +185,7 @@ def test_download_setup_endpoint_returns_200_and_matches_installer_size():
 
 # Health endpoint smoke for splash lightweight wait probe
 def test_health_endpoint_returns_200_with_small_payload():
-    base_url = os.environ.get("REACT_APP_BACKEND_URL")
-    assert base_url, "REACT_APP_BACKEND_URL env var is required"
+    base_url = _get_base_url()
 
     response = requests.get(f"{base_url.rstrip('/')}/api/health", timeout=15)
 
@@ -172,3 +204,10 @@ def test_release_contains_runtime_requirements_and_windows_wheels():
     assert runtime_req_path.exists()
     assert marker_path.exists()
     assert len(list(wheels_dir.glob("*.whl"))) > 0
+
+
+def test_release_contains_bundled_portable_mongodb_executable():
+    mongod_path = RELEASE_DIR / "mongodb" / "bin" / "mongod.exe"
+
+    assert mongod_path.exists()
+    assert mongod_path.stat().st_size > 10_000_000

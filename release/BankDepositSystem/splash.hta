@@ -30,6 +30,8 @@
     var progress = 8;
     var startedAt = new Date().getTime();
     var maxWaitMs = 180000;
+    var localAppData = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%");
+    var startupErrorPath = localAppData + "\\BankDepositSystem\\logs\\startup_error.txt";
 
     function centerWindow() {
       window.resizeTo(880, 600);
@@ -55,7 +57,24 @@
 
     function showStartupFailure() {
       setStatus("تعذر إكمال تشغيل الخدمات الخلفية", 92);
-      document.getElementById("hint").innerText = "راجع ملف السجل: " + shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") + "\\BankDepositSystem\\logs\\startup_error.txt";
+      document.getElementById("hint").innerText = "راجع ملف السجل: " + startupErrorPath;
+    }
+
+    function readStartupError() {
+      try {
+        if (!fso.FileExists(startupErrorPath)) return "";
+        var file = fso.OpenTextFile(startupErrorPath, 1, false);
+        var text = file.ReadAll();
+        file.Close();
+        return text || "راجع ملف السجل: " + startupErrorPath;
+      } catch (e) {
+        return "راجع ملف السجل: " + startupErrorPath;
+      }
+    }
+
+    function showStartupError(text) {
+      setStatus("تعذر إكمال تشغيل الخدمات الخلفية", 92);
+      document.getElementById("hint").innerText = text;
     }
 
     function openSystem() {
@@ -70,6 +89,11 @@
       if (index < statuses.length - 1) index += 1;
       progress = Math.min(92, progress + 11);
       setStatus(statuses[index], progress);
+      var startupError = readStartupError();
+      if (startupError) {
+        showStartupError(startupError);
+        return;
+      }
       if (serverReady() && new Date().getTime() - startedAt > 2600) {
         openSystem();
         return;

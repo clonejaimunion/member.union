@@ -10,8 +10,12 @@ set "RUNTIME_REQ=%APP_DIR%backend\requirements-runtime.txt"
 set "FULL_REQ=%APP_DIR%backend\requirements.txt"
 set "DEPS_MARKER=%APP_DIR%backend\.venv\bank_deposit_runtime_ready_py311.flag"
 set "HARDEN_MARKER=%STATE_DIR%\installed_files_hardened.flag"
+set "MONGO_EXE=%APP_DIR%mongodb\bin\mongod.exe"
+set "MONGO_DATA=%STATE_DIR%\mongo-data"
+set "MONGO_LOG=%LOG_DIR%\mongodb.log"
 set "NETWORK_URLS_FILE=%APP_DIR%network_urls.txt"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
+if exist "%LOG_DIR%\startup_error.txt" del "%LOG_DIR%\startup_error.txt" >nul 2>nul
 
 echo ==== Bank Deposit System startup %DATE% %TIME% ====>>"%LOG_DIR%\startup.log"
 
@@ -110,6 +114,41 @@ if errorlevel 1 (
   echo Uvicorn is not installed correctly.>"%LOG_DIR%\startup_error.txt"
   exit /b 1
 )
+
+if not exist "%MONGO_DATA%" mkdir "%MONGO_DATA%" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $c = New-Object Net.Sockets.TcpClient; $iar = $c.BeginConnect('127.0.0.1',27017,$null,$null); if ($iar.AsyncWaitHandle.WaitOne(1500,$false)) { $c.EndConnect($iar); $c.Close(); exit 0 } else { $c.Close(); exit 1 } } catch { exit 1 }" >nul 2>nul
+if not errorlevel 1 goto mongo_ready
+
+echo MongoDB is not responding on port 27017. Trying Windows service.>>"%LOG_DIR%\startup.log"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$svc = Get-Service -Name MongoDB -ErrorAction SilentlyContinue; if ($svc -and $svc.Status -ne 'Running') { try { Start-Service -Name MongoDB -ErrorAction Stop } catch {} }" >>"%LOG_DIR%\startup.log" 2>&1
+for /L %%A in (1,1,8) do (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $c = New-Object Net.Sockets.TcpClient; $iar = $c.BeginConnect('127.0.0.1',27017,$null,$null); if ($iar.AsyncWaitHandle.WaitOne(1000,$false)) { $c.EndConnect($iar); $c.Close(); exit 0 } else { $c.Close(); exit 1 } } catch { exit 1 }" >nul 2>nul
+  if not errorlevel 1 goto mongo_ready
+  timeout /t 1 /nobreak >nul
+)
+
+if exist "%MONGO_EXE%" (
+  echo Starting bundled portable MongoDB.>>"%LOG_DIR%\startup.log"
+  set "MONGO_EXE_ENV=%MONGO_EXE%"
+  set "MONGO_DATA_ENV=%MONGO_DATA%"
+  set "MONGO_LOG_ENV=%MONGO_LOG%"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe=$env:MONGO_EXE_ENV; $data=$env:MONGO_DATA_ENV; $log=$env:MONGO_LOG_ENV; Start-Process -FilePath $exe -ArgumentList @('--dbpath',$data,'--port','27017','--bind_ip','127.0.0.1','--logpath',$log,'--logappend') -WindowStyle Hidden" >>"%LOG_DIR%\startup.log" 2>&1
+) else (
+  echo Bundled MongoDB executable is missing.>"%LOG_DIR%\startup_error.txt"
+  exit /b 1
+)
+
+for /L %%A in (1,1,30) do (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $c = New-Object Net.Sockets.TcpClient; $iar = $c.BeginConnect('127.0.0.1',27017,$null,$null); if ($iar.AsyncWaitHandle.WaitOne(1000,$false)) { $c.EndConnect($iar); $c.Close(); exit 0 } else { $c.Close(); exit 1 } } catch { exit 1 }" >nul 2>nul
+  if not errorlevel 1 goto mongo_ready
+  timeout /t 1 /nobreak >nul
+)
+
+echo MongoDB did not start. Check mongodb.log.>"%LOG_DIR%\startup_error.txt"
+exit /b 1
+
+:mongo_ready
+echo MongoDB is ready on 127.0.0.1:27017.>>"%LOG_DIR%\startup.log"
 
 netsh advfirewall firewall add rule name="Bank Deposit System 8001" dir=in action=allow protocol=TCP localport=8001 >nul 2>nul
 wscript.exe "%APP_DIR%run_backend_hidden.vbs"
