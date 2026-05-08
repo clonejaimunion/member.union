@@ -33,7 +33,7 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
   const canUseMiscCreditors = isModuleEnabled(user, "misc_creditors") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseFeasibility = isModuleEnabled(user, "feasibility_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseActuarial = isModuleEnabled(user, "actuarial_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseErpHealthReport = isModuleEnabled(user, "erp_health_report") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseErpHealthReport = user?.role === "super_admin" && isModuleEnabled(user, "erp_health_report");
   const canUseStudies = canUseFeasibility || canUseActuarial;
   const showHomeHub = !accountingOnly && !studiesOnly && (user?.organization_id === "social-solidarity" || canUseStudies || canUseErpHealthReport);
 

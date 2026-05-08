@@ -107,6 +107,12 @@ function ModuleRoute({ moduleKey, children }) {
   return children;
 }
 
+function SuperAdminRoute({ children }) {
+  const { user } = useAuth();
+  if (user?.role !== "super_admin") return <Navigate to="/" replace />;
+  return children;
+}
+
 function SessionSecurityManager() {
   const { token, logout } = useAuth();
   const { settings } = useAppSettings();
@@ -171,7 +177,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute><ModuleSelection accountingOnly /></ProtectedRoute>} />
-              <Route path="/erp-health-report" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="erp_health_report"><ErpHealthReportPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/erp-health-report" element={<ProtectedRoute adminOnly><SuperAdminRoute><ModuleRoute moduleKey="erp_health_report"><ErpHealthReportPage /></ModuleRoute></SuperAdminRoute></ProtectedRoute>} />
               <Route path="/studies" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleSelection studiesOnly /></ProtectedRoute>} />
               <Route path="/membership" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_users"]}><ModuleRoute moduleKey="membership"><MembershipPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/custody-advances" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="custody_advances"><CustodyAdvancesPage /></ModuleRoute></ProtectedRoute>} />

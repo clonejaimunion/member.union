@@ -87,28 +87,77 @@ html {
         print-color-adjust: exact !important;
     }
 
+    [data-testid="reconciliation-preview-actions"] {
+        display: none !important;
+    }
+
+    [data-testid="reconciliation-print-sheet-frame"] {
+        border: 1.5px solid #111827 !important;
+        border-radius: 0 !important;
+        padding: 2mm !important;
+        margin: 0 !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
     [data-testid="reconciliation-print-report"] * {
         font-size: inherit !important;
         line-height: 1.12 !important;
     }
 
     [data-testid="reconciliation-print-header"] {
-        min-height: 13mm !important;
+        min-height: 18mm !important;
         margin: 0 !important;
-        padding: 0 !important;
+        padding: 0 0 1.5mm !important;
+        border-bottom: 1.5px solid #111827 !important;
+    }
+
+    [data-testid="reconciliation-print-title"] {
+        font-size: 16px !important;
+        margin: 0.5mm 0 !important;
+    }
+
+    [data-testid="reconciliation-print-organization"] {
+        font-size: 9px !important;
+        margin: 0 !important;
     }
 
     [data-testid="reconciliation-print-period"] {
         margin: 0 !important;
-        font-size: 12px !important;
+        font-size: 11px !important;
         font-weight: 800 !important;
     }
 
     [data-testid="reconciliation-print-bank-logo"] img,
     [data-testid="reconciliation-print-bank-logo-mark"] {
-        max-height: 12mm !important;
-        max-width: 24mm !important;
+        max-height: 13mm !important;
+        max-width: 25mm !important;
         object-fit: contain !important;
+    }
+
+    [data-testid="reconciliation-print-meta-grid"] {
+        display: grid !important;
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 1mm !important;
+        margin-top: 1.5mm !important;
+    }
+
+    [data-testid^="reconciliation-print-meta-"] {
+        border: 1px solid #111827 !important;
+        border-radius: 0 !important;
+        padding: 1mm !important;
+        background: #f8fafc !important;
+    }
+
+    [data-testid="reconciliation-print-formula-wrapper"] {
+        margin-top: 1.5mm !important;
+        border: 1px solid #111827 !important;
+        border-radius: 0 !important;
+    }
+
+    [data-testid="reconciliation-print-formula-table"] td {
+        font-size: 7.5px !important;
+        padding: 0.9mm 1mm !important;
     }
 
     [data-testid="reconciliation-print-kpis"] {
@@ -134,7 +183,7 @@ html {
 
     [data-testid="outstanding-print-print-section"],
     [data-testid="collection-print-print-section"] {
-        margin: 1mm 0 0 !important;
+        margin: 1.2mm 0 0 !important;
         padding: 0 !important;
         gap: 1mm !important;
         break-inside: avoid !important;
@@ -157,7 +206,7 @@ html {
 
     [data-testid="reconciliation-print-report"] th,
     [data-testid="reconciliation-print-report"] td {
-        padding: 1mm !important;
+        padding: 0.8mm !important;
         font-size: 7px !important;
         line-height: 1.08 !important;
         border: 1px solid #111827 !important;
@@ -169,8 +218,24 @@ html {
     }
 
     [data-testid="print-status-wrapper"] {
-        padding-top: 2mm !important;
+        padding-top: 1mm !important;
+        margin-top: 1mm !important;
+    }
+
+    [data-testid="reconciliation-print-signatures"] {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 2mm !important;
         margin-top: auto !important;
+        padding-top: 1.5mm !important;
+    }
+
+    [data-testid="reconciliation-print-preparer-signature"],
+    [data-testid="reconciliation-print-approver-signature"] {
+        border: 1px solid #111827 !important;
+        border-radius: 0 !important;
+        padding: 1.5mm !important;
+        min-height: 14mm !important;
     }
 
     [data-testid="print-status"] {
