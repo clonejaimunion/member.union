@@ -32,6 +32,15 @@ const cloneReportContent = (selectors) => {
     const source = document.querySelector(selector);
     if (!source) return;
     const clone = source.cloneNode(true);
+    clone.querySelectorAll("img").forEach((image) => {
+      const imageSource = image.getAttribute("src") || image.src;
+      if (!imageSource) return;
+      try {
+        image.setAttribute("src", new URL(imageSource, window.location.origin).href);
+      } catch {
+        image.setAttribute("src", imageSource);
+      }
+    });
     clone.querySelectorAll("button, input, select, textarea, [data-export-exclude='true']").forEach((node) => node.remove());
     clone.querySelectorAll("*").forEach((node) => {
       const className = typeof node.className === "string" ? node.className : "";
