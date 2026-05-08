@@ -402,3 +402,17 @@
 - تم تحليل PDF الناتج وتأكيد أن النص العربي مقروء، بدون مربعات أو رموز غريبة، والجداول والعناوين منظمة RTL.
 - الاختبار الذاتي نجح: التقرير احتفظ بنفس الدرجة 88/100 ونفس عدد المؤشرات 9، والرابط المباشر للتحميل يعمل 200.
 - تم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` مع تضمين خط Amiri داخل حزمة التثبيت، والتحقق من رابط `/api/download/setup`.
+
+## Reset Test Environment وSeed Clean Dataset وإصلاح ERP تدريجي بتاريخ 2026-05-08
+- تم تنفيذ تحليل Read Only أولاً قبل أي تعديل، ووجد: 2 حساب غير معروف داخل قيود اختبارية، 4 روابط مصدر مفقودة، 0 قيود غير متوازنة، و0 اعتماد خارجي مؤثر.
+- تم حفظ نسخة احتياطية للبيانات قبل reset في `/app/generated_reports/erp-reset-backup-ed3814c7-e536-4a4f-98eb-154e49d167fe.json`.
+- تم تنفيذ Reset Test Environment للبيانات التشغيلية الاختبارية القديمة، مع تسجيل كل خطوة تعديل داخل `audit_logs` على المسار `/system/erp-reset-correction`.
+- تم Seed Dataset نظيفة تحتوي على 5 قيود نشطة ومترابطة: افتتاحي، وديعة بنك مصر، عائد وديعة، إيراد، ومصروف.
+- تم إنشاء مستندات تشغيل نظيفة مرتبطة مباشرة بالقيود: `deposits=1`، `revenues=1`، `expenses=1`.
+- تم إصلاح استرجاع المصروفات تاريخياً بإضافة معالجة دفاعية في `hydrate_expense` لحساب `total_deductions` و`net_amount` عند غيابها، وتم backfill للمصروف النظيف.
+- تم تعديل عرض `/api/journal-entries` ليشمل `deposit_interest` عند عرض كل القيود، مع بقاء استبعاده من التقارير الحسابية التي تستخدم `REPORT_EXCLUDED_SOURCE_TYPES` لحماية الميزان/الأستاذ من ازدواجية العرض.
+- تم ربط الوديعة النظيفة ببنك مصر والتحقق من ظهورها داخل ودائع بنك مصر.
+- الاختبار الذاتي بعد الإصلاح: `/api/journal-entries` يعرض 5 قيود بالأنواع المطلوبة، ميزان المراجعة 2026 متوازن، وERP Health Score أصبح 93.
+- Testing agent iteration_76 وجد مشكلتين بعد reset؛ تم إصلاحهما، ثم نجح regression test `/app/backend/tests/test_iteration82_erp_reset_seed_health_report.py` بنتيجة 9/9 passed.
+- تقرير الأخطاء النهائي المباشر: `https://interest-calculator-12.preview.emergentagent.com/api/erp-health-report/files/341f5ddb-b473-4882-bf0f-3b9833f03914`.
+- تم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التقرير النهائي 200.

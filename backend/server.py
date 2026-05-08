@@ -4603,6 +4603,10 @@ def hydrate_expense(document: dict) -> dict:
         clean["bank_payment_status"] = "not_presented"
     if clean.get("payment_method") == "check" and not clean.get("check_clearing_type"):
         clean["check_clearing_type"] = "internal"
+    if clean.get("total_deductions") is None:
+        clean["total_deductions"] = round(sum(float(item.get("amount") or 0) for item in clean.get("deductions") or []), 2)
+    if clean.get("net_amount") is None:
+        clean["net_amount"] = round(float(clean.get("gross_amount") or 0) - float(clean.get("total_deductions") or 0), 2)
     return clean
 
 
@@ -7856,8 +7860,6 @@ async def list_journal_entries(
             query["entry_date"]["$lte"] = to_date.isoformat()
     if source_type:
         query["source_type"] = source_type
-    else:
-        query["source_type"] = {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}
     category_sources = {
         "fixed_assets": ["fixed_asset", "asset_depreciation"],
         "revenues": ["revenue", "membership_batch_payment"],
