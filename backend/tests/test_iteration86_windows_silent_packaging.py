@@ -95,6 +95,7 @@ def test_worker_uses_offline_windows_wheels_and_skips_repeated_install():
 
     assert "python 3.11 is required" in lowered
     assert "/api/health" in lowered
+    assert "last startup log lines" in lowered
 
 
 def test_worker_starts_mongodb_before_backend_and_reports_failures():
@@ -204,6 +205,8 @@ def test_release_contains_runtime_requirements_and_windows_wheels():
     assert runtime_req_path.exists()
     assert marker_path.exists()
     assert len(list(wheels_dir.glob("*.whl"))) > 0
+    assert "colorama==0.4.6" in runtime_req_path.read_text(encoding="utf-8")
+    assert any(path.name.startswith("colorama-0.4.6") for path in wheels_dir.glob("*.whl"))
 
 
 def test_release_contains_bundled_portable_mongodb_executable():

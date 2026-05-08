@@ -94,7 +94,8 @@ if "%DEPS_READY%"=="0" (
     "%VENV_PY%" -m pip install --timeout 15 --retries 1 -r "%FULL_REQ%" >>"%LOG_DIR%\startup.log" 2>&1
   )
   if errorlevel 1 (
-    echo Requirements installation failed. Check startup.log.>"%LOG_DIR%\startup_error.txt"
+    echo Requirements installation failed. Last startup log lines:>"%LOG_DIR%\startup_error.txt"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path '%LOG_DIR%\startup.log' -Tail 35" >>"%LOG_DIR%\startup_error.txt" 2>nul
     exit /b 1
   )
 )

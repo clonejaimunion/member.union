@@ -1,1 +1,1 @@
-Windows amd64 Python 3.11 runtime wheels bundled for offline startup.
+Windows amd64 Python 3.11 runtime wheels bundled for offline startup. Includes Windows-only dependencies such as colorama.
