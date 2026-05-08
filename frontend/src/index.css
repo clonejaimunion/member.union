@@ -17,6 +17,55 @@ html {
     background: #f8fafc;
 }
 
+.reconciliation-memo-page {
+    direction: rtl;
+}
+
+.reconciliation-memo-sheet {
+    padding: 32px 42px 18px;
+    min-height: 260px;
+}
+
+.reconciliation-memo-org-title {
+    font-size: 26px;
+    line-height: 1.55;
+}
+
+.reconciliation-memo-period {
+    font-size: 18px;
+}
+
+.reconciliation-memo-balance {
+    margin-top: 42px;
+    margin-bottom: 18px;
+}
+
+.reconciliation-memo-balance-label {
+    font-size: 20px;
+}
+
+.reconciliation-memo-balance-value {
+    margin-top: 8px;
+    font-size: 28px;
+}
+
+.reconciliation-memo-checks-section {
+    padding-inline: 42px;
+}
+
+.reconciliation-memo-check-table th,
+.reconciliation-memo-check-table td {
+    border-color: #d6d6d6;
+}
+
+.reconciliation-memo-total-row td {
+    border-top: 2px solid #222 !important;
+}
+
+.reconciliation-memo-footer {
+    padding-inline: 42px;
+}
+
 @media print {
     @page {
         size: A4 portrait;
@@ -249,6 +298,136 @@ html {
 
     [data-testid="print-matched-balance-value"] {
         font-size: 13px !important;
+        margin-top: 1mm !important;
+    }
+
+    .reconciliation-memo-page[data-testid="reconciliation-print-report"] {
+        width: 200mm !important;
+        max-width: 200mm !important;
+        max-height: 286mm !important;
+        padding: 8mm 10mm !important;
+        gap: 4mm !important;
+        zoom: 0.9 !important;
+        font-size: 10px !important;
+        background: #fff !important;
+    }
+
+    .reconciliation-memo-sheet[data-testid="reconciliation-print-sheet-frame"] {
+        border: 0 !important;
+        padding: 0 !important;
+        min-height: 56mm !important;
+        margin: 0 0 2mm !important;
+    }
+
+    .reconciliation-memo-header[data-testid="reconciliation-print-header"] {
+        min-height: 28mm !important;
+        border-bottom: 0 !important;
+        padding: 0 !important;
+    }
+
+    .reconciliation-memo-logo[data-testid="reconciliation-print-bank-logo"] {
+        left: 3mm !important;
+        top: 0 !important;
+    }
+
+    .reconciliation-memo-logo[data-testid="reconciliation-print-bank-logo"] img,
+    .reconciliation-memo-logo [data-testid="reconciliation-print-bank-logo-mark"] {
+        max-height: 18mm !important;
+        max-width: 34mm !important;
+    }
+
+    .reconciliation-memo-org-title[data-testid="reconciliation-print-organization"] {
+        font-size: 14px !important;
+        line-height: 1.45 !important;
+        font-weight: 900 !important;
+        margin: 0 !important;
+        padding-top: 1mm !important;
+    }
+
+    .reconciliation-memo-bank-line[data-testid="reconciliation-print-meta-bank"] {
+        border: 0 !important;
+        background: transparent !important;
+        padding: 0 !important;
+        margin-top: 1mm !important;
+        font-size: 9px !important;
+        font-weight: 700 !important;
+    }
+
+    .reconciliation-memo-period[data-testid="reconciliation-print-period"] {
+        font-size: 12px !important;
+        margin-top: 1mm !important;
+        font-weight: 900 !important;
+    }
+
+    .reconciliation-memo-balance[data-testid="reconciliation-print-formula-book-balance"] {
+        margin: 16mm 0 5mm !important;
+        padding-right: 8mm !important;
+    }
+
+    .reconciliation-memo-balance-label {
+        font-size: 13px !important;
+        margin: 0 !important;
+    }
+
+    .reconciliation-memo-balance-value {
+        font-size: 15px !important;
+        margin-top: 2mm !important;
+    }
+
+    .reconciliation-memo-checks-section {
+        padding: 0 8mm !important;
+        margin-top: 5mm !important;
+    }
+
+    .reconciliation-memo-section-title {
+        font-size: 12px !important;
+        margin: 0 0 2mm !important;
+        font-weight: 900 !important;
+    }
+
+    .reconciliation-memo-table-wrapper {
+        border: 0 !important;
+        border-radius: 0 !important;
+    }
+
+    .reconciliation-memo-check-table th,
+    .reconciliation-memo-check-table td {
+        border: 1px solid #d7d7d7 !important;
+        padding: 1.2mm 2mm !important;
+        font-size: 9px !important;
+        background: #fff !important;
+        color: #111827 !important;
+    }
+
+    .reconciliation-memo-check-table th {
+        font-weight: 900 !important;
+    }
+
+    .reconciliation-memo-total-row td {
+        border-top: 1.5px solid #111827 !important;
+        font-weight: 900 !important;
+    }
+
+    .reconciliation-memo-footer[data-testid="print-status-wrapper"] {
+        justify-content: flex-start !important;
+        direction: ltr !important;
+        padding: 12mm 8mm 0 !important;
+        margin-top: auto !important;
+    }
+
+    .reconciliation-memo-footer [data-testid="print-status"] {
+        direction: rtl !important;
+        text-align: left !important;
+        padding: 0 !important;
+    }
+
+    .reconciliation-memo-status[data-testid="print-status-text"] {
+        font-size: 13px !important;
+        font-weight: 900 !important;
+    }
+
+    .reconciliation-memo-final-balance[data-testid="print-matched-balance-value"] {
+        font-size: 10px !important;
         margin-top: 1mm !important;
     }
 

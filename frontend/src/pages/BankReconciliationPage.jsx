@@ -431,18 +431,19 @@ export default function BankReconciliationPage() {
   );
 
   const ChecksTable = ({ title, rows, testId, total }) => (
-    <section className="space-y-3" data-testid={`${testId}-print-section`}>
-      <h3 className="text-xl font-extrabold text-slate-950" data-testid={`${testId}-print-title`}>{title}</h3>
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white" data-testid={`${testId}-table-wrapper`}>
-        <Table data-testid={`${testId}-table`}>
-          <TableHeader className="bg-slate-950">
-            <TableRow className="hover:bg-slate-950" data-testid={`${testId}-header-row`}>
-              <TableHead className="text-right font-extrabold text-white">التاريخ يوم/شهر</TableHead>
-              <TableHead className="text-right font-extrabold text-white">رقم الشيك</TableHead>
-              <TableHead className="text-right font-extrabold text-white">المبلغ</TableHead>
+    <section className="reconciliation-memo-checks-section space-y-2" data-testid={`${testId}-print-section`}>
+      <h3 className="reconciliation-memo-section-title text-lg font-extrabold text-slate-950" data-testid={`${testId}-print-title`}>{title}</h3>
+      <div className="reconciliation-memo-table-wrapper overflow-hidden bg-white" data-testid={`${testId}-table-wrapper`}>
+        <Table className="reconciliation-memo-check-table" data-testid={`${testId}-table`}>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent" data-testid={`${testId}-header-row`}>
+              <TableHead className="text-right font-extrabold text-slate-950">التاريخ يوم/شهر</TableHead>
+              <TableHead className="text-right font-extrabold text-slate-950">رقم الشيك</TableHead>
+              <TableHead className="text-right font-extrabold text-slate-950">المبلغ</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
+            {(rows || []).length === 0 && <TableRow data-testid={`${testId}-empty-row`}><TableCell colSpan={3} className="text-center text-slate-400">—</TableCell></TableRow>}
             {(rows || []).map((row, index) => (
               <TableRow key={`${testId}-${index}`} data-testid={`${testId}-row-${index}`}>
                 <TableCell data-testid={`${testId}-row-${index}-date`}>{formatCheckDate(row.check_date)}</TableCell>
@@ -450,7 +451,7 @@ export default function BankReconciliationPage() {
                 <TableCell data-testid={`${testId}-row-${index}-amount`}>{formatEgpText(row.amount)}</TableCell>
               </TableRow>
             ))}
-            <TableRow className="bg-slate-50 hover:bg-slate-50" data-testid={`${testId}-total-row`}>
+            <TableRow className="reconciliation-memo-total-row bg-white hover:bg-white" data-testid={`${testId}-total-row`}>
               <TableCell colSpan={2} className="font-extrabold text-slate-950" data-testid={`${testId}-total-label`}>الإجمالي</TableCell>
               <TableCell className="font-extrabold text-slate-950" data-testid={`${testId}-total-amount`}>{formatEgpText(total)}</TableCell>
             </TableRow>
@@ -599,47 +600,33 @@ export default function BankReconciliationPage() {
         </section>
 
         {activeReconciliation && (
-          <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:flex print:min-h-[95vh] print:flex-col print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
+          <section className="reconciliation-memo-page space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:flex print:min-h-[95vh] print:flex-col print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
             <div className="flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between" data-testid="reconciliation-preview-actions">
               <Badge className="w-fit bg-sky-50 px-3 py-1 text-sky-800 hover:bg-sky-50" data-testid="reconciliation-preview-badge">معاينة قبل الطباعة والاعتماد</Badge>
               <Button type="button" onClick={() => printReconciliation(activeReconciliation)} className="h-10 rounded-lg bg-slate-950 text-white" data-testid="reconciliation-preview-print-button"><Printer className="h-4 w-4" /> طباعة هذه المعاينة</Button>
             </div>
-            <div className="rounded-2xl border border-slate-950 bg-white p-4" data-testid="reconciliation-print-sheet-frame">
-              <div className="relative border-b-2 border-slate-950 pb-3 text-center" data-testid="reconciliation-print-header">
-                <div className="absolute left-0 top-0" data-testid="reconciliation-print-bank-logo">
+            <div className="reconciliation-memo-sheet bg-white" data-testid="reconciliation-print-sheet-frame">
+              <div className="reconciliation-memo-header relative text-center" data-testid="reconciliation-print-header">
+                <div className="reconciliation-memo-logo absolute left-0 top-0" data-testid="reconciliation-print-bank-logo">
                   <BankLogo bankId={bank.id} bankName={bank.name} logoUrl={bank.logo_url} className="h-16 w-28" testId="reconciliation-print-bank-logo-mark" />
                 </div>
-                <p className="text-sm font-black text-slate-500" data-testid="reconciliation-print-organization">{activeReconciliation.administration || administration || currentAdministrationName}</p>
-                <h2 className="mt-1 text-3xl font-black text-slate-950" data-testid="reconciliation-print-title">مذكرة التسوية الشهرية</h2>
-                <p className="mt-1 text-lg font-extrabold text-slate-700" data-testid="reconciliation-print-period">{activeReconciliation.period_label || "—"}</p>
+                <h2 className="reconciliation-memo-org-title font-black text-slate-950" data-testid="reconciliation-print-organization">{activeReconciliation.administration || administration || currentAdministrationName}</h2>
+                <p className="reconciliation-memo-bank-line font-bold text-slate-600" data-testid="reconciliation-print-meta-bank">{bank.name}</p>
+                <p className="reconciliation-memo-period font-extrabold text-slate-800" data-testid="reconciliation-print-period">{periodMeta(activeReconciliation.period_label).month} {periodMeta(activeReconciliation.period_label).year}</p>
+                <span className="sr-only" data-testid="reconciliation-print-meta-month">{periodMeta(activeReconciliation.period_label).month}</span>
+                <span className="sr-only" data-testid="reconciliation-print-meta-year">{periodMeta(activeReconciliation.period_label).year}</span>
+                <span className="sr-only" data-testid="reconciliation-print-meta-created">{formatDateTime(activeReconciliation.created_at)}</span>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="reconciliation-print-meta-grid">
-                <div className="rounded-lg border border-slate-300 bg-slate-50 p-3" data-testid="reconciliation-print-meta-bank"><p className="text-xs font-bold text-slate-500">البنك</p><p className="font-black text-slate-950">{bank.name}</p></div>
-                <div className="rounded-lg border border-slate-300 bg-slate-50 p-3" data-testid="reconciliation-print-meta-month"><p className="text-xs font-bold text-slate-500">الشهر</p><p className="font-black text-slate-950">{periodMeta(activeReconciliation.period_label).month}</p></div>
-                <div className="rounded-lg border border-slate-300 bg-slate-50 p-3" data-testid="reconciliation-print-meta-year"><p className="text-xs font-bold text-slate-500">السنة</p><p className="font-black text-slate-950">{periodMeta(activeReconciliation.period_label).year}</p></div>
-                <div className="rounded-lg border border-slate-300 bg-slate-50 p-3" data-testid="reconciliation-print-meta-created"><p className="text-xs font-bold text-slate-500">تاريخ الإعداد</p><p className="font-black text-slate-950">{formatDateTime(activeReconciliation.created_at)}</p></div>
-              </div>
-              <div className="mt-3 overflow-hidden rounded-xl border border-slate-300" data-testid="reconciliation-print-formula-wrapper">
-                <Table data-testid="reconciliation-print-formula-table">
-                  <TableBody>
-                    <TableRow data-testid="reconciliation-print-formula-book-balance"><TableCell className="font-extrabold">رصيد الدفاتر قبل تسويات الشيكات</TableCell><TableCell className="text-left font-black">{formatEgpText(activeReconciliation.book_balance)}</TableCell></TableRow>
-                    <TableRow data-testid="reconciliation-print-formula-outstanding"><TableCell className="font-extrabold">يضاف: شيكات لم تقدم للصرف</TableCell><TableCell className="text-left font-black text-emerald-700">{formatEgpText(activeReconciliation.total_outstanding_checks)}</TableCell></TableRow>
-                    <TableRow data-testid="reconciliation-print-formula-collection"><TableCell className="font-extrabold">يخصم: شيكات تحت التحصيل</TableCell><TableCell className="text-left font-black text-red-700">{formatEgpText(activeReconciliation.total_collection_checks)}</TableCell></TableRow>
-                    <TableRow className="bg-slate-950 hover:bg-slate-950" data-testid="reconciliation-print-formula-calculated"><TableCell className="font-black text-white">الرصيد بعد التسوية</TableCell><TableCell className="text-left font-black text-white">{formatEgpText(activeReconciliation.calculated_balance)}</TableCell></TableRow>
-                    <TableRow data-testid="reconciliation-print-formula-bank-statement"><TableCell className="font-extrabold">رصيد كشف البنك</TableCell><TableCell className="text-left font-black">{formatEgpText(activeReconciliation.bank_statement_balance)}</TableCell></TableRow>
-                    <TableRow data-testid="reconciliation-print-formula-difference"><TableCell className="font-extrabold">الفرق</TableCell><TableCell className={`text-left font-black ${activeReconciliation.is_matched ? "text-emerald-700" : "text-red-700"}`}>{formatEgpText(activeReconciliation.difference)}</TableCell></TableRow>
-                  </TableBody>
-                </Table>
+              <div className="reconciliation-memo-balance text-right" data-testid="reconciliation-print-formula-book-balance">
+                <p className="reconciliation-memo-balance-label font-black text-slate-950">الرصيد</p>
+                <p className="reconciliation-memo-balance-value font-black text-slate-950">{formatEgpText(activeReconciliation.book_balance)}</p>
               </div>
             </div>
-            {activeReconciliation.outstanding_checks?.length > 0 && <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />}
-            {activeReconciliation.collection_checks?.length > 0 && <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks} testId="collection-print" total={activeReconciliation.total_collection_checks} />}
-            <div className="grid grid-cols-1 gap-3 pt-2 md:grid-cols-[1fr_1fr] print:mt-auto" data-testid="reconciliation-print-signatures">
-              <div className="rounded-xl border border-slate-300 p-4" data-testid="reconciliation-print-preparer-signature"><p className="text-xs font-bold text-slate-500">إعداد ومراجعة</p><p className="mt-6 border-t border-slate-400 pt-2 font-extrabold">التوقيع</p></div>
-              <div className="rounded-xl border border-slate-300 p-4" data-testid="reconciliation-print-approver-signature"><p className="text-xs font-bold text-slate-500">اعتماد</p><p className="mt-6 border-t border-slate-400 pt-2 font-extrabold">التوقيع</p></div>
-            </div>
-            <div className="flex justify-end pt-2 print:justify-start" data-testid="print-status-wrapper">
-              <div className={`rounded-xl p-4 text-center print:bg-transparent print:p-0 ${activeReconciliation.is_matched ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`} data-testid="print-status"><p className="text-xl font-extrabold" data-testid="print-status-text">{activeReconciliation.status_text}</p>{activeReconciliation.is_matched && <p className="mt-2 text-2xl font-black text-slate-950 print:mt-1" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p>}</div>
+            <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks || []} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />
+            <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks || []} testId="collection-print" total={activeReconciliation.total_collection_checks} />
+            <div className="hidden" data-testid="reconciliation-print-formula-wrapper"><span data-testid="reconciliation-print-formula-table" /><span data-testid="reconciliation-print-formula-outstanding">{formatEgpText(activeReconciliation.total_outstanding_checks)}</span><span data-testid="reconciliation-print-formula-collection">{formatEgpText(activeReconciliation.total_collection_checks)}</span><span data-testid="reconciliation-print-formula-calculated">{formatEgpText(activeReconciliation.calculated_balance)}</span><span data-testid="reconciliation-print-formula-bank-statement">{formatEgpText(activeReconciliation.bank_statement_balance)}</span><span data-testid="reconciliation-print-formula-difference">{formatEgpText(activeReconciliation.difference)}</span></div>
+            <div className="reconciliation-memo-footer flex justify-start pt-8" data-testid="print-status-wrapper">
+              <div className="text-left" data-testid="print-status"><p className="reconciliation-memo-status font-extrabold text-slate-950" data-testid="print-status-text">{activeReconciliation.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p><p className="reconciliation-memo-final-balance mt-1 font-bold text-slate-700" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>
             </div>
           </section>
         )}
