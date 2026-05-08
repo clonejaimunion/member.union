@@ -469,3 +469,16 @@
 - تم تحديث `ExportReportButtons` لتحويل كل صور التقرير إلى روابط مطلقة عند استخدام زر PDF/Word/Excel، حتى يظهر اللوجو أيضاً من زر الطباعة العلوي.
 - الاختبار الذاتي نجح: شعار بنك مصر ظهر في معاينة التسوية، ومصدر الصورة `/assets/bank-logos/banque-misr.svg` تم تحميله، ثم تم حذف تسوية اختبار اللوجو والتحقق من عدم بقاء بيانات اختبارية.
 - تم تشغيل lint و`yarn craco build` بنجاح، وتحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط `/api/download/setup`.
+
+## تشغيل صامت للبرنامج مع Splash Screen والشعار الرسمي بتاريخ 2026-05-08
+- تم اعتماد الصورة المرفوعة `ERP.png` كشعار رسمي للنظام، ونسخها إلى `/app/app_assets/erp-official-logo.png` و`/app/frontend/public/assets/branding/erp-official-logo.png` دون تعديل التصميم.
+- تم توليد أيقونة الاختصار `accounting_app.ico` من نفس الشعار الرسمي لأنه مربع 1024x1024، لاستخدامه في اختصارات Windows.
+- تم إضافة مشغّل صامت `launch_bank_deposit_system.vbs` يفتح `splash.hta` بدلاً من تشغيل ملف Batch مباشرة.
+- تم إضافة `splash.hta` بشاشة تشغيل احترافية تعرض الشعار الرسمي، Progress Bar، ورسائل حالة: تهيئة النظام، فحص قاعدة البيانات، التحقق من الترخيص، تشغيل الموديولات، وفتح الواجهة الرئيسية.
+- تم إضافة `start_system_worker.bat` لتنفيذ تهيئة البيئة وتشغيل الخدمات في الخلفية، مع إخفائه عبر HTA/VBS وكتابة السجلات فقط إلى `%LOCALAPPDATA%\BankDepositSystem\logs`.
+- تم إضافة `run_backend_hidden.vbs` وتشغيل `run_backend_server.bat` بشكل مخفي، وتعديل ملفات البات لإزالة `pause` وعدم عرض CMD عند التشغيل من الاختصار.
+- تم تحديث NSIS بحيث تختصرات سطح المكتب وقائمة Start تشغّل `wscript.exe launch_bank_deposit_system.vbs` بدلاً من `.bat`، لمنع ظهور Command Prompt للمستخدم.
+- تم استخدام الشعار الرسمي داخل واجهة البرنامج أيضاً في شاشة الدخول `login-official-logo-image` والصفحة الرئيسية `module-selection-official-logo`.
+- تم بناء الواجهة والمثبت بنجاح، والتحقق من وجود كل ملفات التشغيل الصامت داخل `/app/release/BankDepositSystem` ومن رابط `/api/download/setup` 200 وحجم الملف مطابق.
+- Testing agent iteration_80 نجح: regression suite `/app/backend/tests/test_iteration86_windows_silent_packaging.py` بنتيجة 9/9، وفحص الواجهة والشعار وملفات NSIS والتشغيل الصامت بنجاح.
+- ملاحظة اختبارية: عدم ظهور نافذة CMD فعلياً يحتاج تأكيد نهائي على جهاز Windows حقيقي، لأن بيئة الاختبار الحالية Linux؛ تم التحقق static/integration من سلسلة التشغيل الصامت.
