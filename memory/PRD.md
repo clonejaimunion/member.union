@@ -482,3 +482,9 @@
 - تم بناء الواجهة والمثبت بنجاح، والتحقق من وجود كل ملفات التشغيل الصامت داخل `/app/release/BankDepositSystem` ومن رابط `/api/download/setup` 200 وحجم الملف مطابق.
 - Testing agent iteration_80 نجح: regression suite `/app/backend/tests/test_iteration86_windows_silent_packaging.py` بنتيجة 9/9، وفحص الواجهة والشعار وملفات NSIS والتشغيل الصامت بنجاح.
 - ملاحظة اختبارية: عدم ظهور نافذة CMD فعلياً يحتاج تأكيد نهائي على جهاز Windows حقيقي، لأن بيئة الاختبار الحالية Linux؛ تم التحقق static/integration من سلسلة التشغيل الصامت.
+
+## توسيط عناصر Splash Screen بتاريخ 2026-05-08
+- تم تعديل `splash.hta` ليستخدم تخطيط Flex مركزي بالكامل داخل النافذة، بحيث يتم توسيط الشعار والعنوان ورسائل الحالة وشريط التحميل أفقياً ورأسياً.
+- تم ضبط حجم بطاقة الشعار إلى 300x300 وتثبيت `object-position:center center` و`margin:auto` للحفاظ على الصورة الرسمية كما هي مع عرضها في المنتصف.
+- تم ضبط منطقة الحالة `status-area` بعرض ثابت متوسط ومركزي، وجعل رسالة الحالة والنسبة وشريط التحميل في منتصف الشاشة.
+- تم إعادة بناء ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من أن `splash.hta` داخل release يحتوي على توسيط Flex وأن رابط `/api/download/setup` يعمل 200.
