@@ -350,6 +350,13 @@ export default function BankReconciliationPage() {
     return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   };
 
+  const escapePrintHtml = (value) => String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
   const periodMeta = (label) => {
     const text = String(label || "").trim();
     const months = ["يناير", "فبراير", "مارس", "أبريل", "ابريل", "مايو", "يونيو", "يوليو", "أغسطس", "اغسطس", "سبتمبر", "أكتوبر", "اكتوبر", "نوفمبر", "ديسمبر"];
@@ -377,7 +384,24 @@ export default function BankReconciliationPage() {
 
   const printReconciliation = (item) => {
     setActiveReconciliation(item);
-    setTimeout(() => window.print(), 120);
+    setTimeout(() => {
+      const printWindow = window.open("", "_blank", "width=900,height=1200");
+      if (!printWindow) {
+        window.print();
+        return;
+      }
+      const meta = periodMeta(item.period_label);
+      const logo = bank.logo_url ? `<img class="memo-logo" src="${escapePrintHtml(bank.logo_url)}" alt="${escapePrintHtml(bank.name)}" />` : `<div class="memo-logo-text">${escapePrintHtml(bank.name)}</div>`;
+      const rowsHtml = (rows) => (rows || []).length ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDate(row.check_date))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${escapePrintHtml(formatEgpText(row.amount))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">—</td></tr>`;
+      const checksSection = (title, rows, total) => `<section class="checks-section"><h3>${escapePrintHtml(title)}</h3><table><thead><tr><th>التاريخ يوم/شهر</th><th>رقم الشيك</th><th>المبلغ</th></tr></thead><tbody>${rowsHtml(rows)}<tr class="total-row"><td colspan="2">الإجمالي</td><td>${escapePrintHtml(formatEgpText(total))}</td></tr></tbody></table></section>`;
+      printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مذكرة التسوية</title><style>@page{size:A4 portrait;margin:5mm}html,body{margin:0;padding:0;background:#fff;direction:rtl;font-family:Tahoma,Arial,sans-serif;color:#111827}body{width:200mm;height:287mm;overflow:hidden}.memo-page{position:relative;box-sizing:border-box;width:190mm;height:277mm;max-height:277mm;overflow:hidden;padding:10mm 12mm 8mm;margin:0 auto;background:#fff}.memo-header{position:relative;min-height:38mm;text-align:center}.memo-logo{position:absolute;left:0;top:0;width:38mm;height:22mm;object-fit:contain}.memo-logo-text{position:absolute;left:0;top:0;width:38mm;border:1px solid #ddd;padding:3mm;font-weight:700;text-align:center}.org-title{font-size:15px;line-height:1.5;font-weight:900;margin:0;padding:0 42mm 0 20mm}.bank-line{font-size:10px;font-weight:700;color:#4b5563;margin:2mm 0 0}.period-line{font-size:13px;font-weight:900;margin:2mm 0 0}.balance{margin:15mm 0 7mm;text-align:right;padding-right:8mm}.balance .label{font-size:13px;font-weight:900}.balance .value{font-size:16px;font-weight:900;margin-top:2mm}.checks-section{padding:0 8mm;margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.checks-section h3{font-size:12px;font-weight:900;margin:0 0 2mm;text-align:right}table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #d7d7d7;padding:1.3mm 2mm;font-size:9px;line-height:1.15;text-align:right;vertical-align:middle}th{font-weight:900;background:#fff}.total-row td{border-top:1.6px solid #111827;font-weight:900}.empty-cell{text-align:center;color:#9ca3af}.footer{position:absolute;left:20mm;bottom:15mm;text-align:left;direction:rtl}.footer .status{font-size:13px;font-weight:900}.footer .amount{font-size:10px;font-weight:700;color:#374151;margin-top:1mm}@media print{html,body{width:200mm;height:287mm;overflow:hidden}.memo-page{page-break-after:avoid;break-after:avoid}}</style></head><body><main class="memo-page"><header class="memo-header">${logo}<h1 class="org-title">${escapePrintHtml(item.administration || administration || currentAdministrationName)}</h1><p class="bank-line">${escapePrintHtml(bank.name)}</p><p class="period-line">${escapePrintHtml(`${meta.month} ${meta.year}`)}</p></header><section class="balance"><p class="label">الرصيد</p><p class="value">${escapePrintHtml(formatEgpText(item.book_balance))}</p></section>${checksSection("يضاف: شيكات لم تقدم للصرف", item.outstanding_checks, item.total_outstanding_checks)}${checksSection("يخصم: شيكات تحت التحصيل", item.collection_checks, item.total_collection_checks)}<footer class="footer"><p class="status">${escapePrintHtml(item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق")}</p><p class="amount">${escapePrintHtml(formatEgpText(item.calculated_balance))}</p></footer></main></body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+        printWindow.close();
+      }, 300);
+    }, 120);
   };
 
   const confirmLeaveWithoutSaving = () => {
@@ -474,6 +498,7 @@ export default function BankReconciliationPage() {
               title={`مذكرة تسوية حساب - ${bank.name} - ${activeReconciliation?.period_label || ""}`}
               fileName={`مذكرة-تسوية-${bank.name}-${activeReconciliation?.period_label || ""}`}
               selectors={["[data-testid='reconciliation-print-report']"]}
+              printSelectors={["[data-testid='reconciliation-print-report']"]}
               disabled={!activeReconciliation}
               pdfTestId="print-reconciliation-pdf-button"
               excelTestId="export-reconciliation-excel-button"

@@ -431,6 +431,48 @@ html {
         margin-top: 1mm !important;
     }
 
+    body:has([data-testid="reconciliation-print-report"]) {
+        overflow: hidden !important;
+    }
+
+    body:has([data-testid="reconciliation-print-report"]) [data-testid="bank-reconciliation-page"] > :not([data-testid="reconciliation-print-report"]) {
+        display: none !important;
+    }
+
+    body:has([data-testid="reconciliation-print-report"]) [data-testid="bank-reconciliation-page"] {
+        display: block !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        height: 277mm !important;
+        max-height: 277mm !important;
+        overflow: hidden !important;
+    }
+
+    body:has([data-testid="reconciliation-print-report"]) [data-testid="bank-page-content"],
+    body:has([data-testid="reconciliation-print-report"]) main {
+        margin: 0 !important;
+        padding: 0 !important;
+        height: 277mm !important;
+        max-height: 277mm !important;
+        overflow: hidden !important;
+    }
+
+    body:has([data-testid="reconciliation-print-report"]) [data-testid="reconciliation-print-report"] {
+        width: 190mm !important;
+        height: 277mm !important;
+        max-height: 277mm !important;
+        min-height: 277mm !important;
+        overflow: hidden !important;
+        margin: 0 auto !important;
+        padding: 8mm 10mm !important;
+        page-break-before: avoid !important;
+        page-break-after: avoid !important;
+        break-before: avoid !important;
+        break-after: avoid !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-header"],
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-content"],
     body:has([data-testid="expense-invoice-modal-overlay"]) [data-testid="expenses-footer"],

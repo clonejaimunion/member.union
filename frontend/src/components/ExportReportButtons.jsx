@@ -44,6 +44,7 @@ const cloneReportContent = (selectors) => {
 
 const buildOfficeHtml = ({ title, selectors, excel = false }) => {
   const bodyHtml = cloneReportContent(selectors);
+  const isReconciliationMemo = (selectors || []).some((selector) => String(selector).includes("reconciliation-print-report"));
   const workbookMeta = excel ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>${escapeHtml(title || "تقرير")}</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>` : "";
   return `<!doctype html>
 <html dir="rtl" lang="ar" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:w="urn:schemas-microsoft-com:office:word">
@@ -51,15 +52,16 @@ const buildOfficeHtml = ({ title, selectors, excel = false }) => {
   <meta charset="utf-8" />
   ${workbookMeta}
   <style>
-    @page { size: A4 portrait; margin: 6mm; }
-    body { direction: rtl; font-family: Tahoma, Arial, sans-serif; color: #111827; }
+    @page { size: A4 portrait; margin: ${isReconciliationMemo ? "5mm" : "6mm"}; }
+    body { direction: rtl; font-family: Tahoma, Arial, sans-serif; color: #111827; ${isReconciliationMemo ? "width:200mm;height:287mm;overflow:hidden;margin:0;padding:0;" : ""} }
     h1, h2, h3, p { margin: 0 0 6px; }
+    ${isReconciliationMemo ? "body > h1 { display:none; }" : ""}
     section, article, div { box-sizing: border-box; }
     table { border-collapse: collapse; width: 100%; table-layout: auto; margin: 10px 0; }
     th, td { border: 1px solid #111827; padding: 6px; text-align: right; vertical-align: top; white-space: normal; }
     th { background: #111827; color: #ffffff; font-weight: 700; }
     .rounded-xl, .rounded-lg { border-radius: 4px; }
-    [data-testid="reconciliation-print-report"] { max-height: 285mm; overflow: visible; zoom: 0.82; font-size: 8px; line-height: 1.12; }
+    [data-testid="reconciliation-print-report"] { ${isReconciliationMemo ? "width:190mm;height:277mm;max-height:277mm;min-height:277mm;overflow:hidden;margin:0 auto;padding:8mm 10mm;zoom:0.86;page-break-after:avoid;break-after:avoid;" : "max-height:285mm;overflow:visible;zoom:0.82;"} font-size: 8px; line-height: 1.12; }
     [data-testid="reconciliation-print-report"] h3 { font-size: 10px; margin: 2px 0; }
     [data-testid="reconciliation-print-report"] table { margin: 2px 0; table-layout: fixed; }
     [data-testid="reconciliation-print-report"] th,
