@@ -11,6 +11,8 @@ import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 import unionLogo from "@/assets/union-logo.jpg";
 
+const officialSystemLogo = "/assets/branding/erp-official-logo.png";
+
 const authorityLogo = (primary, secondary, accent, path) => `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="${primary}"/><stop offset="1" stop-color="${secondary}"/></linearGradient><filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#001b12" flood-opacity=".25"/></filter></defs><circle cx="60" cy="60" r="54" fill="white"/><circle cx="60" cy="60" r="48" fill="url(#g)" filter="url(#s)"/><circle cx="60" cy="60" r="38" fill="none" stroke="rgba(255,255,255,.72)" stroke-width="3"/><path d="${path}" fill="${accent}"/><path d="M38 90h44" stroke="white" stroke-width="5" stroke-linecap="round" opacity=".82"/></svg>`)} `;
 
 const authorityLogos = [
@@ -138,7 +140,13 @@ export default function LoginPage() {
           <CreditLine className="mt-6 text-center text-xs font-bold text-slate-500" testId="login-creator-credit" />
         </section>
         <section className="order-1 space-y-6 lg:order-2" data-testid="login-hero-section">
-          {settings.login_union_logo_visible !== false && <div className="relative mx-auto flex max-w-sm select-none items-center justify-center py-2 [perspective:1200px]" data-testid="login-union-logo-3d-stage">
+          <div className="relative mx-auto flex max-w-sm select-none items-center justify-center py-2 [perspective:1200px]" data-testid="login-official-logo-stage">
+            <div className="absolute inset-x-8 bottom-0 h-10 rounded-full bg-sky-400/20 blur-2xl" data-testid="login-official-logo-glow" />
+            <div className="relative rounded-[2rem] border border-sky-200/25 bg-black/20 p-4 shadow-[0_35px_90px_rgba(14,165,233,0.28)] backdrop-blur-xl transition-transform duration-500 hover:[transform:rotateY(6deg)_translateY(-4px)]" data-testid="login-official-logo-card">
+              <img src={officialSystemLogo} alt="الشعار الرسمي للنظام" draggable={false} className="relative h-44 w-44 rounded-[1.5rem] object-contain drop-shadow-[0_18px_30px_rgba(0,0,0,0.42)] sm:h-56 sm:w-56" data-testid="login-official-logo-image" />
+            </div>
+          </div>
+          {settings.login_union_logo_visible !== false && <div className="relative mx-auto hidden max-w-sm select-none items-center justify-center py-2 [perspective:1200px]" data-testid="login-union-logo-3d-stage">
             <div className="absolute inset-x-8 bottom-0 h-10 rounded-full bg-emerald-400/20 blur-2xl" data-testid="login-union-logo-glow" />
             <div className="relative rounded-[2rem] border border-emerald-200/25 bg-white/10 p-4 shadow-[0_35px_90px_rgba(16,185,129,0.28)] backdrop-blur-xl transition-transform duration-500 hover:[transform:rotateY(6deg)_translateY(-4px)]" data-testid="login-union-logo-3d-card">
               <div className="absolute inset-0 rounded-[2rem] bg-[linear-gradient(135deg,rgba(255,255,255,0.32),transparent_38%,rgba(16,185,129,0.2))]" data-testid="login-union-logo-glass" />

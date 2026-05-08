@@ -1,0 +1,98 @@
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="utf-8" />
+  <title>ERP Startup</title>
+  <hta:application id="BankDepositSplash" applicationname="ERP Startup" border="thin" borderstyle="complex" caption="no" contextmenu="no" maximizebutton="no" minimizebutton="no" scroll="no" selection="no" showintaskbar="yes" singleinstance="yes" sysmenu="no" windowstate="normal" />
+  <style>
+    html, body { width: 880px; height: 600px; margin: 0; overflow: hidden; background: #020617; font-family: Tahoma, Arial, sans-serif; color: #f8fafc; }
+    body { background: radial-gradient(circle at 18% 18%, rgba(56,189,248,.24), transparent 28%), radial-gradient(circle at 82% 24%, rgba(14,165,233,.18), transparent 26%), linear-gradient(135deg, #020617 0%, #07111f 42%, #000 100%); }
+    .shell { position: relative; box-sizing: border-box; width: 100%; height: 100%; padding: 34px 42px; display: grid; grid-template-rows: 1fr auto; gap: 20px; }
+    .frame { position: absolute; inset: 16px; border: 1px solid rgba(56,189,248,.34); box-shadow: inset 0 0 26px rgba(56,189,248,.2), 0 0 44px rgba(14,165,233,.16); pointer-events: none; }
+    .brand { display: grid; place-items: center; text-align: center; }
+    .logo-card { width: 360px; height: 360px; display: grid; place-items: center; border: 1px solid rgba(148,163,184,.24); background: rgba(0,0,0,.34); box-shadow: 0 28px 90px rgba(0,0,0,.44); }
+    .logo-card img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+    .title { margin: 18px 0 0; font-size: 28px; font-weight: 900; letter-spacing: .03em; }
+    .subtitle { margin-top: 7px; font-size: 13px; color: #bae6fd; font-weight: 700; }
+    .status-area { position: relative; z-index: 1; }
+    .status-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 10px; font-size: 14px; font-weight: 700; color: #e0f2fe; }
+    .progress { width: 100%; height: 14px; border: 1px solid rgba(125,211,252,.35); background: rgba(15,23,42,.86); overflow: hidden; }
+    .bar { height: 100%; width: 8%; background: linear-gradient(90deg, #0284c7, #38bdf8, #e0f2fe); box-shadow: 0 0 18px rgba(56,189,248,.74); transition: width .45s ease; }
+    .hint { margin-top: 10px; color: #94a3b8; font-size: 11px; text-align: center; }
+  </style>
+  <script language="javascript">
+    var shell = new ActiveXObject("WScript.Shell");
+    var fso = new ActiveXObject("Scripting.FileSystemObject");
+    var appPath = decodeURIComponent(location.pathname).replace(/^\/([A-Za-z]:)/, "$1").replace(/\//g, "\\");
+    var appDir = fso.GetParentFolderName(appPath);
+    var statuses = ["جاري تهيئة النظام...", "جاري فحص قاعدة البيانات...", "جاري التحقق من الترخيص...", "جاري تشغيل الموديولات...", "جاري فتح الواجهة الرئيسية..."];
+    var index = 0;
+    var progress = 8;
+    var startedAt = new Date().getTime();
+
+    function centerWindow() {
+      window.resizeTo(880, 600);
+      window.moveTo((screen.width - 880) / 2, (screen.height - 600) / 2);
+    }
+
+    function setStatus(text, value) {
+      document.getElementById("statusText").innerText = text;
+      document.getElementById("percentText").innerText = Math.min(100, Math.floor(value)) + "%";
+      document.getElementById("bar").style.width = Math.min(100, value) + "%";
+    }
+
+    function serverReady() {
+      try {
+        var http = new ActiveXObject("MSXML2.XMLHTTP");
+        http.open("GET", "http://127.0.0.1:8001/api/app-settings/public?ts=" + new Date().getTime(), false);
+        http.send();
+        return http.status >= 200 && http.status < 500;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function openSystem() {
+      setStatus("تم التشغيل بنجاح...", 100);
+      setTimeout(function () {
+        shell.Run("http://localhost:8001", 1, false);
+        window.close();
+      }, 650);
+    }
+
+    function tick() {
+      if (index < statuses.length - 1) index += 1;
+      progress = Math.min(92, progress + 11);
+      setStatus(statuses[index], progress);
+      if (serverReady() && new Date().getTime() - startedAt > 2600) {
+        openSystem();
+        return;
+      }
+      setTimeout(tick, 950);
+    }
+
+    function start() {
+      centerWindow();
+      document.getElementById("logo").src = appDir + "\\app_assets\\erp-official-logo.png";
+      shell.Run("cmd.exe /c \"" + appDir + "\\start_system_worker.bat\"", 0, false);
+      setStatus(statuses[0], progress);
+      setTimeout(tick, 700);
+    }
+  </script>
+</head>
+<body onload="start()">
+  <div class="frame"></div>
+  <main class="shell">
+    <section class="brand">
+      <div class="logo-card"><img id="logo" alt="ERP" /></div>
+      <h1 class="title">نظام ERP المحاسبي</h1>
+      <div class="subtitle">تشغيل صامت للخدمات الخلفية وتجهيز الواجهة الرئيسية</div>
+    </section>
+    <section class="status-area">
+      <div class="status-row"><span id="statusText">جاري تهيئة النظام...</span><span id="percentText">8%</span></div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div class="hint">يرجى الانتظار — يتم تشغيل قاعدة البيانات والموديولات في الخلفية بدون نوافذ أو أوامر نصية</div>
+    </section>
+  </main>
+</body>
+</html>

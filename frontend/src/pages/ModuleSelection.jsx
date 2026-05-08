@@ -7,6 +7,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { isModuleEnabled } from "@/lib/modules";
 
+const officialSystemLogo = "/assets/branding/erp-official-logo.png";
+
 export default function ModuleSelection({ accountingOnly = false, studiesOnly = false }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -216,7 +218,7 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
       <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="module-selection-header">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3" data-testid="module-selection-brand">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm" data-testid="module-selection-brand-icon"><img src={officialSystemLogo} alt="الشعار الرسمي للنظام" className="h-full w-full object-contain" data-testid="module-selection-official-logo" /></div>
             <div>
               <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">{pageEyebrow}</p>
               <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{organizationName}</h1>

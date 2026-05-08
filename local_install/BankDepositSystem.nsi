@@ -17,8 +17,8 @@ Section "Install"
   File /r "..\release\BankDepositSystem\*"
 
   CreateDirectory "$SMPROGRAMS\Bank Deposit Interest System"
-  CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
-  CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$INSTDIR\start_bank_deposit_system.bat" "" "$INSTDIR\accounting_app.ico" 0
+  CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\launch_bank_deposit_system.vbs"' "$INSTDIR\accounting_app.ico" 0
+  CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\launch_bank_deposit_system.vbs"' "$INSTDIR\accounting_app.ico" 0
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
