@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Landmark, LogOut, NotebookPen, PackageCheck, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Handshake, Landmark, LineChart, LogOut, NotebookPen, PackageCheck, PackageSearch, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -28,6 +28,10 @@ export default function ModuleSelection({ accountingOnly = false }) {
   const canUseFixedAssets = isModuleEnabled(user, "fixed_assets") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseCustodyAdvances = isModuleEnabled(user, "custody_advances") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseMembership = isModuleEnabled(user, "membership") && user?.organization_id === "social-solidarity" && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_users);
+  const canUseInventory = isModuleEnabled(user, "inventory") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseMiscCreditors = isModuleEnabled(user, "misc_creditors") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseFeasibility = isModuleEnabled(user, "feasibility_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseActuarial = isModuleEnabled(user, "actuarial_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const showSocialHub = user?.organization_id === "social-solidarity" && !accountingOnly;
 
   const hubModules = [
@@ -90,6 +94,20 @@ export default function ModuleSelection({ accountingOnly = false }) {
       icon: NotebookPen,
       testId: "module-journal-entries-card",
     },
+    canUseInventory && {
+      title: "دفتر المخزون",
+      description: "وارد ومنصرف ورصيد لكل صنف مع قيود تلقائية وأثر مباشر على الأصول المتداولة.",
+      path: "/inventory",
+      icon: PackageSearch,
+      testId: "module-inventory-card",
+    },
+    canUseMiscCreditors && {
+      title: "الدائنون المتنوعون",
+      description: "إثبات الالتزامات وسدادها بقيود تلقائية ورصيد مستقل لكل دائن.",
+      path: "/misc-creditors",
+      icon: Handshake,
+      testId: "module-misc-creditors-card",
+    },
     canUseTrialBalance && {
       title: "ميزان المراجعة",
       description: "تقرير تلقائي بالمجاميع والأرصدة من القيود اليومية وشجرة الحسابات.",
@@ -145,6 +163,20 @@ export default function ModuleSelection({ accountingOnly = false }) {
       path: "/electronic-invoice",
       icon: FileCheck2,
       testId: "module-electronic-invoice-card",
+    },
+    canUseFeasibility && {
+      title: "دراسة جدوى",
+      description: "تحليل مستقل للتكاليف والإيرادات ونقطة التعادل وفترة الاسترداد بدون قيود محاسبية.",
+      path: "/feasibility-study",
+      icon: FileBarChart,
+      testId: "module-feasibility-study-card",
+    },
+    canUseActuarial && {
+      title: "دراسة اكتوارية",
+      description: "تقدير الأعضاء والتدفقات والالتزامات ومعدل كفاية الصندوق بدون أثر مالي مرحل.",
+      path: "/actuarial-study",
+      icon: LineChart,
+      testId: "module-actuarial-study-card",
     },
   ].filter(Boolean);
 

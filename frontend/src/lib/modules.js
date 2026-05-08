@@ -14,6 +14,10 @@ export const moduleDefinitions = {
   banking_expenses: "المصروفات البنكية",
   ledger: "دفتر الأستاذ",
   electronic_invoice: "الفاتورة الإلكترونية",
+  inventory: "دفتر المخزون",
+  misc_creditors: "دفتر الدائنين المتنوعين",
+  feasibility_study: "دراسة جدوى",
+  actuarial_study: "دراسة اكتوارية",
 };
 
 export const isModuleEnabled = (user, moduleKey) => user?.organization_modules?.[moduleKey] !== false;

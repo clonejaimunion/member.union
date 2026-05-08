@@ -29,6 +29,10 @@ import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import CustodyAdvancesPage from "@/pages/CustodyAdvancesPage";
 import MembershipPage from "@/pages/MembershipPage";
 import ElectronicInvoicePage from "@/pages/ElectronicInvoicePage";
+import InventoryPage from "@/pages/InventoryPage";
+import MiscCreditorsPage from "@/pages/MiscCreditorsPage";
+import FeasibilityStudyPage from "@/pages/FeasibilityStudyPage";
+import ActuarialStudyPage from "@/pages/ActuarialStudyPage";
 import { isModuleEnabled } from "@/lib/modules";
 
 const defaultAppTitle = "نظام محاسبي متكامل";
@@ -52,6 +56,10 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/trial-balance", title: `ميزان المراجعة - ${appTitle}` },
   { test: (path) => path === "/financial-statements", title: `القوائم المالية - ${appTitle}` },
   { test: (path) => path === "/journal-entries", title: `القيود اليومية - ${appTitle}` },
+  { test: (path) => path === "/inventory", title: `دفتر المخزون - ${appTitle}` },
+  { test: (path) => path === "/misc-creditors", title: `دفتر الدائنين المتنوعين - ${appTitle}` },
+  { test: (path) => path === "/feasibility-study", title: `دراسة جدوى - ${appTitle}` },
+  { test: (path) => path === "/actuarial-study", title: `دراسة اكتوارية - ${appTitle}` },
   { test: (path) => path === "/electronic-invoice", title: `الفاتورة الإلكترونية - ${appTitle}` },
   { test: (path) => path === "/secure-admin-control-panel", title: `لوحة الأدمن - ${appTitle}` },
   { test: (path) => path.endsWith("/register"), title: `تسجيل الودائع - ${appTitle}` },
@@ -173,6 +181,10 @@ function App() {
               <Route path="/trial-balance" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="trial_balance"><TrialBalancePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/financial-statements" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="financial_statements"><FinancialStatementsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/journal-entries" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="journal_entries"><JournalEntriesPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/inventory" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="inventory"><InventoryPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/misc-creditors" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="misc_creditors"><MiscCreditorsPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/feasibility-study" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="feasibility_study"><FeasibilityStudyPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/actuarial-study" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="actuarial_study"><ActuarialStudyPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/electronic-invoice" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_revenues"]}><ModuleRoute moduleKey="electronic_invoice"><ElectronicInvoicePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/secure-admin-control-panel" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
               <Route path="/bank/:bankId/register" element={<ProtectedRoute permission="enter_deposits"><ModuleRoute moduleKey="deposits"><DepositRegistration /></ModuleRoute></ProtectedRoute>} />
