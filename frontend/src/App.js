@@ -7,6 +7,8 @@ import { AppSettingsProvider, useAppSettings } from "@/contexts/AppSettingsConte
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { applyEasternArabicNumeralsToDocument } from "@/lib/format";
 import BankSelection from "@/pages/BankSelection";
+import BankPrintsPortalPage from "@/pages/BankPrintsPortalPage";
+import BanqueMisrPrintPage from "@/pages/BanqueMisrPrintPage";
 import DepositRegistration from "@/pages/DepositRegistration";
 import ReportPage from "@/pages/ReportPage";
 import LoginPage from "@/pages/LoginPage";
@@ -42,6 +44,8 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/", title: appTitle },
   { test: (path) => path === "/login", title: appTitle },
   { test: (path) => path === "/accounting", title: `الحسابات - ${appTitle}` },
+  { test: (path) => path === "/bank-prints", title: `مطبوعات بنكية - ${appTitle}` },
+  { test: (path) => path === "/bank-prints/banque-misr", title: `مطبوعات بنك مصر - ${appTitle}` },
   { test: (path) => path === "/membership", title: `العضوية - ${appTitle}` },
   { test: (path) => path === "/studies", title: `الدراسات والتحليلات - ${appTitle}` },
   { test: (path) => path === "/custody-advances", title: `العهد والسلف - ${appTitle}` },
@@ -169,6 +173,8 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute><ModuleSelection accountingOnly /></ProtectedRoute>} />
+              <Route path="/bank-prints" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="bank_prints"><BankPrintsPortalPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/bank-prints/banque-misr" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="bank_prints"><BanqueMisrPrintPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/studies" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleSelection studiesOnly /></ProtectedRoute>} />
               <Route path="/membership" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_users"]}><ModuleRoute moduleKey="membership"><MembershipPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/custody-advances" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="custody_advances"><CustodyAdvancesPage /></ModuleRoute></ProtectedRoute>} />

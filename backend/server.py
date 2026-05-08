@@ -17,6 +17,7 @@ import math
 import base64
 from io import BytesIO
 import re
+import html
 import urllib.request
 import json
 import hashlib
@@ -93,6 +94,7 @@ MODULE_DEFINITIONS = {
     "banking_expenses": "المصروفات البنكية",
     "ledger": "دفتر الأستاذ",
     "treasury_banks": "الخزينة والبنوك",
+    "bank_prints": "مطبوعات بنكية",
     "electronic_invoice": "الفاتورة الإلكترونية",
 }
 
@@ -669,6 +671,62 @@ class TreasuryBanksReport(BaseModel):
     summary: TreasuryBanksSummary
     accounts: List[TreasuryBanksAccount]
     transactions: List[TreasuryBanksTransaction]
+
+
+class BankPrintExternalRow(BaseModel):
+    id: str
+    section: str
+    title: str
+    description: Optional[str] = None
+    currency: Optional[str] = None
+    buy: Optional[str] = None
+    sell: Optional[str] = None
+    url: Optional[str] = None
+
+
+class BankPrintExternalData(BaseModel):
+    bank_id: str
+    bank_name: str
+    source_url: str
+    fetched_at: datetime
+    status: Literal["OK", "NO_DATA"] = "OK"
+    checksum: str
+    rows: List[BankPrintExternalRow]
+
+
+class BankPrintManualInput(BaseModel):
+    bank_notes: Optional[str] = Field(default=None, max_length=500)
+    checks_or_settlements_numbers: Optional[str] = Field(default=None, max_length=220)
+    descriptive_adjustments: Optional[str] = Field(default=None, max_length=500)
+    period_from: Optional[date] = None
+    period_to: Optional[date] = None
+    internal_approver_name: Optional[str] = Field(default=None, max_length=120)
+    internal_signature: Optional[str] = Field(default=None, max_length=160)
+    approval_code: Optional[str] = Field(default=None, max_length=80)
+
+
+class BankPrintRequestCreate(BaseModel):
+    manual_inputs: BankPrintManualInput
+
+
+class BankPrintRequestStatusUpdate(BaseModel):
+    status: Literal["saved_before_print", "printed", "cancelled"]
+
+
+class BankPrintRequestResponse(BaseModel):
+    id: str
+    organization_id: str
+    bank_id: str
+    bank_name: str
+    source_url: str
+    external_data: BankPrintExternalData
+    manual_inputs: BankPrintManualInput
+    status: Literal["saved_before_print", "printed", "cancelled"]
+    created_by: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    printed_at: Optional[datetime] = None
 
 
 class TrialBalanceRow(BaseModel):
@@ -3535,6 +3593,127 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
         total_payments=total_payments,
         reconciliation_balance=reconciliation_balance,
     )
+
+
+BANQUE_MISR_EXTERNAL_SOURCE_URL = "https://www.banquemisr.ae/#tab-2"
+
+
+def clean_external_html_text(value: Optional[str]) -> str:
+    text = html.unescape(re.sub(r"<[^>]+>", " ", value or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def absolute_external_url(value: Optional[str], base_url: str = BANQUE_MISR_EXTERNAL_SOURCE_URL) -> Optional[str]:
+    if not value:
+        return None
+    return urllib.parse.urljoin(base_url, value)
+
+
+def fetch_external_html(url: str) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 BankDepositSystem/1.0; ReadOnlyBankPrints",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            content_type = response.headers.get("Content-Type", "")
+            charset_match = re.search(r"charset=([^;]+)", content_type, re.I)
+            charset = charset_match.group(1).strip() if charset_match else "utf-8"
+            return response.read().decode(charset, errors="ignore")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"تعذر جلب بيانات بنك مصر من المصدر الخارجي: {exc}")
+
+
+def extract_banque_misr_rows(raw_html: str) -> List[dict]:
+    rows: List[dict] = []
+    seen = set()
+    for match in re.finditer(r'<div class="slick-slide"\s+title="([^"]+)">.*?<h6[^>]*>([^<]+)</h6>.*?<label>BUY</label>\s*<b>([^<]+)</b>.*?<label>SELL</label>\s*<b>([^<]+)</b>', raw_html, re.I | re.S):
+        title, currency, buy, sell = [clean_external_html_text(item) for item in match.groups()]
+        key = f"fx-{currency}"
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "id": key.lower(),
+            "section": "أسعار العملات",
+            "title": title,
+            "description": "سعر شراء وبيع لحظي ظاهر في صفحة بنك مصر الخارجية",
+            "currency": currency,
+            "buy": buy,
+            "sell": sell,
+            "url": "https://www.banquemisr.ae/personal-banking/remittances/#fx-rates",
+        })
+    for match in re.finditer(r'<h1[^>]*>(.*?)</h1>\s*<a[^>]+href="([^"]+)"[^>]*>\s*Learn More\s*</a>', raw_html, re.I | re.S):
+        title = clean_external_html_text(match.group(1))
+        url = absolute_external_url(html.unescape(match.group(2)))
+        key = f"product-{normalize_arabic_key(title)}"
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            "section": "منتجات وخدمات",
+            "title": title,
+            "description": "منتج أو خدمة ظاهرة في واجهة بنك مصر الخارجية",
+            "currency": None,
+            "buy": None,
+            "sell": None,
+            "url": url,
+        })
+    for match in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>.*?<span class="font-weight-bold">(.*?)</span>.*?<div class="exeption"[^>]*>\s*<p>(.*?)</p>', raw_html, re.I | re.S):
+        url = absolute_external_url(html.unescape(match.group(1)))
+        title = clean_external_html_text(match.group(2))
+        description = clean_external_html_text(match.group(3))
+        key = f"service-{normalize_arabic_key(title)}"
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "id": hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            "section": "خدمات مصرفية",
+            "title": title,
+            "description": description,
+            "currency": None,
+            "buy": None,
+            "sell": None,
+            "url": url,
+        })
+    return rows
+
+
+def fetch_banque_misr_external_data() -> BankPrintExternalData:
+    raw_html = fetch_external_html(BANQUE_MISR_EXTERNAL_SOURCE_URL)
+    rows = extract_banque_misr_rows(raw_html)
+    checksum_payload = json.dumps(rows, ensure_ascii=False, sort_keys=True)
+    return BankPrintExternalData(
+        bank_id="banque-misr",
+        bank_name="بنك مصر",
+        source_url=BANQUE_MISR_EXTERNAL_SOURCE_URL,
+        fetched_at=datetime.now(timezone.utc),
+        status="OK" if rows else "NO_DATA",
+        checksum=hashlib.sha256(checksum_payload.encode("utf-8")).hexdigest(),
+        rows=[BankPrintExternalRow(**row) for row in rows],
+    )
+
+
+def hydrate_bank_print_request(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at", "printed_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    external_data = clean.get("external_data") or {}
+    if isinstance(external_data.get("fetched_at"), str):
+        external_data["fetched_at"] = datetime.fromisoformat(external_data["fetched_at"])
+    manual_inputs = clean.get("manual_inputs") or {}
+    for date_field in ["period_from", "period_to"]:
+        if isinstance(manual_inputs.get(date_field), str) and manual_inputs.get(date_field):
+            manual_inputs[date_field] = date.fromisoformat(manual_inputs[date_field])
+    clean["external_data"] = external_data
+    clean["manual_inputs"] = manual_inputs
+    return clean
 
 
 async def journal_for_bank_opening_balance(bank: dict, opening_balance: float, current_user: Optional[dict] = None):
@@ -7603,6 +7782,70 @@ async def get_treasury_banks_report(
     return TreasuryBanksReport(summary=summary, accounts=[TreasuryBanksAccount(**item) for item in treasury_accounts], transactions=transactions)
 
 
+@api_router.get("/bank-prints/banque-misr/external-data", response_model=BankPrintExternalData)
+async def banque_misr_external_print_data(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    return fetch_banque_misr_external_data()
+
+
+@api_router.get("/bank-prints/requests", response_model=List[BankPrintRequestResponse])
+async def list_bank_print_requests(
+    bank_id: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if bank_id:
+        query["bank_id"] = bank_id
+    documents = await db.bank_print_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [BankPrintRequestResponse(**hydrate_bank_print_request(document)) for document in documents]
+
+
+@api_router.post("/bank-prints/banque-misr/requests", response_model=BankPrintRequestResponse)
+async def create_banque_misr_print_request(payload: BankPrintRequestCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    manual_inputs = payload.manual_inputs
+    if manual_inputs.period_from and manual_inputs.period_to and manual_inputs.period_from > manual_inputs.period_to:
+        raise HTTPException(status_code=400, detail="تاريخ بداية الفترة يجب أن يكون قبل تاريخ النهاية")
+    external_data = fetch_banque_misr_external_data()
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "bank_id": "banque-misr",
+        "bank_name": "بنك مصر",
+        "source_url": BANQUE_MISR_EXTERNAL_SOURCE_URL,
+        "external_data": external_data.model_dump(mode="json"),
+        "manual_inputs": manual_inputs.model_dump(mode="json"),
+        "status": "saved_before_print",
+        "created_by": current_user.get("id"),
+        "created_by_name": real_name_for_user(current_user),
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "printed_at": None,
+    })
+    await db.bank_print_requests.insert_one(document.copy())
+    return BankPrintRequestResponse(**hydrate_bank_print_request(document))
+
+
+@api_router.get("/bank-prints/requests/{request_id}", response_model=BankPrintRequestResponse)
+async def get_bank_print_request(request_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    document = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="طلب الطباعة غير موجود")
+    return BankPrintRequestResponse(**hydrate_bank_print_request(document))
+
+
+@api_router.patch("/bank-prints/requests/{request_id}/status", response_model=BankPrintRequestResponse)
+async def update_bank_print_request_status(request_id: str, payload: BankPrintRequestStatusUpdate, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    existing = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="طلب الطباعة غير موجود")
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    updates = {"status": payload.status, "updated_at": now_iso}
+    if payload.status == "printed":
+        updates["printed_at"] = now_iso
+    await db.bank_print_requests.update_one(with_organization({"id": request_id}), {"$set": updates})
+    updated = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
+    return BankPrintRequestResponse(**hydrate_bank_print_request(updated))
+
+
 @api_router.get("/inventory/items", response_model=List[InventoryItemResponse])
 async def list_inventory_items(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
     await sync_chart_accounts_for_organization(organization_id_or_default())
@@ -8495,8 +8738,8 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
-USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "bank_print_requests", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "bank_print_requests", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
 TRAINING_DIR = ROOT_DIR.parent / "training_exports"
 TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 
