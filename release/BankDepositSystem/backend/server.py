@@ -14,11 +14,20 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 import calendar
 import math
+import time
 import base64
 from io import BytesIO
 import re
 import html
 import urllib.request
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table as PdfTable, TableStyle
 import json
 import hashlib
 import secrets
@@ -60,6 +69,8 @@ ADMIN_INITIAL_PASSWORD = os.environ['ADMIN_INITIAL_PASSWORD']
 CORS_ORIGINS = [origin.strip() for origin in os.environ['CORS_ORIGINS'].split(',') if origin.strip()]
 APP_ASSETS_DIR = ROOT_DIR.parent / "app_assets"
 APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+GENERATED_REPORTS_DIR = ROOT_DIR.parent / "generated_reports"
+GENERATED_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 APP_ICON_PATH = APP_ASSETS_DIR / "accounting_app_custom.ico"
 DEFAULT_SYSTEM_NAME = "نظام محاسبي متكامل"
 DEFAULT_ORGANIZATION_ID = "social-solidarity"
@@ -94,7 +105,7 @@ MODULE_DEFINITIONS = {
     "banking_expenses": "المصروفات البنكية",
     "ledger": "دفتر الأستاذ",
     "treasury_banks": "الخزينة والبنوك",
-    "bank_prints": "مطبوعات بنكية",
+    "erp_health_report": "تقرير تقييم النظام",
     "electronic_invoice": "الفاتورة الإلكترونية",
 }
 
@@ -727,6 +738,27 @@ class BankPrintRequestResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     printed_at: Optional[datetime] = None
+
+
+class ErpHealthMetric(BaseModel):
+    key: str
+    title: str
+    score: int
+    status: str
+    details: str
+
+
+class ErpHealthReportResponse(BaseModel):
+    id: str
+    organization_id: str
+    generated_at: datetime
+    period_from: date
+    period_to: date
+    overall_score: int
+    metrics: List[ErpHealthMetric]
+    recommendations: List[str]
+    direct_download_url: str
+    source: str = "read_only_ledger_trial_reconciliations_audit"
 
 
 class TrialBalanceRow(BaseModel):
@@ -4306,6 +4338,212 @@ def validation_tests_from_flow(accounting_validation: dict, membership_validatio
     ]
 
 
+def health_score(base: int, penalties: List[int]) -> int:
+    return max(0, min(100, int(base - sum(penalties))))
+
+
+def health_status(score: int) -> str:
+    if score >= 90:
+        return "ممتاز"
+    if score >= 80:
+        return "جيد جداً"
+    if score >= 70:
+        return "جيد"
+    if score >= 55:
+        return "يحتاج متابعة"
+    return "حرج"
+
+
+def pdf_ar(value: object) -> str:
+    text = str(value if value is not None else "-")
+    return get_display(arabic_reshaper.reshape(text))
+
+
+def register_erp_pdf_font() -> str:
+    font_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
+    for font_path in font_candidates:
+        if Path(font_path).exists():
+            try:
+                pdfmetrics.registerFont(TTFont("ArabicReportFont", font_path))
+                return "ArabicReportFont"
+            except Exception:
+                continue
+    return "Helvetica"
+
+
+def public_app_base_url(request: Request) -> str:
+    for origin in CORS_ORIGINS:
+        if origin.startswith("https://") and "preview" in origin:
+            return origin.rstrip("/")
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    forwarded_proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    if forwarded_host:
+        return f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+def metric_as_model(key: str, title: str, score: int, details: str) -> ErpHealthMetric:
+    return ErpHealthMetric(key=key, title=title, score=score, status=health_status(score), details=details)
+
+
+async def build_erp_health_report_payload(organization_id: str, direct_download_url: str, report_id: str) -> ErpHealthReportResponse:
+    started_at = time.perf_counter()
+    generated_at = datetime.now(timezone.utc)
+    period_from = date(1900, 1, 1)
+    period_to = date(2099, 12, 31)
+    query_started_at = time.perf_counter()
+    accounts = await db.chart_accounts.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}}, organization_id), {"_id": 0}).to_list(100000)
+    all_entries_count = await db.journal_entries.count_documents(with_organization({}, organization_id))
+    reversal_count = await db.journal_entries.count_documents(with_organization({"is_reversal": True}, organization_id))
+    reconciliations = await db.reconciliations.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
+    audit_count = await db.audit_logs.count_documents(with_organization({}, organization_id))
+    electronic_invoice_count = await db.electronic_invoices.count_documents(with_organization({}, organization_id))
+    banking_tariff_count = await db.banking_tariffs.count_documents(with_organization({}, organization_id))
+    query_ms = round((time.perf_counter() - query_started_at) * 1000, 2)
+    accounts_by_id = {item.get("id"): item for item in accounts if item.get("id")}
+    accounts_by_code = {item.get("code"): item for item in accounts if item.get("code")}
+    accounts_by_name = {item.get("name"): item for item in accounts if item.get("name")}
+    unbalanced_entries = []
+    invalid_lines = []
+    missing_accounts = []
+    duplicate_entry_numbers = []
+    seen_entry_numbers = set()
+    ledger_totals: Dict[str, dict] = {}
+    total_debit = 0.0
+    total_credit = 0.0
+    entries_with_created_at = 0
+    entries_with_user = 0
+    for entry in entries:
+        entry_number = entry.get("entry_number")
+        if entry_number in seen_entry_numbers:
+            duplicate_entry_numbers.append(entry_number)
+        seen_entry_numbers.add(entry_number)
+        if entry.get("created_at"):
+            entries_with_created_at += 1
+        if entry.get("created_by") or entry.get("created_by_name"):
+            entries_with_user += 1
+        entry_debit = round(sum(float(line.get("debit") or 0) for line in entry.get("lines", [])), 2)
+        entry_credit = round(sum(float(line.get("credit") or 0) for line in entry.get("lines", [])), 2)
+        total_debit = round(total_debit + entry_debit, 2)
+        total_credit = round(total_credit + entry_credit, 2)
+        if abs(entry_debit - entry_credit) >= 0.01:
+            unbalanced_entries.append(entry_number)
+        for index, line in enumerate(entry.get("lines", []), 1):
+            debit = float(line.get("debit") or 0)
+            credit = float(line.get("credit") or 0)
+            if (debit > 0 and credit > 0) or (debit == 0 and credit == 0):
+                invalid_lines.append({"entry_number": entry_number, "line_index": index})
+            account = accounts_by_id.get(line.get("account_id")) or accounts_by_code.get(line.get("account_code")) or accounts_by_name.get(line.get("account_name"))
+            if not account:
+                missing_accounts.append({"entry_number": entry_number, "line_index": index, "account_name": line.get("account_name")})
+                continue
+            account_id = account.get("id")
+            ledger_totals.setdefault(account_id, {"debit": 0.0, "credit": 0.0, "name": account.get("name"), "code": account.get("code")})
+            ledger_totals[account_id]["debit"] = round(ledger_totals[account_id]["debit"] + debit, 2)
+            ledger_totals[account_id]["credit"] = round(ledger_totals[account_id]["credit"] + credit, 2)
+    trial_is_balanced = abs(total_debit - total_credit) < 0.01
+    reconciliation_differences = [abs(float(item.get("difference") or 0)) for item in reconciliations]
+    matched_reconciliations = sum(1 for item in reconciliations if item.get("is_matched") is True or abs(float(item.get("difference") or 0)) < 0.01)
+    reconciliation_match_rate = round((matched_reconciliations / len(reconciliations) * 100), 2) if reconciliations else 100.0
+    source_collections = ["deposits", "revenues", "expenses", "fixed_assets", "custody_advances", "memberships", "membership_batch_payments", "inventory_movements", "misc_creditor_movements", "reconciliations"]
+    source_counts = {name: await db[name].count_documents(with_organization({}, organization_id)) for name in source_collections}
+    source_types_in_entries = {entry.get("source_type") for entry in entries if entry.get("source_type")}
+    integration_expected = ["deposit", "revenue", "expense", "fixed_asset", "custody_advance", "membership_batch_payment", "inventory", "misc_creditor", "reconciliation"]
+    active_expected = [item for item in integration_expected if any(key in item for key in [])]
+    active_expected = [item for item in integration_expected if item in source_types_in_entries]
+    integration_score_value = round((len(active_expected) / max(1, len(integration_expected))) * 100)
+    external_dependency_items = electronic_invoice_count + banking_tariff_count
+    total_operation_items = max(1, all_entries_count + sum(source_counts.values()) + len(reconciliations))
+    external_dependency_percent = round((external_dependency_items / total_operation_items) * 100, 2)
+    accounting_score = health_score(100, [min(40, len(unbalanced_entries) * 10), min(25, len(invalid_lines) * 5), min(25, len(missing_accounts) * 5), min(10, len(duplicate_entry_numbers) * 2)])
+    trial_score = health_score(100, [0 if trial_is_balanced else 35, min(30, len(missing_accounts) * 3), min(20, len(duplicate_entry_numbers) * 2)])
+    reconciliation_score = health_score(100, [int((100 - reconciliation_match_rate) * 0.7), min(20, sum(1 for value in reconciliation_differences if value >= 0.01) * 3)])
+    performance_score = health_score(100, [0 if query_ms <= 800 else 10 if query_ms <= 2000 else 25, 0 if len(entries) <= 50000 else 10])
+    integration_score = health_score(100, [max(0, 100 - integration_score_value) // 2, min(15, len(missing_accounts) * 2)])
+    external_score = health_score(100, [0 if external_dependency_percent <= 5 else 10 if external_dependency_percent <= 15 else 25])
+    stability_score = health_score(100, [min(30, len(duplicate_entry_numbers) * 5), min(30, len(missing_accounts) * 4), 0 if trial_is_balanced else 20])
+    audit_ratio = round(((entries_with_created_at + entries_with_user) / max(1, len(entries) * 2)) * 100, 2)
+    audit_score = health_score(100, [max(0, 100 - int(audit_ratio)) // 2, 0 if audit_count else 10])
+    metrics = [
+        metric_as_model("journal_accuracy", "دقة القيود ومعدل الأخطاء المحاسبية", accounting_score, f"تم فحص {len(entries)} قيد مرحل. قيود عكسية محفوظة للتدقيق: {reversal_count}. قيود غير متوازنة: {len(unbalanced_entries)}، سطور غير صحيحة: {len(invalid_lines)}، سطور بلا حساب: {len(missing_accounts)}."),
+        metric_as_model("trial_balance_consistency", "توازن الحسابات واتساق ميزان المراجعة", trial_score, f"إجمالي المدين {total_debit} / إجمالي الدائن {total_credit}. حالة الاتزان: {'متوازن' if trial_is_balanced else 'غير متوازن'}."),
+        metric_as_model("bank_reconciliation_efficiency", "كفاءة ودقة التسويات البنكية", reconciliation_score, f"عدد التسويات {len(reconciliations)}، المتطابق منها {matched_reconciliations}، معدل التطابق {reconciliation_match_rate}%."),
+        metric_as_model("performance_metrics", "سرعة معالجة العمليات", performance_score, f"زمن القراءة والتحليل الأساسي {query_ms} مللي ثانية لعدد {total_operation_items} عنصر تشغيلي تقريباً."),
+        metric_as_model("integration_score", "تكامل وربط الموديولات", integration_score, f"مصادر القيود النشطة: {len(source_types_in_entries)}، ومؤشر الربط المحسوب {integration_score_value}%."),
+        metric_as_model("external_dependency", "نسبة الاعتماد على البيانات الخارجية", external_score, f"نسبة الاعتماد الخارجي المحسوبة {external_dependency_percent}% بناءً على الفواتير/التعريفات الخارجية مقابل التشغيل الداخلي."),
+        metric_as_model("data_stability", "استقرار النظام وعدم وجود تعارضات بيانات", stability_score, f"أرقام قيود مكررة: {len(duplicate_entry_numbers)}، روابط حسابات مفقودة: {len(missing_accounts)}، حالة الميزان: {'مستقر' if trial_is_balanced else 'يحتاج مراجعة'}."),
+        metric_as_model("audit_completeness", "جودة تتبع العمليات Audit Completeness", audit_score, f"اكتمال created_at/created_by داخل القيود: {audit_ratio}%. عدد سجلات التدقيق: {audit_count}."),
+    ]
+    overall_score = round(sum(item.score for item in metrics) / len(metrics)) if metrics else 0
+    recommendations = []
+    if unbalanced_entries:
+        recommendations.append("مراجعة القيود غير المتوازنة فوراً قبل إصدار أي قوائم نهائية.")
+    if missing_accounts:
+        recommendations.append("استكمال ربط سطور القيود بدليل الحسابات لتقليل مخاطر الترحيل غير المصنف.")
+    if not trial_is_balanced:
+        recommendations.append("إعادة فحص ميزان المراجعة ومطابقته مع دفتر الأستاذ قبل اعتماد الفترة.")
+    if reconciliation_match_rate < 90:
+        recommendations.append("زيادة مراجعة التسويات البنكية غير المتطابقة وتوثيق فروق كشف البنك.")
+    if query_ms > 2000:
+        recommendations.append("تحسين الفهارس أو تقسيم تقارير التشغيل عند زيادة حجم البيانات.")
+    if audit_score < 85:
+        recommendations.append("رفع اكتمال بيانات التدقيق created_by/created_at وتفعيل مراجعة سجل الحركات دورياً.")
+    if external_dependency_percent > 15:
+        recommendations.append("تقليل الاعتماد على مصادر خارجية غير حاكمة أو توثيق مصدر كل عملية خارجية داخل التقرير.")
+    if not recommendations:
+        recommendations.append("النظام مستقر حالياً؛ يوصى باستمرار الفحص الدوري قبل إقفال كل فترة مالية.")
+    total_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    metrics.append(metric_as_model("analysis_runtime", "زمن إنشاء تقرير التقييم", performance_score, f"إجمالي زمن إنشاء التقرير للعرض فقط: {total_ms} مللي ثانية."))
+    return ErpHealthReportResponse(
+        id=report_id,
+        organization_id=organization_id,
+        generated_at=generated_at,
+        period_from=period_from,
+        period_to=period_to,
+        overall_score=overall_score,
+        metrics=metrics,
+        recommendations=recommendations,
+        direct_download_url=direct_download_url,
+    )
+
+
+def write_erp_health_pdf(report: ErpHealthReportResponse, output_path: Path):
+    font_name = register_erp_pdf_font()
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("ArabicTitle", parent=styles["Title"], fontName=font_name, fontSize=20, leading=28, alignment=TA_CENTER)
+    heading_style = ParagraphStyle("ArabicHeading", parent=styles["Heading2"], fontName=font_name, fontSize=14, leading=20, alignment=TA_RIGHT)
+    body_style = ParagraphStyle("ArabicBody", parent=styles["BodyText"], fontName=font_name, fontSize=10, leading=16, alignment=TA_RIGHT)
+    document = SimpleDocTemplate(str(output_path), pagesize=A4, rightMargin=1.2 * cm, leftMargin=1.2 * cm, topMargin=1.0 * cm, bottomMargin=1.0 * cm)
+    story = [
+        Paragraph(pdf_ar("تقرير تقييم شامل للنظام ERP Health Report"), title_style),
+        Paragraph(pdf_ar(f"درجة النظام الإجمالية: {report.overall_score} من 100"), heading_style),
+        Paragraph(pdf_ar(f"تاريخ الإنشاء: {report.generated_at.isoformat()} | الجهة: {report.organization_id} | الوضع: تحليل فقط Read Only"), body_style),
+        Spacer(1, 0.3 * cm),
+    ]
+    metric_rows = [[pdf_ar("البند"), pdf_ar("Score"), pdf_ar("الحالة"), pdf_ar("التفاصيل")]]
+    for metric in report.metrics:
+        metric_rows.append([Paragraph(pdf_ar(metric.title), body_style), pdf_ar(metric.score), pdf_ar(metric.status), Paragraph(pdf_ar(metric.details), body_style)])
+    metrics_table = PdfTable(metric_rows, colWidths=[4.2 * cm, 2.0 * cm, 2.3 * cm, 9.0 * cm], repeatRows=1)
+    metrics_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), font_name),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f3f5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+    ]))
+    story.extend([metrics_table, Spacer(1, 0.4 * cm), Paragraph(pdf_ar("التوصيات التلقائية"), heading_style)])
+    for index, recommendation in enumerate(report.recommendations, 1):
+        story.append(Paragraph(pdf_ar(f"{index}- {recommendation}"), body_style))
+    story.extend([Spacer(1, 0.35 * cm), Paragraph(pdf_ar("تأكيد: هذا التقرير تم إنشاؤه للقراءة والتحليل فقط، ولا يقوم بأي تعديل على القيود أو التسويات البنكية أو الأرصدة."), body_style)])
+    document.build(story)
+
+
 def hydrate_reconciliation(document: dict) -> dict:
     clean = {key: value for key, value in document.items() if key != "_id"}
     for field_name in ["created_at", "updated_at"]:
@@ -7785,68 +8023,40 @@ async def get_treasury_banks_report(
     return TreasuryBanksReport(summary=summary, accounts=[TreasuryBanksAccount(**item) for item in treasury_accounts], transactions=transactions)
 
 
-@api_router.get("/bank-prints/banque-misr/external-data", response_model=BankPrintExternalData)
-async def banque_misr_external_print_data(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
-    return fetch_banque_misr_external_data()
+@api_router.get("/erp-health-report", response_model=ErpHealthReportResponse)
+async def generate_erp_health_report(request: Request, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    organization_id = organization_id_or_default()
+    report_id = str(uuid.uuid4())
+    direct_download_url = f"{public_app_base_url(request)}/api/erp-health-report/files/{report_id}"
+    report = await build_erp_health_report_payload(organization_id, direct_download_url, report_id)
+    write_erp_health_pdf(report, GENERATED_REPORTS_DIR / f"{report_id}.pdf")
+    return report
 
 
-@api_router.get("/bank-prints/requests", response_model=List[BankPrintRequestResponse])
-async def list_bank_print_requests(
-    bank_id: Optional[str] = Query(default=None),
-    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
-):
-    query = with_organization({})
-    if bank_id:
-        query["bank_id"] = bank_id
-    documents = await db.bank_print_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [BankPrintRequestResponse(**hydrate_bank_print_request(document)) for document in documents]
+@api_router.get("/erp-health-report/pdf")
+async def download_new_erp_health_report_pdf(request: Request, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    organization_id = organization_id_or_default()
+    report_id = str(uuid.uuid4())
+    direct_download_url = f"{public_app_base_url(request)}/api/erp-health-report/files/{report_id}"
+    report = await build_erp_health_report_payload(organization_id, direct_download_url, report_id)
+    output_path = GENERATED_REPORTS_DIR / f"{report_id}.pdf"
+    write_erp_health_pdf(report, output_path)
+    return FileResponse(str(output_path), media_type="application/pdf", filename="ERP-Health-Report.pdf")
 
 
-@api_router.post("/bank-prints/banque-misr/requests", response_model=BankPrintRequestResponse)
-async def create_banque_misr_print_request(payload: BankPrintRequestCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
-    manual_inputs = payload.manual_inputs
-    if manual_inputs.period_from and manual_inputs.period_to and manual_inputs.period_from > manual_inputs.period_to:
-        raise HTTPException(status_code=400, detail="تاريخ بداية الفترة يجب أن يكون قبل تاريخ النهاية")
-    external_data = fetch_banque_misr_external_data()
-    now_iso = serialize_datetime(datetime.now(timezone.utc))
-    document = attach_organization({
-        "id": str(uuid.uuid4()),
-        "bank_id": "banque-misr",
-        "bank_name": "بنك مصر",
-        "source_url": BANQUE_MISR_EXTERNAL_SOURCE_URL,
-        "external_data": external_data.model_dump(mode="json"),
-        "manual_inputs": manual_inputs.model_dump(mode="json"),
-        "status": "saved_before_print",
-        "created_by": current_user.get("id"),
-        "created_by_name": real_name_for_user(current_user),
-        "created_at": now_iso,
-        "updated_at": now_iso,
-        "printed_at": None,
-    })
-    await db.bank_print_requests.insert_one(document.copy())
-    return BankPrintRequestResponse(**hydrate_bank_print_request(document))
+@api_router.get("/erp-health-report/files/{report_id}")
+async def download_generated_erp_health_report(report_id: str):
+    if not re.fullmatch(r"[a-f0-9\-]{36}", report_id):
+        raise HTTPException(status_code=404, detail="التقرير غير موجود")
+    output_path = GENERATED_REPORTS_DIR / f"{report_id}.pdf"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="التقرير غير موجود أو انتهت صلاحيته")
+    return FileResponse(str(output_path), media_type="application/pdf", filename="ERP-Health-Report.pdf")
 
 
-@api_router.get("/bank-prints/requests/{request_id}", response_model=BankPrintRequestResponse)
-async def get_bank_print_request(request_id: str, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
-    document = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
-    if not document:
-        raise HTTPException(status_code=404, detail="طلب الطباعة غير موجود")
-    return BankPrintRequestResponse(**hydrate_bank_print_request(document))
-
-
-@api_router.patch("/bank-prints/requests/{request_id}/status", response_model=BankPrintRequestResponse)
-async def update_bank_print_request_status(request_id: str, payload: BankPrintRequestStatusUpdate, _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
-    existing = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="طلب الطباعة غير موجود")
-    now_iso = serialize_datetime(datetime.now(timezone.utc))
-    updates = {"status": payload.status, "updated_at": now_iso}
-    if payload.status == "printed":
-        updates["printed_at"] = now_iso
-    await db.bank_print_requests.update_one(with_organization({"id": request_id}), {"$set": updates})
-    updated = await db.bank_print_requests.find_one(with_organization({"id": request_id}), {"_id": 0})
-    return BankPrintRequestResponse(**hydrate_bank_print_request(updated))
+@api_router.get("/bank-prints/{path:path}")
+async def disabled_bank_prints_routes(path: str):
+    raise HTTPException(status_code=404, detail="تم إلغاء مطبوعات بنكية بناءً على طلب المستخدم")
 
 
 @api_router.get("/inventory/items", response_model=List[InventoryItemResponse])
@@ -8741,8 +8951,8 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "bank_print_requests", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
-USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "bank_print_requests", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
 TRAINING_DIR = ROOT_DIR.parent / "training_exports"
 TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 
