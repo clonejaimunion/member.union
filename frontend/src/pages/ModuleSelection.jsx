@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { isModuleEnabled } from "@/lib/modules";
 
-export default function ModuleSelection({ accountingOnly = false }) {
+export default function ModuleSelection({ accountingOnly = false, studiesOnly = false }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { settings } = useAppSettings();
@@ -32,7 +32,8 @@ export default function ModuleSelection({ accountingOnly = false }) {
   const canUseMiscCreditors = isModuleEnabled(user, "misc_creditors") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseFeasibility = isModuleEnabled(user, "feasibility_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseActuarial = isModuleEnabled(user, "actuarial_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const showSocialHub = user?.organization_id === "social-solidarity" && !accountingOnly;
+  const canUseStudies = canUseFeasibility || canUseActuarial;
+  const showHomeHub = !accountingOnly && !studiesOnly && (user?.organization_id === "social-solidarity" || canUseStudies);
 
   const hubModules = [
     {
@@ -48,6 +49,30 @@ export default function ModuleSelection({ accountingOnly = false }) {
       path: "/membership",
       icon: UsersRound,
       testId: "module-membership-card",
+    },
+    canUseStudies && {
+      title: "الدراسات والتحليلات",
+      description: "دراسة جدوى ودراسة اكتوارية كوحدات تحليلية مستقلة بدون أي ترحيل محاسبي.",
+      path: "/studies",
+      icon: FileBarChart,
+      testId: "module-studies-hub-card",
+    },
+  ].filter(Boolean);
+
+  const studyModules = [
+    canUseFeasibility && {
+      title: "دراسة جدوى",
+      description: "تحليل مستقل للتكاليف والإيرادات ونقطة التعادل وفترة الاسترداد بدون قيود محاسبية.",
+      path: "/feasibility-study",
+      icon: FileBarChart,
+      testId: "module-feasibility-study-card",
+    },
+    canUseActuarial && {
+      title: "دراسة اكتوارية",
+      description: "تقدير الأعضاء والتدفقات والالتزامات ومعدل كفاية الصندوق بدون أثر مالي مرحل.",
+      path: "/actuarial-study",
+      icon: LineChart,
+      testId: "module-actuarial-study-card",
     },
   ].filter(Boolean);
 
@@ -164,23 +189,11 @@ export default function ModuleSelection({ accountingOnly = false }) {
       icon: FileCheck2,
       testId: "module-electronic-invoice-card",
     },
-    canUseFeasibility && {
-      title: "دراسة جدوى",
-      description: "تحليل مستقل للتكاليف والإيرادات ونقطة التعادل وفترة الاسترداد بدون قيود محاسبية.",
-      path: "/feasibility-study",
-      icon: FileBarChart,
-      testId: "module-feasibility-study-card",
-    },
-    canUseActuarial && {
-      title: "دراسة اكتوارية",
-      description: "تقدير الأعضاء والتدفقات والالتزامات ومعدل كفاية الصندوق بدون أثر مالي مرحل.",
-      path: "/actuarial-study",
-      icon: LineChart,
-      testId: "module-actuarial-study-card",
-    },
   ].filter(Boolean);
 
-  const modules = showSocialHub ? hubModules : accountingModules;
+  const modules = studiesOnly ? studyModules : showHomeHub ? hubModules : accountingModules;
+  const pageEyebrow = studiesOnly ? "الدراسات والتحليلات" : accountingOnly ? "الحسابات" : "الصفحة الرئيسية";
+  const pageHeading = studiesOnly ? "الدراسات والتحليلات" : accountingOnly ? "الحسابات" : settings.system_name;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="module-selection-page">
@@ -189,7 +202,7 @@ export default function ModuleSelection({ accountingOnly = false }) {
           <div className="flex items-center gap-3" data-testid="module-selection-brand">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white" data-testid="module-selection-brand-icon"><Building2 className="h-5 w-5" /></div>
             <div>
-              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">{accountingOnly ? "الحسابات" : "الصفحة الرئيسية"}</p>
+              <p className="text-xs font-extrabold text-emerald-700" data-testid="module-selection-eyebrow">{pageEyebrow}</p>
               <h1 className="text-2xl font-extrabold" data-testid="module-selection-title">{organizationName}</h1>
             </div>
           </div>
@@ -208,7 +221,7 @@ export default function ModuleSelection({ accountingOnly = false }) {
 
       <section className="mx-auto flex min-h-[calc(100vh-88px)] max-w-7xl flex-col justify-center gap-10 px-4 py-10 sm:px-6 lg:px-8" data-testid="module-selection-content">
         <div className="mx-auto max-w-4xl space-y-5 text-center" data-testid="module-selection-intro">
-          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">{accountingOnly ? "الحسابات" : settings.system_name}</h2>
+          <h2 className="text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl" data-testid="module-selection-heading">{pageHeading}</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-testid="module-cards-grid">

@@ -42,6 +42,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/login", title: appTitle },
   { test: (path) => path === "/accounting", title: `الحسابات - ${appTitle}` },
   { test: (path) => path === "/membership", title: `العضوية - ${appTitle}` },
+  { test: (path) => path === "/studies", title: `الدراسات والتحليلات - ${appTitle}` },
   { test: (path) => path === "/custody-advances", title: `العهد والسلف - ${appTitle}` },
   { test: (path) => path === "/deposits", title: `فوائد الودائع - ${appTitle}` },
   { test: (path) => path === "/reconciliations", title: `التسويات البنكية - ${appTitle}` },
@@ -166,6 +167,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/" element={<ProtectedRoute><ModuleSelection /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute><ModuleSelection accountingOnly /></ProtectedRoute>} />
+              <Route path="/studies" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleSelection studiesOnly /></ProtectedRoute>} />
               <Route path="/membership" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_users"]}><ModuleRoute moduleKey="membership"><MembershipPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/custody-advances" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="custody_advances"><CustodyAdvancesPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/deposits" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports"]}><ModuleRoute moduleKey="deposits"><BankSelection mode="deposits" /></ModuleRoute></ProtectedRoute>} />
