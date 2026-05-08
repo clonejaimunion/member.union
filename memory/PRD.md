@@ -432,3 +432,13 @@
 - تم تنظيف كل بيانات الاختبار المعلّمة `TEST_TAX_ENGINE_AUTOMATION_DELETE_ME` من `electronic_invoices` و`tax_invoices` و`journal_entries` حتى لا تؤثر على بيانات التشغيل.
 - الاختبار الذاتي النهائي: `GET /api/tax-engine/profile` يعيد `is_configured=true` وبدون أخطاء، وملف التثبيت `/app/dist/BankDepositSystemSetup.exe` تم تحديثه والتحقق من رابط `/api/download/setup` 200.
 - ملاحظة: Tax Engine الداخلي ليس MOCKED، لكن إرسال ETA API الحي ما زال **MOCKED/CONFIGURATION_REQUIRED** لحين إدخال بيانات التكامل والتوقيع الإلكتروني.
+
+## ضبط ظهور الفاتورة الإلكترونية حسب جهة السوبر أدمن بتاريخ 2026-05-08
+- تم تعديل `default_modules_for_organization` بحيث لا تكون `electronic_invoice` مفعلة تلقائياً للجهات الجديدة؛ يجب تفعيلها صراحة من إعدادات الخواص.
+- تم تحديث endpoints `GET/PUT /api/admin/organization/modules` لقبول `organization_id` كسؤال اختياري للسوبر أدمن فقط، مع منع أي أدمن عادي من تعديل جهة أخرى.
+- تم إضافة سجل تدقيق `ORGANIZATION_MODULES_UPDATED` عند حفظ إعدادات الخواص، ويشمل before/after modules للجهة المستهدفة.
+- تم تعديل صفحة الأدمن `إعدادات الخواص` بإضافة اختيار جهة `feature-settings-organization-select` للسوبر أدمن، بحيث يمكن تفعيل الفاتورة الإلكترونية للنقابة العامة وتعطيلها لمشروع التكافل أو العكس.
+- الحالة الحالية وفق مثال المستخدم: `general-union.electronic_invoice=true` و`social-solidarity.electronic_invoice=false`.
+- تم التحقق ذاتياً: النقابة العامة تعرض كارت الفاتورة الإلكترونية و`/api/tax-engine/profile` يعيد 200، بينما مشروع التكافل لا يعرض الكارت و`/api/tax-engine/profile` يعيد 404.
+- Testing agent iteration_78 نجح بنسبة 100%: backend 8/8، وتحقق من الواجهة، عزل الجهات، منع cross-org لغير السوبر أدمن، وعدم تفعيل الفاتورة تلقائياً للجهات الجديدة.
+- تم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط `/api/download/setup` بطلب GET ناجح.

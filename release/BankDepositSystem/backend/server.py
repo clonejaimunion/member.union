@@ -2018,6 +2018,7 @@ def organization_id_or_default() -> str:
 
 def default_modules_for_organization(organization_id: str) -> Dict[str, bool]:
     modules = {key: True for key in MODULE_DEFINITIONS}
+    modules["electronic_invoice"] = False
     if organization_id == "general-union":
         modules["membership"] = False
     return modules
@@ -5785,15 +5786,26 @@ async def update_admin_app_settings(payload: AppSettingsUpdate, admin_user: dict
 
 
 @api_router.get("/admin/organization/modules", response_model=OrganizationModulesResponse)
-async def get_admin_organization_modules(admin_user: dict = Depends(require_admin)):
-    organization = await get_organization_document(admin_user.get("organization_id"))
+async def get_admin_organization_modules(organization_id: Optional[str] = Query(default=None), admin_user: dict = Depends(require_admin)):
+    target_organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    if organization_id and admin_user.get("role") == "super_admin":
+        target_organization_id = organization_id
+    elif organization_id and organization_id != target_organization_id:
+        raise HTTPException(status_code=403, detail="لا يمكنك تعديل خواص جهة أخرى")
+    organization = await get_organization_document(target_organization_id)
     return build_organization_modules_response(organization)
 
 
 @api_router.put("/admin/organization/modules", response_model=OrganizationModulesResponse)
-async def update_admin_organization_modules(payload: OrganizationModulesUpdate, admin_user: dict = Depends(require_admin)):
-    organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+async def update_admin_organization_modules(payload: OrganizationModulesUpdate, organization_id: Optional[str] = Query(default=None), admin_user: dict = Depends(require_admin)):
+    target_organization_id = admin_user.get("organization_id") or DEFAULT_ORGANIZATION_ID
+    if organization_id and admin_user.get("role") == "super_admin":
+        target_organization_id = organization_id
+    elif organization_id and organization_id != target_organization_id:
+        raise HTTPException(status_code=403, detail="لا يمكنك تعديل خواص جهة أخرى")
+    organization_id = target_organization_id
     organization = await get_organization_document(organization_id)
+    before_modules = normalize_modules(organization_id, organization.get("modules"))
     next_modules = normalize_modules(organization_id, payload.modules)
     now_iso = serialize_datetime(datetime.now(timezone.utc))
     await db.organizations.update_one(
@@ -5802,6 +5814,23 @@ async def update_admin_organization_modules(payload: OrganizationModulesUpdate, 
         upsert=True,
     )
     await db.users.update_many({"organization_id": organization_id}, {"$set": {"organization_modules": next_modules, "updated_at": now_iso}})
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "username": admin_user.get("username"),
+        "actor_full_name": real_name_for_user(admin_user),
+        "user_id": admin_user.get("id"),
+        "organization_id": organization_id,
+        "method": "PUT",
+        "path": "/admin/organization/modules",
+        "action": "ORGANIZATION_MODULES_UPDATED",
+        "arabic_description": f"تم تحديث إعدادات خواص الجهة {organization.get('name')} بعزل كامل، ومنها الفاتورة الإلكترونية إن وُجدت.",
+        "status_code": 200,
+        "request_body": None,
+        "before_document": {"modules": before_modules},
+        "after_document": {"modules": next_modules},
+        "ip_address": None,
+        "created_at": now_iso,
+    })
     updated = await get_organization_document(organization_id)
     return build_organization_modules_response(updated)
 
