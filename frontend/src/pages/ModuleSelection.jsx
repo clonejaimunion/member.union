@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Handshake, Landmark, LineChart, LogOut, NotebookPen, PackageCheck, PackageSearch, PrinterCheck, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, Vault, WalletCards } from "lucide-react";
+import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart, FileCheck2, FileSpreadsheet, GitFork, HandCoins, Handshake, Landmark, LineChart, LogOut, NotebookPen, PackageCheck, PackageSearch, ReceiptText, Scale, SendToBack, ShieldCheck, UsersRound, Vault, WalletCards } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
@@ -33,9 +33,9 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
   const canUseMiscCreditors = isModuleEnabled(user, "misc_creditors") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseFeasibility = isModuleEnabled(user, "feasibility_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseActuarial = isModuleEnabled(user, "actuarial_study") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
-  const canUseBankPrints = isModuleEnabled(user, "bank_prints") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
+  const canUseErpHealthReport = isModuleEnabled(user, "erp_health_report") && (privilegedAdmin || user?.permissions?.enter_deposits || user?.permissions?.view_reports || user?.permissions?.manage_expenses || user?.permissions?.manage_revenues);
   const canUseStudies = canUseFeasibility || canUseActuarial;
-  const showHomeHub = !accountingOnly && !studiesOnly && (user?.organization_id === "social-solidarity" || canUseStudies || canUseBankPrints);
+  const showHomeHub = !accountingOnly && !studiesOnly && (user?.organization_id === "social-solidarity" || canUseStudies || canUseErpHealthReport);
 
   const hubModules = [
     {
@@ -59,12 +59,12 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
       icon: FileBarChart,
       testId: "module-studies-hub-card",
     },
-    canUseBankPrints && {
-      title: "مطبوعات بنكية",
-      description: "مطبوعات محدثة لحظياً من مصادر خارجية مع حفظ طلبات الطباعة بدون أثر محاسبي.",
-      path: "/bank-prints",
-      icon: PrinterCheck,
-      testId: "module-bank-prints-hub-card",
+    canUseErpHealthReport && {
+      title: "تقرير تقييم النظام",
+      description: "تحليل ERP Health شامل للقيود والأستاذ والميزان والتسويات وسجل الحركات بصيغة PDF.",
+      path: "/erp-health-report",
+      icon: ShieldCheck,
+      testId: "module-erp-health-report-card",
     },
   ].filter(Boolean);
 
