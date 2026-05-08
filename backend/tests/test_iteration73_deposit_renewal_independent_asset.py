@@ -75,7 +75,8 @@ def _create_deposit(base_url: str, token: str, number: str, amount: float, start
 
 def _term_deposit_balance(rows):
     row = next((item for item in rows if item.get("account_name") == "ودائع لأجل" or item.get("account_code") == "1250"), None)
-    assert row is not None, rows
+    if row is None:
+        return 0.0
     return round(float(row.get("balance_debit") or 0) - float(row.get("balance_credit") or 0), 2)
 
 

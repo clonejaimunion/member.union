@@ -992,6 +992,99 @@ class JournalEntryCreate(BaseModel):
     lines: List[JournalLine] = Field(..., min_length=2)
 
 
+class InventoryItemCreate(BaseModel):
+    item_code: str = Field(..., min_length=1, max_length=60)
+    item_name: str = Field(..., min_length=2, max_length=160)
+    unit: str = Field(default="وحدة", min_length=1, max_length=40)
+
+
+class InventoryItemResponse(InventoryItemCreate):
+    id: str
+    organization_id: str
+    quantity_balance: float = 0
+    value_balance: float = 0
+    average_cost: float = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class InventoryMovementCreate(BaseModel):
+    movement_date: date
+    item_id: Optional[str] = None
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    unit: str = "وحدة"
+    movement_type: Literal["in", "out"]
+    quantity: float = Field(..., gt=0)
+    unit_cost: Optional[float] = Field(default=None, ge=0)
+    description: str = Field(..., min_length=2, max_length=300)
+    reference: Optional[str] = Field(default=None, max_length=80)
+
+
+class InventoryMovementResponse(BaseModel):
+    id: str
+    organization_id: str
+    movement_date: date
+    item_id: str
+    item_code: str
+    item_name: str
+    unit: str
+    movement_type: Literal["in", "out"]
+    quantity: float
+    unit_cost: float
+    total_value: float
+    quantity_balance_after: float
+    value_balance_after: float
+    journal_entry_id: Optional[str] = None
+    description: str
+    reference: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MiscCreditorCreate(BaseModel):
+    creditor_code: Optional[str] = Field(default=None, max_length=60)
+    creditor_name: str = Field(..., min_length=2, max_length=160)
+    notes: Optional[str] = Field(default=None, max_length=300)
+
+
+class MiscCreditorResponse(MiscCreditorCreate):
+    id: str
+    organization_id: str
+    balance: float = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class MiscCreditorMovementCreate(BaseModel):
+    movement_date: date
+    creditor_id: Optional[str] = None
+    creditor_name: Optional[str] = None
+    movement_type: Literal["obligation", "payment"]
+    amount: float = Field(..., gt=0)
+    bank_id: Optional[str] = None
+    description: str = Field(..., min_length=2, max_length=300)
+    reference: Optional[str] = Field(default=None, max_length=80)
+
+
+class MiscCreditorMovementResponse(BaseModel):
+    id: str
+    organization_id: str
+    movement_date: date
+    creditor_id: str
+    creditor_name: str
+    movement_type: Literal["obligation", "payment"]
+    amount: float
+    balance_after: float
+    bank_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    journal_entry_id: Optional[str] = None
+    description: str
+    reference: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class JournalEntryResponse(BaseModel):
     id: str
     organization_id: str
@@ -999,7 +1092,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -2543,7 +2636,7 @@ def membership_due_periods(member: dict, as_of_date: date, paid_periods: Optiona
 
 
 async def membership_paid_allocations_map(as_of_date: Optional[date] = None) -> dict[str, dict[str, float]]:
-    query = with_organization({"is_reversal": {"$ne": True}})
+    query = with_organization({"is_reversal": {"$ne": True}, "status": "approved"})
     if as_of_date:
         query["payment_date"] = {"$lte": as_of_date.isoformat()}
     documents = await db.membership_batch_payments.find(query, {"_id": 0, "allocations": 1}).to_list(100000)
@@ -2595,8 +2688,10 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "1490", "name": "مجمع إهلاك الأصول الثابتة", "account_type": "asset", "nature": "credit", "is_postable": False, "parent_code": "1000", "system_key": "accumulated_depreciation_parent"},
         {"code": "1500", "name": "العهد والسلف", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "custody_advances"},
         {"code": "1600", "name": "مديونية اشتراكات العضوية", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "membership_subscription_receivable"},
+        {"code": "1700", "name": "المخزون", "account_type": "asset", "nature": "debit", "is_postable": True, "parent_code": "1000", "system_key": "inventory_asset"},
         {"code": "2000", "name": "الالتزامات", "account_type": "liability", "nature": "credit", "is_postable": False, "system_key": "liabilities"},
         {"code": "2100", "name": "شيكات صادرة", "account_type": "liability", "nature": "credit", "is_postable": True, "parent_code": "2000", "system_key": "issued_checks"},
+        {"code": "2200", "name": "دائنون متنوعون", "account_type": "liability", "nature": "credit", "is_postable": True, "parent_code": "2000", "system_key": "misc_creditors"},
         {"code": "3000", "name": "حقوق الملكية / الفائض", "account_type": "equity", "nature": "credit", "is_postable": False, "system_key": "equity"},
         {"code": "3100", "name": "رصيد افتتاحي", "account_type": "equity", "nature": "credit", "is_postable": True, "parent_code": "3000", "system_key": "opening_balance_equity"},
         {"code": "4000", "name": "الإيرادات", "account_type": "revenue", "nature": "credit", "is_postable": False, "system_key": "revenues"},
@@ -2609,6 +2704,7 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
         {"code": "5103", "name": "تسوية العهد والسلف", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "custody_advance_expense"},
+        {"code": "5104", "name": "منصرف مخزون", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "inventory_issue_expense"},
         {"code": "5200", "name": "إهلاك الأصول الثابتة", "account_type": "expense", "nature": "debit", "is_postable": False, "parent_code": "5000", "system_key": "depreciation_expense_parent"},
     ]
     for category in FIXED_ASSET_CATEGORIES:
@@ -2696,6 +2792,9 @@ async def resolve_journal_account(line: dict) -> dict:
         "رصيد افتتاحي": "opening_balance_equity",
         "الخزينة": "cash_box",
         "مديونية اشتراكات العضوية": "membership_subscription_receivable",
+        "المخزون": "inventory_asset",
+        "دائنون متنوعون": "misc_creditors",
+        "منصرف مخزون": "inventory_issue_expense",
         "إيرادات اشتراكات العضوية": "membership_subscription_revenue",
         "إيرادات الاشتراكات": "membership_subscription_revenue",
     }
@@ -3054,6 +3153,149 @@ async def reclassify_revenue_journal_lines_for_organization(organization_id: str
             lines.append(next_line)
         if changed:
             await db.journal_entries.update_one(with_organization({"id": entry.get("id")}, organization_id), {"$set": {"lines": lines, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+
+
+def hydrate_inventory_item(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+def hydrate_inventory_movement(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if isinstance(clean.get("movement_date"), str):
+        clean["movement_date"] = date.fromisoformat(clean["movement_date"])
+    return clean
+
+
+def hydrate_misc_creditor(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    return clean
+
+
+def hydrate_misc_creditor_movement(document: dict) -> dict:
+    clean = {key: value for key, value in document.items() if key != "_id"}
+    for field_name in ["created_at", "updated_at"]:
+        if isinstance(clean.get(field_name), str):
+            clean[field_name] = datetime.fromisoformat(clean[field_name])
+    if isinstance(clean.get("movement_date"), str):
+        clean["movement_date"] = date.fromisoformat(clean["movement_date"])
+    return clean
+
+
+async def ensure_inventory_item_from_payload(payload: InventoryMovementCreate) -> dict:
+    if payload.item_id:
+        item = await db.inventory_items.find_one(with_organization({"id": payload.item_id}), {"_id": 0})
+        if not item:
+            raise HTTPException(status_code=404, detail="الصنف غير موجود")
+        return item
+    if not payload.item_name:
+        raise HTTPException(status_code=400, detail="يجب اختيار صنف أو إدخال اسم صنف جديد")
+    code = (payload.item_code or payload.item_name).strip()
+    existing = await db.inventory_items.find_one(with_organization({"item_code": code}), {"_id": 0})
+    if existing:
+        return existing
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "item_code": code,
+        "item_name": payload.item_name.strip(),
+        "unit": (payload.unit or "وحدة").strip(),
+        "quantity_balance": 0.0,
+        "value_balance": 0.0,
+        "average_cost": 0.0,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.inventory_items.insert_one(document.copy())
+    return document
+
+
+async def journal_for_inventory_movement(movement: dict, current_user: Optional[dict] = None):
+    amount = round(float(movement.get("total_value") or 0), 2)
+    if amount <= 0:
+        return None
+    if movement.get("movement_type") == "in":
+        lines = [
+            {"account_name": "المخزون", "system_key": "inventory_asset", "debit": amount, "credit": 0, "notes": movement.get("item_name")},
+            {"account_name": "دائنون متنوعون", "system_key": "misc_creditors", "debit": 0, "credit": amount, "notes": "إثبات وارد مخزون"},
+        ]
+    else:
+        lines = [
+            {"account_name": "منصرف مخزون", "system_key": "inventory_issue_expense", "debit": amount, "credit": 0, "notes": movement.get("item_name")},
+            {"account_name": "المخزون", "system_key": "inventory_asset", "debit": 0, "credit": amount, "notes": "صرف مخزون"},
+        ]
+    return await save_journal_entry_document(
+        entry_date=movement.get("movement_date") if isinstance(movement.get("movement_date"), date) else date.fromisoformat(str(movement.get("movement_date"))),
+        description=f"قيد تلقائي لحركة مخزون: {movement.get('description')}",
+        reference=movement.get("reference") or movement.get("id"),
+        source_type="inventory",
+        source_id=movement.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=lines,
+        force_new=True,
+    )
+
+
+async def ensure_misc_creditor_from_payload(payload: MiscCreditorMovementCreate) -> dict:
+    if payload.creditor_id:
+        creditor = await db.misc_creditors.find_one(with_organization({"id": payload.creditor_id}), {"_id": 0})
+        if not creditor:
+            raise HTTPException(status_code=404, detail="الدائن غير موجود")
+        return creditor
+    if not payload.creditor_name:
+        raise HTTPException(status_code=400, detail="يجب اختيار دائن أو إدخال اسم دائن جديد")
+    existing = await db.misc_creditors.find_one(with_organization({"creditor_name": payload.creditor_name.strip()}), {"_id": 0})
+    if existing:
+        return existing
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "creditor_code": None,
+        "creditor_name": payload.creditor_name.strip(),
+        "notes": None,
+        "balance": 0.0,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.misc_creditors.insert_one(document.copy())
+    return document
+
+
+async def journal_for_misc_creditor_movement(movement: dict, current_user: Optional[dict] = None):
+    amount = round(float(movement.get("amount") or 0), 2)
+    if movement.get("movement_type") == "obligation":
+        lines = [
+            {"account_name": "المصروفات", "system_key": "expense_general", "debit": amount, "credit": 0, "notes": movement.get("creditor_name")},
+            {"account_name": "دائنون متنوعون", "system_key": "misc_creditors", "debit": 0, "credit": amount, "notes": "إثبات التزام"},
+        ]
+    else:
+        if not movement.get("bank_id"):
+            raise HTTPException(status_code=400, detail="يجب اختيار البنك عند سداد دائن")
+        lines = [
+            {"account_name": "دائنون متنوعون", "system_key": "misc_creditors", "debit": amount, "credit": 0, "notes": movement.get("creditor_name")},
+            {"account_name": "البنك", "bank_id": movement.get("bank_id"), "debit": 0, "credit": amount, "notes": "سداد دائن متنوع"},
+        ]
+    return await save_journal_entry_document(
+        entry_date=movement.get("movement_date") if isinstance(movement.get("movement_date"), date) else date.fromisoformat(str(movement.get("movement_date"))),
+        description=f"قيد تلقائي لدائن متنوع: {movement.get('description')}",
+        reference=movement.get("reference") or movement.get("id"),
+        source_type="misc_creditor",
+        source_id=movement.get("id"),
+        is_auto=True,
+        current_user=current_user,
+        lines=lines,
+        force_new=True,
+    )
 
 
 async def journal_for_expense(expense: dict, current_user: Optional[dict] = None):
@@ -3530,11 +3772,7 @@ async def calculate_trial_balance_report(
             row["balance_debit"] = 0.0
             row["balance_credit"] = round(abs(signed_balance), 2)
         if row.get("system_key") == "term_deposits" and not show_term_deposit_principal:
-            row["opening_balance"] = 0.0
-            row["total_debit"] = 0.0
-            row["total_credit"] = 0.0
-            row["balance_debit"] = 0.0
-            row["balance_credit"] = 0.0
+            continue
         if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
             continue
         row.pop("system_key", None)
@@ -7118,6 +7356,8 @@ async def list_journal_entries(
     from_date: Optional[date] = Query(default=None),
     to_date: Optional[date] = Query(default=None),
     source_type: Optional[str] = Query(default=None),
+    entry_category: Optional[str] = Query(default=None),
+    entry_item: Optional[str] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
     query = with_organization({"is_reversal": {"$ne": True}})
@@ -7131,8 +7371,223 @@ async def list_journal_entries(
         query["source_type"] = source_type
     else:
         query["source_type"] = {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}
+    category_sources = {
+        "fixed_assets": ["fixed_asset", "asset_depreciation"],
+        "revenues": ["revenue", "membership_batch_payment"],
+        "expenses": ["expense"],
+        "deposits": ["deposit", "deposit_interest"],
+        "banking_expenses": ["banking_expense"],
+        "custody_advances": ["custody_advance", "custody_advance_settlement"],
+        "membership": ["membership_batch_payment"],
+        "reconciliations": ["reconciliation"],
+        "inventory": ["inventory"],
+        "misc_creditors": ["misc_creditor"],
+    }
+    if entry_category and entry_category != "all" and not source_type:
+        query["source_type"] = {"$in": category_sources.get(entry_category, [])}
+    if entry_item and entry_item != "all":
+        query["$or"] = [
+            {"description": {"$regex": entry_item, "$options": "i"}},
+            {"reference": {"$regex": entry_item, "$options": "i"}},
+            {"lines.account_name": {"$regex": entry_item, "$options": "i"}},
+            {"lines.notes": {"$regex": entry_item, "$options": "i"}},
+        ]
     documents = await db.journal_entries.find(query, {"_id": 0}).sort("entry_number", -1).to_list(2000)
     return [JournalEntryResponse(**hydrate_journal_entry(document)) for document in documents]
+
+
+@api_router.get("/journal-entry-classifications")
+async def journal_entry_classifications(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    return {
+        "categories": [
+            {"key": "all", "label": "كل الأصناف", "items": [{"key": "all", "label": "الكل"}]},
+            {"key": "fixed_assets", "label": "الأصول الثابتة", "items": [{"key": "all", "label": "الكل"}, {"key": "خزينة حديد", "label": "خزينة حديد"}, {"key": "أثاث", "label": "أثاث"}, {"key": "أجهزة", "label": "أجهزة"}, {"key": "سيارات", "label": "سيارات"}, {"key": "معدات", "label": "معدات"}]},
+            {"key": "revenues", "label": "الإيرادات", "items": [{"key": "all", "label": "الكل"}, {"key": "إيرادات أوامر الدفع", "label": "أوامر الدفع"}, {"key": "إيرادات فوائد الحساب الجاري", "label": "فوائد الحساب الجاري"}, {"key": "إيرادات فوائد ودائع", "label": "فوائد الودائع"}]},
+            {"key": "expenses", "label": "المصروفات", "items": [{"key": "all", "label": "الكل"}, {"key": "مصروفات عمومية", "label": "مصروفات عمومية"}, {"key": "إعانات وفاة", "label": "إعانات وفاة"}, {"key": "ربط وديعة", "label": "ربط وديعة"}]},
+            {"key": "deposits", "label": "الودائع", "items": [{"key": "all", "label": "الكل"}, {"key": "ودائع لأجل", "label": "أصل الوديعة"}, {"key": "إيرادات فوائد ودائع", "label": "فوائد الودائع"}]},
+            {"key": "banking_expenses", "label": "المصروفات البنكية", "items": [{"key": "all", "label": "الكل"}, {"key": "المصروفات البنكية", "label": "المصروفات البنكية"}]},
+            {"key": "custody_advances", "label": "العهد والسلف", "items": [{"key": "all", "label": "الكل"}, {"key": "العهد والسلف", "label": "العهد والسلف"}, {"key": "تسوية العهد والسلف", "label": "تسوية العهد والسلف"}]},
+            {"key": "membership", "label": "العضوية", "items": [{"key": "all", "label": "الكل"}, {"key": "اشتراكات العضوية", "label": "اشتراكات العضوية"}]},
+            {"key": "reconciliations", "label": "التسويات البنكية", "items": [{"key": "all", "label": "الكل"}, {"key": "تسوية", "label": "تسويات بنكية"}]},
+            {"key": "inventory", "label": "المخزون", "items": [{"key": "all", "label": "الكل"}, {"key": "وارد", "label": "وارد مخزون"}, {"key": "صرف", "label": "منصرف مخزون"}, {"key": "المخزون", "label": "حساب المخزون"}]},
+            {"key": "misc_creditors", "label": "الدائنون المتنوعون", "items": [{"key": "all", "label": "الكل"}, {"key": "إثبات", "label": "إثبات الالتزام"}, {"key": "سداد", "label": "سداد الدائن"}, {"key": "دائنون متنوعون", "label": "حساب الدائنين"}]},
+        ]
+    }
+
+
+@api_router.get("/inventory/items", response_model=List[InventoryItemResponse])
+async def list_inventory_items(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    documents = await db.inventory_items.find(with_organization({}), {"_id": 0}).sort("item_name", 1).to_list(5000)
+    return [InventoryItemResponse(**hydrate_inventory_item(document)) for document in documents]
+
+
+@api_router.post("/inventory/items", response_model=InventoryItemResponse)
+async def create_inventory_item(payload: InventoryItemCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    existing = await db.inventory_items.find_one(with_organization({"item_code": payload.item_code.strip()}), {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="كود الصنف مسجل من قبل")
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "item_code": payload.item_code.strip(),
+        "item_name": payload.item_name.strip(),
+        "unit": payload.unit.strip(),
+        "quantity_balance": 0.0,
+        "value_balance": 0.0,
+        "average_cost": 0.0,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.inventory_items.insert_one(document.copy())
+    return InventoryItemResponse(**hydrate_inventory_item(document))
+
+
+@api_router.get("/inventory/movements", response_model=List[InventoryMovementResponse])
+async def list_inventory_movements(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    item_id: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if item_id:
+        query["item_id"] = item_id
+    if from_date or to_date:
+        query["movement_date"] = {}
+        if from_date:
+            query["movement_date"]["$gte"] = from_date.isoformat()
+        if to_date:
+            query["movement_date"]["$lte"] = to_date.isoformat()
+    documents = await db.inventory_movements.find(query, {"_id": 0}).sort("movement_date", -1).to_list(5000)
+    return [InventoryMovementResponse(**hydrate_inventory_movement(document)) for document in documents]
+
+
+@api_router.post("/inventory/movements", response_model=InventoryMovementResponse)
+async def create_inventory_movement(payload: InventoryMovementCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    item = await ensure_inventory_item_from_payload(payload)
+    quantity = round(float(payload.quantity), 4)
+    current_qty = round(float(item.get("quantity_balance") or 0), 4)
+    current_value = round(float(item.get("value_balance") or 0), 2)
+    average_cost = round(float(item.get("average_cost") or 0), 4)
+    unit_cost = round(float(payload.unit_cost if payload.unit_cost is not None else average_cost), 4)
+    if payload.movement_type == "in" and unit_cost <= 0:
+        raise HTTPException(status_code=400, detail="يجب إدخال تكلفة الوحدة في حركة الوارد")
+    if payload.movement_type == "out":
+        if current_qty < quantity:
+            raise HTTPException(status_code=400, detail="رصيد الصنف لا يكفي لتنفيذ المنصرف")
+        if unit_cost <= 0:
+            unit_cost = average_cost
+    total_value = round(quantity * unit_cost, 2)
+    next_qty = round(current_qty + quantity, 4) if payload.movement_type == "in" else round(current_qty - quantity, 4)
+    next_value = round(current_value + total_value, 2) if payload.movement_type == "in" else round(max(0, current_value - total_value), 2)
+    next_average = round(next_value / next_qty, 4) if next_qty > 0 else 0.0
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "movement_date": payload.movement_date.isoformat(),
+        "item_id": item["id"],
+        "item_code": item.get("item_code"),
+        "item_name": item.get("item_name"),
+        "unit": item.get("unit") or payload.unit or "وحدة",
+        "movement_type": payload.movement_type,
+        "quantity": quantity,
+        "unit_cost": unit_cost,
+        "total_value": total_value,
+        "quantity_balance_after": next_qty,
+        "value_balance_after": next_value,
+        "journal_entry_id": None,
+        "description": payload.description.strip(),
+        "reference": (payload.reference or "").strip() or None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.inventory_movements.insert_one(document.copy())
+    journal = await journal_for_inventory_movement({**document, "movement_date": payload.movement_date}, current_user)
+    await db.inventory_movements.update_one(with_organization({"id": document["id"]}), {"$set": {"journal_entry_id": journal.get("id") if journal else None}})
+    document["journal_entry_id"] = journal.get("id") if journal else None
+    await db.inventory_items.update_one(with_organization({"id": item["id"]}), {"$set": {"quantity_balance": next_qty, "value_balance": next_value, "average_cost": next_average, "updated_at": now_iso}})
+    return InventoryMovementResponse(**hydrate_inventory_movement(document))
+
+
+@api_router.get("/misc-creditors", response_model=List[MiscCreditorResponse])
+async def list_misc_creditors(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
+    documents = await db.misc_creditors.find(with_organization({}), {"_id": 0}).sort("creditor_name", 1).to_list(5000)
+    return [MiscCreditorResponse(**hydrate_misc_creditor(document)) for document in documents]
+
+
+@api_router.post("/misc-creditors", response_model=MiscCreditorResponse)
+async def create_misc_creditor(payload: MiscCreditorCreate, _: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "creditor_code": (payload.creditor_code or "").strip() or None,
+        "creditor_name": payload.creditor_name.strip(),
+        "notes": (payload.notes or "").strip() or None,
+        "balance": 0.0,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.misc_creditors.insert_one(document.copy())
+    return MiscCreditorResponse(**hydrate_misc_creditor(document))
+
+
+@api_router.get("/misc-creditors/movements", response_model=List[MiscCreditorMovementResponse])
+async def list_misc_creditor_movements(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    creditor_id: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    query = with_organization({})
+    if creditor_id:
+        query["creditor_id"] = creditor_id
+    if from_date or to_date:
+        query["movement_date"] = {}
+        if from_date:
+            query["movement_date"]["$gte"] = from_date.isoformat()
+        if to_date:
+            query["movement_date"]["$lte"] = to_date.isoformat()
+    documents = await db.misc_creditor_movements.find(query, {"_id": 0}).sort("movement_date", -1).to_list(5000)
+    return [MiscCreditorMovementResponse(**hydrate_misc_creditor_movement(document)) for document in documents]
+
+
+@api_router.post("/misc-creditors/movements", response_model=MiscCreditorMovementResponse)
+async def create_misc_creditor_movement(payload: MiscCreditorMovementCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    creditor = await ensure_misc_creditor_from_payload(payload)
+    amount = round(float(payload.amount), 2)
+    current_balance = round(float(creditor.get("balance") or 0), 2)
+    if payload.movement_type == "payment" and amount > current_balance:
+        raise HTTPException(status_code=400, detail="لا يمكن سداد مبلغ أكبر من رصيد الدائن")
+    next_balance = round(current_balance + amount, 2) if payload.movement_type == "obligation" else round(current_balance - amount, 2)
+    bank_name = None
+    if payload.bank_id:
+        bank_name = ensure_bank(payload.bank_id)["name"]
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    document = attach_organization({
+        "id": str(uuid.uuid4()),
+        "movement_date": payload.movement_date.isoformat(),
+        "creditor_id": creditor["id"],
+        "creditor_name": creditor.get("creditor_name"),
+        "movement_type": payload.movement_type,
+        "amount": amount,
+        "balance_after": next_balance,
+        "bank_id": payload.bank_id,
+        "bank_name": bank_name,
+        "journal_entry_id": None,
+        "description": payload.description.strip(),
+        "reference": (payload.reference or "").strip() or None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    })
+    await db.misc_creditor_movements.insert_one(document.copy())
+    journal = await journal_for_misc_creditor_movement({**document, "movement_date": payload.movement_date}, current_user)
+    await db.misc_creditor_movements.update_one(with_organization({"id": document["id"]}), {"$set": {"journal_entry_id": journal.get("id") if journal else None}})
+    document["journal_entry_id"] = journal.get("id") if journal else None
+    await db.misc_creditors.update_one(with_organization({"id": creditor["id"]}), {"$set": {"balance": next_balance, "updated_at": now_iso}})
+    return MiscCreditorMovementResponse(**hydrate_misc_creditor_movement(document))
 
 
 @api_router.post("/journal-entries", response_model=JournalEntryResponse)

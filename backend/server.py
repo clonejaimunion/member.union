@@ -3772,11 +3772,7 @@ async def calculate_trial_balance_report(
             row["balance_debit"] = 0.0
             row["balance_credit"] = round(abs(signed_balance), 2)
         if row.get("system_key") == "term_deposits" and not show_term_deposit_principal:
-            row["opening_balance"] = 0.0
-            row["total_debit"] = 0.0
-            row["total_credit"] = 0.0
-            row["balance_debit"] = 0.0
-            row["balance_credit"] = 0.0
+            continue
         if non_zero_only and not any([row["opening_balance"], row["total_debit"], row["total_credit"], row["balance_debit"], row["balance_credit"]]):
             continue
         row.pop("system_key", None)
