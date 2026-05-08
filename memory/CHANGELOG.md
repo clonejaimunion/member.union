@@ -9,6 +9,14 @@
 - تم تحديث release وإعادة بناء المثبت: `/app/dist/BankDepositSystemSetup.exe` بحجم `23038002` bytes، ورابط `/api/download/setup` مطابق للحجم.
 - الاختبارات: lint backend ناجح، smoke screenshot ناجح، وTesting Agent iteration_81 أكد نجاح 14/14 لاختبارات التغليف والصحة والتنزيل. يلزم فقط تحقق نهائي على Windows فعلي لأن بيئة Linux لا تشغل HTA/BAT.
 
+## إصلاح — 2026-05-08 — MongoDB محمول لمنع توقف 92% نهائياً
+- بعد استمرار التوقف عند 92% على جهاز المستخدم، تم دعم التشغيل المحلي بقاعدة MongoDB محمولة داخل المثبت: `mongodb/bin/mongod.exe`.
+- أصبح `start_system_worker.bat` يبدأ MongoDB قبل backend: يفحص `127.0.0.1:27017`، يحاول تشغيل خدمة MongoDB إن وجدت، ثم يبدأ `mongod.exe` المرفق تلقائياً مع `dbpath` داخل `%LOCALAPPDATA%\BankDepositSystem\mongo-data`.
+- تمت إضافة قراءة فورية لـ `startup_error.txt` داخل `splash.hta` حتى تظهر المشكلة على الشاشة بدلاً من الوقوف الصامت عند 92%.
+- تم ضبط `serverSelectionTimeoutMS=3000` في اتصال MongoDB لتقليل الانتظار عند أي فشل محلي.
+- تم بناء المثبت الجديد بحجم `39959765` bytes، والتحقق من رابط `/api/download/setup` بحجم مطابق ومن وجود `mongod.exe` وحزم `wheels_win` داخل release.
+- الاختبارات: lint backend ناجح، smoke للواجهة ناجح، وTesting Agent iteration_82 نجح 16/16. ملاحظة: التنفيذ الفعلي لـ BAT/HTA لا يزال يتطلب تأكيداً على Windows حقيقي.
+
 ## تحديث — 2026-05-03 — روابط PDF عامة وعضوية وتصدير ومراجعة تصحيحات
 - جعل روابط الدليل العربي والإنجليزي المنفصلين قابلة للتحميل المباشر بدون تسجيل دخول: `/api/admin/training/manual-ar.pdf` و`/api/admin/training/manual-en.pdf`.
 - إضافة تعديل وحذف العضويات من API والواجهة، مع اعتماد سجل التدقيق العام لتسجيل عمليات PUT/DELETE الخاصة بالعضوية.
