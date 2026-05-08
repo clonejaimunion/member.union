@@ -1,0 +1,61 @@
+{
+  "summary": "Executed backend + frontend testing for Tax Engine scope. Core requested social-solidarity flows are blocked by organization module gating: electronic_invoice is disabled for social-solidarity, causing /api/tax-engine/profile and dependent endpoints to fail with 404. UI confirms Tax Engine card hidden for social-solidarity and visible for general-union.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/tax-engine/profile (social-solidarity)",
+        "issue": "Returns 404 with detail: 'الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي'. This blocks GET/PUT profile, invoice creation, approval, audit verification, and tenant isolation checks in requested org.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Accounting modules grid (social-solidarity)",
+        "issue": "Electronic Invoice module card is not shown for social-solidarity while request expects it enabled and testable.",
+        "selector": "[data-testid='module-electronic-invoice-card']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Tax Engine profile/invoice flow for social-solidarity",
+        "issue": "Frontend visibility and backend access are both gated off for the target tenant, so integration flow cannot run in requested organization.",
+        "affected_selectors": [
+          "[data-testid='module-accounting-hub-card']",
+          "[data-testid='module-electronic-invoice-card']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration83_tax_engine_profile_and_invoices.py",
+    "/app/test_reports/pytest/pytest_results_iter83_tax_engine.xml"
+  ],
+  "action_items": [
+    "Enable organization module electronic_invoice=true for social-solidarity in effective organization modules source used at login/authorization.",
+    "After enabling, rerun /app/backend/tests/test_iteration83_tax_engine_profile_and_invoices.py to validate requested Tax Engine endpoints and approval/audit flow end-to-end.",
+    "Re-verify /electronic-invoice page in social-solidarity shows Tax Engine Profile and tax sales/purchase buttons.",
+    "Then retest multi-tenant isolation against general-union once social flow is unblocked."
+  ],
+  "critical_code_review_comments": [
+    "Tax Engine endpoints are correctly behind require_einvoice_enabled, but tenant module configuration is inconsistent with product requirement for social-solidarity.",
+    "Single-file backend server.py remains very large (>10k LOC), increasing regression risk when toggling tenant/module auth behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration83_tax_engine_profile_and_invoices.py",
+    "/app/test_reports/iteration_77.json"
+  ],
+  "success_rate": {
+    "backend": "14% (1/7)",
+    "frontend": "40%"
+  },
+  "seed_data_creation": "No seed data created. No TEST_TAX_ENGINE_AUTOMATION_DELETE_ME invoices were created because social-solidarity tax endpoints were blocked.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Evidence gathered: login payload shows social-solidarity organization_modules.electronic_invoice=false, while general-union shows electronic_invoice=true. UI check with admin_takaful and admin_union confirms social accounting page hides module-electronic-invoice-card and union shows it. Backend pytest file is ready and currently fails at social tax profile setup due this gate.",
+  "rca of the issue": "RCA: Tenant module configuration regression/mismatch. Reproduction: (1) POST /api/auth/login with admin/social-solidarity returns user.organization_modules.electronic_invoice=false. (2) GET /api/tax-engine/profile with that token returns 404 'الفاتورة الإلكترونية غير متاحة لمشروع التكافل الاجتماعي'. (3) UI social login -> accounting page shows no [data-testid='module-electronic-invoice-card']; union login shows card present. Mitigation: set social-solidarity electronic_invoice=true in organization modules data path consumed by auth and module checks, then rerun blocked tax-engine suite. ETA submit path remains CONFIGURATION_REQUIRED/OFFLINE_READY by design and was not auto-invoked."
+}
