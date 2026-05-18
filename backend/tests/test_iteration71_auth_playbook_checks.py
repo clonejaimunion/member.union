@@ -60,7 +60,7 @@ def test_login_sets_http_only_cookie(base_url):
 
 # Modules/features: verify CORS preflight returns explicit origin with credentials.
 def test_local_preflight_allows_explicit_origin_and_credentials():
-    origin = "https://interest-calculator-12.preview.emergentagent.com"
+    origin = "https://scanner-ocr-test.preview.emergentagent.com"
     response = requests.options(
         "http://localhost:8001/api/auth/login",
         headers={

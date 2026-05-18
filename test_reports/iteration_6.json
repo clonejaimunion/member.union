@@ -42,6 +42,6 @@
   "seed_data_creation": "Created TEST reconciliation records and temporary users: TEST_recon_*, TEST_enteronly_1777227335, TEST_viewonly_1777227358.",
   "retest_needed": true,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Reconciliation math/status/print/history are working. Reproduce critical mismatch by logging in as enter_deposits-only user and opening /bank/banque-misr/reconciliation; app redirects to '/'.",
+  "context_for_next_testing_agent": "Validated on https://scanner-ocr-test.preview.emergentagent.com. Reconciliation math/status/print/history are working. Reproduce critical mismatch by logging in as enter_deposits-only user and opening /bank/banque-misr/reconciliation; app redirects to '/'.",
   "rca of the issue": "RCA: route protection mismatch. In frontend App.js, reconciliation route is wrapped with ProtectedRoute(permission='view_reports'). Backend POST /api/banks/{bank_id}/reconciliations is guarded by require_permission('enter_deposits'). This split causes enter_deposits-only users to be denied UI access even though backend authorizes save. Reproduction: create user {enter_deposits:true, view_reports:false}, login, navigate to /bank/banque-misr/reconciliation, observe redirect to '/'."
 }

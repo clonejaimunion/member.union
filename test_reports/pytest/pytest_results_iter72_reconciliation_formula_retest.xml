@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="7" time="18.606" timestamp="2026-05-06T13:21:46.962149+00:00" hostname="agent-env-ba67e22d-6b71-4fe8-aa51-02b7e4b7510e"><testcase classname="tests.test_iteration72_bank_reconciliation_monthly_formula" name="test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments" time="8.417"><failure message="AssertionError: {&quot;detail&quot;:&quot;يجب إدخال رقم العضوية عند اختيار إعانات وفاة&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="7" time="18.606" timestamp="2026-05-06T13:21:46.962149+00:00" hostname="agent-env-ba67e22d-6b71-4fe8-aa51-02b7e4b7510e"><testcase classname="tests.test_iteration72_bank_reconciliation_monthly_formula" name="test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments" time="8.417"><failure message="AssertionError: {&quot;detail&quot;:&quot;يجب إدخال رقم العضوية عند اختيار إعانات وفاة&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">base_url = 'https://scanner-ocr-test.preview.emergentagent.com'
 admin_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MDczNzA3LCJleHAiOjE3NzgxMDI1MDd9.EYmzaS56ZCzr-iIPzx8Mh56G63u9qbC2gpf7wriMkag'
 
     def test_bank_reconciliation_uses_month_opening_plus_receipts_minus_payments(base_url, admin_token):
@@ -14,7 +14,7 @@ admin_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdm
 tests/test_iteration72_bank_reconciliation_monthly_formula.py:142: 
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
 
-base_url = 'https://interest-calculator-12.preview.emergentagent.com'
+base_url = 'https://scanner-ocr-test.preview.emergentagent.com'
 token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiY2I5YWYyYy0zZjdmLTRkNDYtYTIwZC1iMzMyZDBhMmY1MTkiLCJ1c2VybmFtZSI6ImFk...kiLCJwdXJwb3NlIjoiYWNjZXNzIiwiaWF0IjoxNzc4MDczNzA3LCJleHAiOjE3NzgxMDI1MDd9.EYmzaS56ZCzr-iIPzx8Mh56G63u9qbC2gpf7wriMkag'
 suffix = '08', amount = 80.0, category = 'death_benefits', status = 'paid'
 method = 'cash'

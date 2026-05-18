@@ -27,6 +27,6 @@
   "seed_data_creation": "None",
   "retest_needed": false,
   "should_main_agent_self_test": true,
-  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Login may redirect admin to /secure-admin-control-panel first; then navigating to '/' shows ModuleSelection. setup.exe first two bytes verified as 4d 5a (MZ).",
+  "context_for_next_testing_agent": "Validated on https://scanner-ocr-test.preview.emergentagent.com. Login may redirect admin to /secure-admin-control-panel first; then navigating to '/' shows ModuleSelection. setup.exe first two bytes verified as 4d 5a (MZ).",
   "rca of the issue": "No issue reproduced in requested scope."
 }

@@ -32,6 +32,6 @@
   "seed_data_creation": "Created TEST PRINT RULES ITER9 UNION and TEST PRINT RULES ITER9 SOCIAL reconciliations via UI, plus TEST_* reconciliations via API tests.",
   "retest_needed": false,
   "should_main_agent_self_test": true,
-  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Verified administration select options, organization print text mapping (union/social), print header titles hidden, logo top-left, bank statement balance hidden in print area, book balance label rendered as 'الرصيد', outstanding total row after last outstanding check row, collection checks table hidden when empty, status block at bottom-left and final block in print section, and setup executable magic bytes MZ from both endpoint and /app/dist file.",
+  "context_for_next_testing_agent": "Validated on https://scanner-ocr-test.preview.emergentagent.com. Verified administration select options, organization print text mapping (union/social), print header titles hidden, logo top-left, bank statement balance hidden in print area, book balance label rendered as 'الرصيد', outstanding total row after last outstanding check row, collection checks table hidden when empty, status block at bottom-left and final block in print section, and setup executable magic bytes MZ from both endpoint and /app/dist file.",
   "rca of the issue": "No issue reproduced in requested scope."
 }

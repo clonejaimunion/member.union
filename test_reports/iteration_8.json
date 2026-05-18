@@ -32,6 +32,6 @@
   "seed_data_creation": "Created TEST_ui_nonadmin_229324 via admin UI and temporary TEST reconciliation records during API/UI validation.",
   "retest_needed": false,
   "should_main_agent_self_test": true,
-  "context_for_next_testing_agent": "Validated on https://interest-calculator-12.preview.emergentagent.com. Confirmed admin sees delete reconciliation button and can delete; non-admin created in this run did not see delete buttons. Check-date input showed MM/DD (04/26), saving 05/17 displayed 05/17 in print table. Key amounts rendered with 'جنيه مصري'. Setup file magic bytes verified as 4d 5a from /app/dist/BankDepositSystemSetup.exe and from /api/download/setup response content.",
+  "context_for_next_testing_agent": "Validated on https://scanner-ocr-test.preview.emergentagent.com. Confirmed admin sees delete reconciliation button and can delete; non-admin created in this run did not see delete buttons. Check-date input showed MM/DD (04/26), saving 05/17 displayed 05/17 in print table. Key amounts rendered with 'جنيه مصري'. Setup file magic bytes verified as 4d 5a from /app/dist/BankDepositSystemSetup.exe and from /api/download/setup response content.",
   "rca of the issue": "No issue reproduced in requested scope."
 }

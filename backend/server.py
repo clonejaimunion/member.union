@@ -34,6 +34,7 @@ import secrets
 import subprocess
 import tempfile
 import shlex
+import shutil
 import urllib.parse
 from contextvars import ContextVar
 import zipfile
@@ -980,6 +981,16 @@ class MembershipCreate(MembershipBase):
     pass
 
 
+class MembershipScanAttachment(BaseModel):
+    id: str
+    file_name: str
+    pdf_url: str
+    source_type: Literal["scanner", "upload"] = "scanner"
+    page_count: int = 1
+    ocr_engine: str = "local"
+    scanned_at: datetime
+
+
 class MembershipResponse(MembershipBase):
     model_config = ConfigDict(extra="ignore")
 
@@ -996,8 +1007,26 @@ class MembershipResponse(MembershipBase):
     current_due: float = 0
     total_collected: float = 0
     remaining_balance: float = 0
+    scan_attachment: Optional[MembershipScanAttachment] = None
     created_at: datetime
     updated_at: datetime
+
+
+class MembershipScannerStatusResponse(BaseModel):
+    is_windows: bool
+    scanner_available: bool
+    tesseract_available: bool
+    windows_ocr_available: bool
+    message: str
+
+
+class MembershipScanImportResponse(BaseModel):
+    member: MembershipResponse
+    extracted_fields: Dict[str, str]
+    pdf_url: str
+    page_count: int
+    ocr_engine: str
+    source_type: Literal["scanner", "upload"]
 
 
 class MembershipCurrentSizeResponse(BaseModel):
@@ -2724,6 +2753,291 @@ def membership_import_preview_response(document: dict) -> MembershipImportPrevie
         total_rows_detected=int(document.get("total_rows_detected") or 0),
         accepted_rows=[MembershipImportAcceptedRow(**row) for row in document.get("accepted_rows", [])[:200]],
         skipped_rows=[MembershipImportSkippedRow(**row) for row in document.get("skipped_rows", [])[:200]],
+    )
+
+
+MEMBERSHIP_SCAN_DIR = GENERATED_REPORTS_DIR / "membership_scans"
+MEMBERSHIP_SCAN_DIR.mkdir(parents=True, exist_ok=True)
+
+SCANNED_FORM_FIELD_LABELS = {
+    "governorate": ["المحافظة", "محافظه"],
+    "union_committee": ["اللجنة النقابية", "اللجنه النقابيه", "اللجنة", "اللجنه"],
+    "membership_number": ["رقم العضوية", "رقم العضويه", "رقم العضو", "عضوية"],
+    "name": ["الاسم", "اسم العضو", "اسم المشترك"],
+    "national_id": ["الرقم القومي", "الررقم القومي", "رقم البطاقة", "رقم البطاقه", "الرقم القومى"],
+    "birth_date": ["تاريخ الميلاد", "الميلاد", "تاريخ ميلاد"],
+    "address": ["العنوان", "محل الاقامة والتليفون", "محل الإقامة والتليفون", "محل الاقامة", "محل الإقامة"],
+    "death_beneficiary": ["في حالة الوفاة", "مستلم الاعانة", "مستلم الإعانة", "المستفيد"],
+}
+
+
+def scanner_normalized_text(value: str) -> str:
+    text = normalize_member_text(value)
+    replacements = {"أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه", "ى": "ي", "ؤ": "و", "ئ": "ي", "ـ": ""}
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
+def scanner_pdf_url(membership_id: str) -> str:
+    return f"/api/memberships/{membership_id}/scan-pdf"
+
+
+def scan_line_value(line: str, labels: List[str]) -> Optional[str]:
+    raw_line = normalize_member_text(line)
+    normalized_line = scanner_normalized_text(raw_line)
+    for label in sorted(labels, key=len, reverse=True):
+        normalized_label = scanner_normalized_text(label)
+        if normalized_label and normalized_label in normalized_line:
+            value = raw_line
+            for candidate in [label, scanner_normalized_text(label)]:
+                value = re.sub(re.escape(candidate), " ", value, flags=re.IGNORECASE)
+            value = re.sub(r"^[\s:：\-–—/\\]+", "", value).strip()
+            value = re.sub(r"^(بيان|البيان)\s*", "", value).strip()
+            return normalize_member_text(value) or None
+    return None
+
+
+def extracted_labeled_value(lines: List[str], field_name: str) -> Optional[str]:
+    labels = SCANNED_FORM_FIELD_LABELS[field_name]
+    for index, line in enumerate(lines):
+        value = scan_line_value(line, labels)
+        if value:
+            return value
+        if any(scanner_normalized_text(label) in scanner_normalized_text(line) for label in labels):
+            for next_line in lines[index + 1:index + 4]:
+                next_value = normalize_member_text(next_line)
+                if next_value and not any(scanner_normalized_text(item) in scanner_normalized_text(next_value) for values in SCANNED_FORM_FIELD_LABELS.values() for item in values):
+                    return next_value
+    return None
+
+
+def birth_date_from_national_id(national_id: str) -> Optional[date]:
+    digits = normalize_digit_text(national_id)
+    if len(digits) != 14 or digits[0] not in {"2", "3"}:
+        return None
+    year = (1900 if digits[0] == "2" else 2000) + int(digits[1:3])
+    month = int(digits[3:5])
+    day = int(digits[5:7])
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def parse_scanned_membership_text(raw_text: str) -> dict:
+    text = normalize_digit_text(raw_text or "")
+    lines = [normalize_member_text(line) for line in re.split(r"[\r\n]+", text) if normalize_member_text(line)]
+    payload = {field_name: extracted_labeled_value(lines, field_name) for field_name in SCANNED_FORM_FIELD_LABELS}
+    national_match = re.search(r"\b\d{14}\b", text)
+    if national_match:
+        payload["national_id"] = national_match.group(0)
+    payload["national_id"] = normalize_digit_text(payload.get("national_id") or "")
+    payload["membership_number"] = normalize_digit_text(payload.get("membership_number") or "")
+    if not payload.get("birth_date") and payload.get("national_id"):
+        inferred_birth = birth_date_from_national_id(payload["national_id"])
+        if inferred_birth:
+            payload["birth_date"] = serialize_date(inferred_birth)
+    birth_value = parse_import_date(payload.get("birth_date") or "")
+    required = ["governorate", "union_committee", "membership_number", "name", "national_id", "birth_date", "address"]
+    missing = [field for field in required if not payload.get(field)]
+    if missing:
+        labels = {"governorate": "المحافظة", "union_committee": "اللجنة النقابية", "membership_number": "رقم العضوية", "name": "الاسم", "national_id": "الرقم القومي", "birth_date": "تاريخ الميلاد", "address": "العنوان"}
+        raise HTTPException(status_code=400, detail=f"تعذر قراءة الحقول التالية من الاستمارة: {', '.join(labels[item] for item in missing)}")
+    return {
+        "governorate": normalize_member_text(payload["governorate"]),
+        "union_committee": normalize_member_text(payload["union_committee"]),
+        "membership_number": payload["membership_number"],
+        "name": normalize_member_text(payload["name"]),
+        "national_id": payload["national_id"],
+        "birth_date": birth_value,
+        "address": normalize_member_text(payload["address"]),
+        "death_beneficiary": normalize_member_text(payload.get("death_beneficiary") or "غير محدد"),
+        "status": "active",
+        "status_effective_date": date.today(),
+    }
+
+
+def tesseract_executable_path() -> Optional[str]:
+    bundled = ROOT_DIR.parent / "tesseract" / "tesseract.exe"
+    if bundled.exists():
+        return str(bundled)
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    for env_name in ["ProgramFiles", "ProgramFiles(x86)"]:
+        base = os.environ.get(env_name)
+        if not base:
+            continue
+        candidate = Path(base) / "Tesseract-OCR" / "tesseract.exe"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def run_tesseract_ocr(image_paths: List[Path]) -> Optional[str]:
+    executable = tesseract_executable_path()
+    if not executable:
+        return None
+    parts = []
+    for image_path in image_paths:
+        result = subprocess.run([executable, str(image_path), "stdout", "-l", "ara+eng", "--psm", "6"], capture_output=True, text=True, timeout=90, check=False)
+        if result.stdout:
+            parts.append(result.stdout)
+    return "\n".join(parts).strip() or None
+
+
+def run_windows_ocr(image_paths: List[Path]) -> Optional[str]:
+    if os.name != "nt" or not image_paths:
+        return None
+    output_path = Path(tempfile.mkdtemp(prefix="membership_ocr_")) / "ocr.txt"
+    quoted_images = ",".join([f"'{str(path).replace(chr(39), chr(39) + chr(39))}'" for path in image_paths])
+    script = f"""
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]
+$null = [Windows.Globalization.Language, Windows.Foundation, ContentType=WindowsRuntime]
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+function Await($operation, $type) {{ $asTask = $asTaskGeneric.MakeGenericMethod($type); $task = $asTask.Invoke($null, @($operation)); $task.Wait() | Out-Null; return $task.Result }}
+$lang = New-Object Windows.Globalization.Language 'ar'
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($lang)
+if ($null -eq $engine) {{ $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }}
+if ($null -eq $engine) {{ exit 3 }}
+$texts = New-Object System.Collections.Generic.List[string]
+foreach ($imagePath in @({quoted_images})) {{
+  try {{
+    $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($imagePath)) ([Windows.Storage.StorageFile])
+    $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+    $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+    $texts.Add($result.Text) | Out-Null
+    $stream.Dispose()
+  }} catch {{ }}
+}}
+Set-Content -LiteralPath '{str(output_path).replace(chr(39), chr(39) + chr(39))}' -Value ($texts -join "`n") -Encoding UTF8
+"""
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], capture_output=True, text=True, timeout=120, check=False)
+    if output_path.exists():
+        return output_path.read_text(encoding="utf-8", errors="ignore").strip() or None
+    return None
+
+
+def create_pdf_from_images(image_paths: List[Path], pdf_path: Path) -> None:
+    if not image_paths:
+        raise HTTPException(status_code=400, detail="لم ينتج الماسح أي صفحات")
+    images = []
+    for image_path in image_paths:
+        images.append(Image.open(image_path).convert("RGB"))
+    first, rest = images[0], images[1:]
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    first.save(pdf_path, "PDF", resolution=300.0, save_all=True, append_images=rest)
+    for image in images:
+        image.close()
+
+
+def scanned_upload_to_pdf(content: bytes, filename: str, output_dir: Path) -> tuple[Path, List[Path], str]:
+    suffix = Path(filename or "").suffix.lower()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if suffix == ".pdf":
+        pdf_path = output_dir / "membership-form.pdf"
+        pdf_path.write_bytes(content)
+        return pdf_path, [], "pdf"
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}:
+        raise HTTPException(status_code=400, detail="ارفع PDF أو صورة للاستمارة فقط")
+    image_path = output_dir / f"page-001{suffix}"
+    image_path.write_bytes(content)
+    pdf_path = output_dir / "membership-form.pdf"
+    create_pdf_from_images([image_path], pdf_path)
+    return pdf_path, [image_path], "image"
+
+
+def extract_text_from_pdf_if_possible(pdf_path: Path) -> Optional[str]:
+    try:
+        reader = PdfReader(str(pdf_path))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return normalize_member_text(text) or None
+    except Exception:
+        return None
+
+
+def run_wia_adf_scan(output_dir: Path, device_index: int, dpi: int, max_pages: int) -> List[Path]:
+    if os.name != "nt":
+        raise HTTPException(status_code=501, detail="المسح الضوئي المباشر يعمل من نسخة Windows المحلية فقط")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    script_path = output_dir / "scan-adf.ps1"
+    script_path.write_text(r'''
+param([int]$DeviceIndex = 1, [string]$OutputPath, [int]$DPI = 300, [int]$MaxPages = 10)
+$ErrorActionPreference = "Stop"
+$deviceManager = New-Object -ComObject WIA.DeviceManager
+if ($deviceManager.DeviceInfos.Count -lt $DeviceIndex) { throw "لم يتم العثور على ماسح ضوئي WIA" }
+$deviceInfo = $deviceManager.DeviceInfos.Item($DeviceIndex)
+$device = $deviceInfo.Connect()
+$FEEDER = 1
+$PNG = "{B96B3CAF-0728-11D3-9D7B-0000F81EF32E}"
+function SetProp($target, [int]$id, $value) { try { $target.Properties.Item($id).Value = $value } catch {} }
+New-Item -ItemType Directory -Force -Path $OutputPath | Out-Null
+$count = 0
+while ($count -lt $MaxPages) {
+  try {
+    $item = $device.Items.Item(1)
+    SetProp $item 6146 $DPI
+    SetProp $item 6147 $DPI
+    SetProp $item 4103 24
+    SetProp $device 3087 $FEEDER
+    $image = $item.Transfer($PNG)
+    $count++
+    $filePath = Join-Path $OutputPath ("page-{0:D3}.png" -f $count)
+    if (Test-Path $filePath) { Remove-Item $filePath -Force }
+    $image.SaveFile($filePath)
+  } catch {
+    if ($count -eq 0) { throw }
+    break
+  }
+}
+Write-Output $count
+''', encoding="utf-8")
+    result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path), "-DeviceIndex", str(device_index), "-OutputPath", str(output_dir), "-DPI", str(dpi), "-MaxPages", str(max_pages)], capture_output=True, text=True, timeout=max(90, max_pages * 45), check=False)
+    if result.returncode != 0:
+        detail = normalize_member_text(result.stderr or result.stdout or "تعذر تنفيذ أمر الماسح الضوئي")
+        raise HTTPException(status_code=500, detail=detail[:500])
+    return sorted(output_dir.glob("page-*.png"))
+
+
+async def create_membership_from_scanned_form(raw_text: str, pdf_path: Path, page_count: int, source_type: str, ocr_engine: str, current_user: dict) -> MembershipScanImportResponse:
+    extracted_payload = parse_scanned_membership_text(raw_text)
+    payload = MembershipCreate(**extracted_payload)
+    document = await membership_document_from_payload(payload)
+    membership_id = str(uuid.uuid4())
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    attachment_id = str(uuid.uuid4())
+    final_dir = MEMBERSHIP_SCAN_DIR / membership_id
+    final_dir.mkdir(parents=True, exist_ok=True)
+    final_pdf_path = final_dir / "membership-form.pdf"
+    if pdf_path.resolve() != final_pdf_path.resolve():
+        shutil.copy2(pdf_path, final_pdf_path)
+    document.update({"id": membership_id, "created_at": now_iso, "updated_at": now_iso})
+    document["scan_attachment"] = {
+        "id": attachment_id,
+        "file_name": "membership-form.pdf",
+        "pdf_path": str(final_pdf_path),
+        "pdf_url": scanner_pdf_url(membership_id),
+        "source_type": source_type,
+        "page_count": page_count,
+        "ocr_engine": ocr_engine,
+        "scanned_at": now_iso,
+        "extracted_text_preview": (raw_text or "")[:1000],
+        "created_by": current_user.get("username"),
+    }
+    await db.memberships.insert_one(document.copy())
+    return MembershipScanImportResponse(
+        member=MembershipResponse(**hydrate_membership(document)),
+        extracted_fields={key: (serialize_date(value) if isinstance(value, date) else str(value or "")) for key, value in extracted_payload.items()},
+        pdf_url=scanner_pdf_url(membership_id),
+        page_count=page_count,
+        ocr_engine=ocr_engine,
+        source_type=source_type,
     )
 
 
@@ -7852,6 +8166,80 @@ async def delete_membership(membership_id: str, current_user: dict = Depends(req
         raise HTTPException(status_code=404, detail="العضوية غير موجودة")
     await db.memberships.delete_one(with_organization({"id": membership_id}, organization_id))
     return {"message": "تم حذف العضوية وتسجيل العملية في سجل التدقيق", "deleted_id": membership_id}
+
+
+@api_router.get("/memberships/scanner/status", response_model=MembershipScannerStatusResponse)
+async def membership_scanner_status(_: dict = Depends(require_any_permission(["enter_deposits", "manage_users"]))):
+    require_social_solidarity_membership(_)
+    is_windows = os.name == "nt"
+    tesseract_available = bool(tesseract_executable_path())
+    windows_ocr_available = is_windows
+    scanner_available = is_windows
+    message = "جاهز للمسح من نسخة Windows المحلية" if is_windows else "المسح المباشر يعمل فقط من برنامج Windows المثبت محلياً"
+    return MembershipScannerStatusResponse(is_windows=is_windows, scanner_available=scanner_available, tesseract_available=tesseract_available, windows_ocr_available=windows_ocr_available, message=message)
+
+
+@api_router.post("/memberships/scanner/scan-import", response_model=MembershipScanImportResponse)
+async def scan_and_import_membership_form(
+    device_index: int = Form(1),
+    dpi: int = Form(300),
+    max_pages: int = Form(10),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
+):
+    require_social_solidarity_membership(current_user)
+    safe_dpi = max(150, min(int(dpi or 300), 600))
+    safe_pages = max(1, min(int(max_pages or 10), 30))
+    work_dir = MEMBERSHIP_SCAN_DIR / "_incoming" / str(uuid.uuid4())
+    image_paths = run_wia_adf_scan(work_dir, max(1, int(device_index or 1)), safe_dpi, safe_pages)
+    pdf_path = work_dir / "membership-form.pdf"
+    create_pdf_from_images(image_paths, pdf_path)
+    raw_text = run_tesseract_ocr(image_paths)
+    ocr_engine = "tesseract"
+    if not raw_text:
+        raw_text = run_windows_ocr(image_paths)
+        ocr_engine = "windows-ocr"
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="تم المسح وحفظ PDF، لكن تعذر قراءة النص مجاناً. تأكد من وضوح الاستمارة أو تثبيت حزمة اللغة العربية في Windows OCR أو Tesseract")
+    return await create_membership_from_scanned_form(raw_text, pdf_path, len(image_paths), "scanner", ocr_engine, current_user)
+
+
+@api_router.post("/memberships/scanner/upload-import", response_model=MembershipScanImportResponse)
+async def upload_scanned_membership_form(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_users"])),
+):
+    require_social_solidarity_membership(current_user)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="ملف الاستمارة فارغ")
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الاستمارة كبير جداً. الحد الأقصى 25 ميجا")
+    work_dir = MEMBERSHIP_SCAN_DIR / "_incoming" / str(uuid.uuid4())
+    pdf_path, image_paths, source_kind = scanned_upload_to_pdf(content, file.filename or "membership-form.pdf", work_dir)
+    raw_text = extract_text_from_pdf_if_possible(pdf_path) if source_kind == "pdf" else None
+    ocr_engine = "pdf-text" if raw_text else "tesseract"
+    if not raw_text and image_paths:
+        raw_text = run_tesseract_ocr(image_paths)
+    if not raw_text and image_paths:
+        raw_text = run_windows_ocr(image_paths)
+        ocr_engine = "windows-ocr"
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="تعذر قراءة النص من الاستمارة. استخدم PDF نصي واضح أو امسح الاستمارة من أداة الماسح على Windows")
+    page_count = len(image_paths) if image_paths else max(1, len(PdfReader(str(pdf_path)).pages))
+    return await create_membership_from_scanned_form(raw_text, pdf_path, page_count, "upload", ocr_engine, current_user)
+
+
+@api_router.get("/memberships/{membership_id}/scan-pdf")
+async def download_membership_scan_pdf(membership_id: str, current_user: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_users"]))):
+    require_social_solidarity_membership(current_user)
+    document = await db.memberships.find_one(with_organization({"id": membership_id}), {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="العضوية غير موجودة")
+    attachment = document.get("scan_attachment") or {}
+    pdf_path = Path(attachment.get("pdf_path") or "")
+    if not pdf_path.exists() or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="ملف استمارة العضوية غير موجود")
+    return FileResponse(str(pdf_path), media_type="application/pdf", filename=f"membership-{document.get('membership_number')}-form.pdf")
 
 
 @api_router.post("/memberships/import", response_model=MembershipImportResponse)

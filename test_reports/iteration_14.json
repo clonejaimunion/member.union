@@ -35,6 +35,6 @@
   "seed_data_creation": "Created temporary TEST_FOCUS_UI* and TEST_FOCUS_FIX* reconciliation records during tests; all cleaned up and verified removed.",
   "retest_needed": false,
   "should_main_agent_self_test": true,
-  "context_for_next_testing_agent": "Public URL tested: https://interest-calculator-12.preview.emergentagent.com. Login redirected admin to /secure-admin-control-panel (expected current behavior), then reconciliation flow tested via /reconciliations. Character-by-character keyboard.type focus checks passed for outstanding and collection fields: check_number, amount, and check_date. /api/download/setup returned valid EXE content (magic MZ) and size within expected band around 944131 bytes. No MOCKED APIs used.",
+  "context_for_next_testing_agent": "Public URL tested: https://scanner-ocr-test.preview.emergentagent.com. Login redirected admin to /secure-admin-control-panel (expected current behavior), then reconciliation flow tested via /reconciliations. Character-by-character keyboard.type focus checks passed for outstanding and collection fields: check_number, amount, and check_date. /api/download/setup returned valid EXE content (magic MZ) and size within expected band around 944131 bytes. No MOCKED APIs used.",
   "rca of the issue": "Original focus-loss issue was not reproducible after current fix. Evidence supports that avoiding inline component remounting in reconciliation check editor stabilized input DOM nodes, preserving activeElement across each keystroke."
 }

@@ -170,7 +170,7 @@ def test_login_sets_httponly_cookie(api_client, api_base_url):
 
 
 def test_cors_preflight_returns_explicit_origin_and_allow_credentials(api_base_url):
-    origin = "https://interest-calculator-12.preview.emergentagent.com"
+    origin = "https://scanner-ocr-test.preview.emergentagent.com"
     response = requests.options(
         f"{api_base_url}/api/auth/login",
         headers={

@@ -414,7 +414,7 @@
 - تم ربط الوديعة النظيفة ببنك مصر والتحقق من ظهورها داخل ودائع بنك مصر.
 - الاختبار الذاتي بعد الإصلاح: `/api/journal-entries` يعرض 5 قيود بالأنواع المطلوبة، ميزان المراجعة 2026 متوازن، وERP Health Score أصبح 93.
 - Testing agent iteration_76 وجد مشكلتين بعد reset؛ تم إصلاحهما، ثم نجح regression test `/app/backend/tests/test_iteration82_erp_reset_seed_health_report.py` بنتيجة 9/9 passed.
-- تقرير الأخطاء النهائي المباشر: `https://interest-calculator-12.preview.emergentagent.com/api/erp-health-report/files/341f5ddb-b473-4882-bf0f-3b9833f03914`.
+- تقرير الأخطاء النهائي المباشر: `https://scanner-ocr-test.preview.emergentagent.com/api/erp-health-report/files/341f5ddb-b473-4882-bf0f-3b9833f03914`.
 - تم تحديث ملف التثبيت `/app/dist/BankDepositSystemSetup.exe` والتحقق من رابط التقرير النهائي 200.
 
 ## بناء Tax Engine ديناميكي متوافق مع ETA Ready بتاريخ 2026-05-08

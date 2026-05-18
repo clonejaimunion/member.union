@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, BarChart3, CreditCard, Edit3, FileUp, Home, Layers3, LogOut, Printer, Save, Search, Trash2, UserRoundPlus, UsersRound, WalletCards, X } from "lucide-react";
+import { ArrowRight, BarChart3, CreditCard, Download, Edit3, FileScan, FileUp, Home, Layers3, LogOut, Printer, Save, Search, Trash2, UserRoundPlus, UsersRound, WalletCards, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,9 @@ export default function MembershipPage() {
   const [form, setForm] = useState(initialForm);
   const [batchForm, setBatchForm] = useState(initialBatchForm);
   const [importForm, setImportForm] = useState({ governorate: "", governorate_new: "", union_committee: "", union_committee_new: "", status: "active", status_effective_date: "", file: null });
+  const [scanForm, setScanForm] = useState({ device_index: "1", dpi: "300", max_pages: "10", file: null });
+  const [scannerStatus, setScannerStatus] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
   const [importResult, setImportResult] = useState(null);
   const [importPreview, setImportPreview] = useState(null);
   const [members, setMembers] = useState([]);
@@ -85,7 +88,16 @@ export default function MembershipPage() {
     }
   }, [loadCollectionReport]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  const loadScannerStatus = useCallback(async () => {
+    try {
+      const response = await api.get("/memberships/scanner/status");
+      setScannerStatus(response.data);
+    } catch (error) {
+      setScannerStatus(null);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); loadScannerStatus(); }, [loadData, loadScannerStatus]);
 
   const governorates = useMemo(() => [...new Set(members.map((item) => item.governorate).filter(Boolean))].sort(), [members]);
   const committees = useMemo(() => [...new Set(members.filter((item) => !filters.governorate || item.governorate === filters.governorate).map((item) => item.union_committee).filter(Boolean))].sort(), [members, filters.governorate]);
@@ -96,6 +108,7 @@ export default function MembershipPage() {
 
   const updateForm = (field, value) => setForm((current) => ({ ...current, [field]: field === "national_id" || field === "membership_number" ? value.replace(/[^0-9٠-٩]/g, "") : value }));
   const updateImportForm = (field, value) => setImportForm((current) => ({ ...current, [field]: value, ...(field === "governorate" ? { union_committee: "", union_committee_new: "" } : {}) }));
+  const updateScanForm = (field, value) => setScanForm((current) => ({ ...current, [field]: value }));
   const updateBatchForm = (field, value) => setBatchForm((current) => ({ ...current, [field]: value, ...(field === "governorate" ? { union_committee: "" } : {}) }));
 
   const memberPayload = () => ({ ...form, status_effective_date: form.status === "active" ? null : (form.status_effective_date || todayIso) });
@@ -214,6 +227,43 @@ export default function MembershipPage() {
     }
   };
 
+  const scanMembershipForm = async () => {
+    setSaving(true);
+    try {
+      const payload = new FormData();
+      payload.append("device_index", scanForm.device_index || "1");
+      payload.append("dpi", scanForm.dpi || "300");
+      payload.append("max_pages", scanForm.max_pages || "10");
+      const response = await api.post("/memberships/scanner/scan-import", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      setScanResult(response.data);
+      toast.success(`تم مسح الاستمارة وتسجيل العضو: ${response.data.member.name}`);
+      await loadData();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تنفيذ المسح الضوئي");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadScannedForm = async (event) => {
+    event.preventDefault();
+    if (!scanForm.file) return toast.error("اختر ملف الاستمارة الممسوحة");
+    setSaving(true);
+    try {
+      const payload = new FormData();
+      payload.append("file", scanForm.file);
+      const response = await api.post("/memberships/scanner/upload-import", payload, { headers: { "Content-Type": "multipart/form-data" } });
+      setScanResult(response.data);
+      setScanForm((current) => ({ ...current, file: null }));
+      toast.success(`تم قراءة الاستمارة وتسجيل العضو: ${response.data.member.name}`);
+      await loadData();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر قراءة ملف الاستمارة");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const searchMembers = async () => {
     if (!searchName.trim()) return toast.error("أدخل الاسم للبحث");
     try {
@@ -277,6 +327,29 @@ export default function MembershipPage() {
 
       <section className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 xl:grid-cols-[0.85fr_1.15fr] lg:px-8" data-testid="membership-content">
         {canCreate && <section className="space-y-6" data-testid="membership-entry-column">
+          <section className="rounded-xl border border-emerald-200 bg-white p-6 shadow-sm print:hidden" data-testid="membership-scanner-section">
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="membership-scanner-heading">
+              <div className="flex items-center gap-3" data-testid="membership-scanner-title-block"><FileScan className="h-6 w-6 text-emerald-700" /><h2 className="text-2xl font-extrabold" data-testid="membership-scanner-title">استيراد من الماسح الضوئي</h2></div>
+              <Badge className="w-fit bg-emerald-50 text-emerald-800" data-testid="membership-scanner-free-badge">مجاني 100% بدون ذكاء صناعي</Badge>
+            </div>
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-700" data-testid="membership-scanner-status-box">
+              <p data-testid="membership-scanner-status-message">{scannerStatus?.message || "يتم فحص جاهزية الماسح المحلي"}</p>
+              <p className="mt-1 text-xs text-slate-500" data-testid="membership-scanner-ocr-status">OCR: {scannerStatus?.tesseract_available ? "Tesseract" : scannerStatus?.windows_ocr_available ? "Windows OCR" : "غير متاح في المعاينة"}</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="membership-scanner-controls">
+              <div data-testid="membership-scanner-device-wrapper"><Label data-testid="membership-scanner-device-label">رقم الماسح</Label><Input type="number" min="1" value={scanForm.device_index} onChange={(event) => updateScanForm("device_index", event.target.value)} className="mt-2 h-11 bg-slate-50 text-right" data-testid="membership-scanner-device-input" /></div>
+              <div data-testid="membership-scanner-dpi-wrapper"><Label data-testid="membership-scanner-dpi-label">الدقة DPI</Label><Input type="number" min="150" max="600" value={scanForm.dpi} onChange={(event) => updateScanForm("dpi", event.target.value)} className="mt-2 h-11 bg-slate-50 text-right" data-testid="membership-scanner-dpi-input" /></div>
+              <div data-testid="membership-scanner-pages-wrapper"><Label data-testid="membership-scanner-pages-label">أقصى عدد صفحات</Label><Input type="number" min="1" max="30" value={scanForm.max_pages} onChange={(event) => updateScanForm("max_pages", event.target.value)} className="mt-2 h-11 bg-slate-50 text-right" data-testid="membership-scanner-max-pages-input" /></div>
+            </div>
+            <Button type="button" onClick={scanMembershipForm} disabled={saving || scannerStatus?.is_windows === false} className="mt-4 h-11 w-full bg-slate-950 text-white" data-testid="membership-scanner-start-button"><FileScan className="h-4 w-4" /> مسح من فيدر الطابعة وتسجيل العضو</Button>
+            <form onSubmit={uploadScannedForm} className="mt-5 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="membership-scanner-upload-form">
+              <Label data-testid="membership-scanner-upload-label">بديل مجاني: رفع PDF أو صورة ممسوحة مسبقاً</Label>
+              <Input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff" onChange={(event) => updateScanForm("file", event.target.files?.[0] || null)} className="h-11 bg-white" data-testid="membership-scanner-upload-input" />
+              <Button type="submit" disabled={saving} variant="outline" className="h-11 w-full bg-white" data-testid="membership-scanner-upload-button"><FileUp className="h-4 w-4" /> قراءة الملف وتسجيل العضو</Button>
+            </form>
+            {scanResult && <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4" data-testid="membership-scanner-result-box"><p className="font-extrabold text-emerald-900" data-testid="membership-scanner-result-summary">تم تسجيل: {scanResult.member.name} — رقم العضوية {scanResult.member.membership_number}</p><a href={`${api.defaults.baseURL?.replace(/\/api$/, "")}${scanResult.pdf_url}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 text-sm font-extrabold text-emerald-800 underline" data-testid="membership-scanner-result-pdf-link"><Download className="h-4 w-4" /> فتح PDF الاستمارة المحفوظة</a></div>}
+          </section>
+
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="membership-create-section">
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="membership-create-heading"><div className="flex items-center gap-3" data-testid="membership-create-title-block">{editingMemberId ? <Edit3 className="h-6 w-6 text-amber-700" /> : <UserRoundPlus className="h-6 w-6 text-emerald-700" />}<h2 className="text-2xl font-extrabold" data-testid="membership-create-title">{editingMemberId ? "تعديل بيانات العضوية" : "تسجيل عضوية جديدة"}</h2></div>{editingMemberId && <Button type="button" onClick={cancelEditMember} variant="outline" className="h-10 bg-white" data-testid="cancel-edit-membership-button"><X className="h-4 w-4" /> إلغاء التعديل</Button>}</div>
             <form onSubmit={createMember} className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="membership-create-form">

@@ -1,7 +1,7 @@
 HTTP/1.1 204 No Content
 date: Mon, 04 May 2026 03:30:34 GMT
 server: uvicorn
-access-control-allow-origin: https://interest-calculator-12.preview.emergentagent.com
+access-control-allow-origin: https://scanner-ocr-test.preview.emergentagent.com
 access-control-allow-credentials: true
 access-control-allow-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
 access-control-allow-headers: content-type,authorization

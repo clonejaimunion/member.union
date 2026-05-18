@@ -9,7 +9,7 @@
 ### Local CORS Preflight Check
 ```bash
 curl -i -X OPTIONS http://localhost:8001/api/auth/login \
-  -H "Origin: https://interest-calculator-12.preview.emergentagent.com" \
+  -H "Origin: https://scanner-ocr-test.preview.emergentagent.com" \
   -H "Access-Control-Request-Method: POST" \
   -H "Access-Control-Request-Headers: content-type,authorization"
 ```

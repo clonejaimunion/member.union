@@ -105,3 +105,14 @@ frontend/node_modules/.cache/default-development/26.pack
 frontend/node_modules/.cache/default-development/27.pack
 frontend/node_modules/.cache/default-development/28.pack
 vendor_downloads/mongodb-windows-x86_64-4.4.29.zip
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
+frontend/node_modules/.cache/default-development/0.pack
+frontend/node_modules/.cache/default-development/30.pack
