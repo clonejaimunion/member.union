@@ -237,11 +237,10 @@ def attach_router(api_router: APIRouter, db: AsyncIOMotorDatabase, require_user_
         only_unread: bool = False,
         limit: int = 100,
         auto_scan: bool = True,
+        include_all_orgs: bool = True,
         current_user: dict = Depends(require_user_dep),
     ):
         organization_id = current_user.get("organization_id")
-        if not organization_id:
-            raise HTTPException(status_code=400, detail="مستخدم بدون جهة")
         # On-demand scan so new deposits show their notification immediately
         # (without waiting for the daily 08:00 cron). Cheap & idempotent.
         if auto_scan:
@@ -249,13 +248,23 @@ def attach_router(api_router: APIRouter, db: AsyncIOMotorDatabase, require_user_
                 await scan_and_create_notifications(db)
             except Exception as scan_error:
                 LOGGER.warning("on-demand scan failed: %s", scan_error)
-        query: dict = {"organization_id": organization_id}
+        # Admin / super-admin can also see notifications across orgs to avoid
+        # losing reminders due to organization_id mismatches in mixed datasets.
+        is_admin = (current_user.get("role") or "").lower() in {"admin", "super_admin", "superadmin"}
+        query: dict = {}
+        if not (is_admin and include_all_orgs):
+            query["organization_id"] = organization_id or "__none__"
         if only_unread:
             query["status"] = "unread"
         cursor = db.deposit_notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(max(1, min(limit, 500)))
         items = await cursor.to_list(length=500)
-        unread_count = await db.deposit_notifications.count_documents({"organization_id": organization_id, "status": "unread"})
-        total_count = await db.deposit_notifications.count_documents({"organization_id": organization_id})
+        unread_filter = {"status": "unread"}
+        total_filter: dict = {}
+        if not (is_admin and include_all_orgs):
+            unread_filter["organization_id"] = organization_id or "__none__"
+            total_filter["organization_id"] = organization_id or "__none__"
+        unread_count = await db.deposit_notifications.count_documents(unread_filter)
+        total_count = await db.deposit_notifications.count_documents(total_filter)
         return NotificationListResponse(items=items, unread_count=unread_count, total_count=total_count)
 
     @router.post("/deposits/{notification_id}/read", response_model=NotificationReadResponse)
@@ -264,13 +273,17 @@ def attach_router(api_router: APIRouter, db: AsyncIOMotorDatabase, require_user_
         current_user: dict = Depends(require_user_dep),
     ):
         organization_id = current_user.get("organization_id")
-        existing = await db.deposit_notifications.find_one({"id": notification_id, "organization_id": organization_id}, {"_id": 0})
+        is_admin = (current_user.get("role") or "").lower() in {"admin", "super_admin", "superadmin"}
+        query: dict = {"id": notification_id}
+        if not is_admin:
+            query["organization_id"] = organization_id
+        existing = await db.deposit_notifications.find_one(query, {"_id": 0})
         if not existing:
             raise HTTPException(status_code=404, detail="التنبيه غير موجود")
         if existing.get("status") == "unread":
             now = now_utc()
             await db.deposit_notifications.update_one(
-                {"id": notification_id, "organization_id": organization_id},
+                {"id": notification_id},
                 {"$set": {"status": "read", "read_at": now, "read_by": current_user.get("username") or current_user.get("id")}},
             )
             existing["status"] = "read"

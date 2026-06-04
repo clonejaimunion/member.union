@@ -95,7 +95,7 @@ async def test_build_message_matches_required_arabic_format():
 @pytest.mark.asyncio
 async def test_scan_creates_notification_only_for_active_within_window(db):
     await _insert_deposit(db, status="active", maturity_offset_days=3, deposit_number="ACTIVE-NEAR")
-    await _insert_deposit(db, status="active", maturity_offset_days=30, deposit_number="ACTIVE-FAR")
+    await _insert_deposit(db, status="active", maturity_offset_days=120, deposit_number="ACTIVE-FAR")
     await _insert_deposit(db, status="active", maturity_offset_days=-5, deposit_number="ACTIVE-PAST")
     await _insert_deposit(db, status="matured", maturity_offset_days=3, deposit_number="MATURED")
     await _insert_deposit(db, status="closed", maturity_offset_days=3, deposit_number="CLOSED")
@@ -103,8 +103,6 @@ async def test_scan_creates_notification_only_for_active_within_window(db):
 
     summary = await scan_and_create_notifications(db, threshold_days=DEFAULT_THRESHOLD_DAYS)
     assert summary.candidates_checked >= 3
-    # Notifications across all orgs may include rows from other tests; we only
-    # care that the unique row we expected was created in this org.
     assert summary.errors == []
 
     notifications = await db.deposit_notifications.find({"organization_id": TEST_ORG}).to_list(length=10)

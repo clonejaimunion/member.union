@@ -25,6 +25,13 @@ export const NotificationBell = () => {
     if (!user) return;
     setLoading(true);
     try {
+      // Force a fresh scan first so any newly-added deposit shows immediately,
+      // even if the running backend is missing the auto_scan optimization.
+      try {
+        await api.post("/notifications/deposits/scan?threshold_days=30");
+      } catch {
+        /* scan endpoint may not exist on very old builds — fall through to GET */
+      }
       const response = await api.get("/notifications/deposits", { params: { limit: 50 } });
       setItems(response.data.items || []);
       setUnreadCount(response.data.unread_count || 0);
