@@ -101,17 +101,18 @@ export const NotificationBell = () => {
             )}
             {sortedItems.map((notification) => {
               const isUnread = notification.status === "unread";
+              const isUrgent = notification.urgency === "urgent" || (notification.days_remaining != null && notification.days_remaining <= 7);
               return (
                 <div
                   key={notification.id}
-                  className={`border-b border-slate-100 px-4 py-3 ${isUnread ? "bg-amber-50/60" : "bg-white"}`}
+                  className={`border-b border-slate-100 px-4 py-3 ${isUnread ? (isUrgent ? "bg-rose-50/70" : "bg-amber-50/60") : "bg-white"}`}
                   data-testid={`notification-bell-item-${notification.id}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
-                      <p className="flex items-center gap-2 text-xs font-extrabold text-amber-700" data-testid={`notification-bell-item-${notification.id}-title`}>
-                        {isUnread && <span className="inline-block h-2 w-2 rounded-full bg-rose-500" data-testid={`notification-bell-item-${notification.id}-dot`} />}
-                        {notification.title || "تنبيه استحقاق وديعة"}
+                      <p className={`flex items-center gap-2 text-xs font-extrabold ${isUrgent ? "text-rose-700" : "text-amber-700"}`} data-testid={`notification-bell-item-${notification.id}-title`}>
+                        {isUnread && <span className={`inline-block h-2 w-2 rounded-full ${isUrgent ? "bg-rose-600" : "bg-amber-500"}`} data-testid={`notification-bell-item-${notification.id}-dot`} />}
+                        {isUrgent ? "⚠️ استحقاق عاجل" : (notification.title || "تنبيه استحقاق وديعة")}
                       </p>
                       <p className="mt-1 text-sm font-bold text-slate-900" data-testid={`notification-bell-item-${notification.id}-deposit`}>وديعة {notification.deposit_number} — {notification.bank_name}</p>
                       <p className="text-xs font-bold text-slate-600" data-testid={`notification-bell-item-${notification.id}-amount`}>{formatAmount(notification.amount)} جنيه</p>

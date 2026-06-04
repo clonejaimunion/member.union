@@ -25,7 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 LOGGER = logging.getLogger("deposit_notifications")
-DEFAULT_THRESHOLD_DAYS = 7
+DEFAULT_THRESHOLD_DAYS = 30
+URGENT_THRESHOLD_DAYS = 7
 
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -61,6 +62,7 @@ class MaturityNotification(BaseModel):
     notification_date: str
     title: str = Field(default="تنبيه استحقاق وديعة")
     message: str
+    urgency: Literal["urgent", "upcoming"] = "upcoming"
     status: Literal["unread", "read"] = "unread"
     created_at: datetime
     sent_at: Optional[datetime] = None
@@ -166,6 +168,7 @@ async def scan_and_create_notifications(db: AsyncIOMotorDatabase, threshold_days
                     days_remaining=remaining,
                     notification_date=today_str,
                     message=build_message(amount, bank_name, deposit_number, creation_str, maturity_str, remaining),
+                    urgency="urgent" if remaining <= URGENT_THRESHOLD_DAYS else "upcoming",
                     status="unread",
                     created_at=now_utc(),
                     sent_at=None,
