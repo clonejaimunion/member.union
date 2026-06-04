@@ -102,13 +102,14 @@ Section "تطبيق التحديث" SecMain
   File "patch\backend\notifier_windows.py"
   File "patch\backend\requirements-runtime.txt"
 
-  ; New wheels for notifications & scheduler
-  DetailPrint "تثبيت wheels جديدة..."
+  ; New wheels for notifications & scheduler (optional — install best-effort)
+  DetailPrint "تثبيت wheels جديدة (اختيارية)..."
   SetOutPath "$INSTDIR\backend\wheels_win"
   File /r "patch\backend\wheels_win\*.whl"
 
-  ; Install new Python packages from local wheels (offline)
-  nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" APScheduler windows-toasts winsdk pytz tzlocal tzdata'
+  ; best-effort: do not abort if optional packages fail to install
+  nsExec::Exec '"$INSTDIR\backend\.venv\Scripts\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" APScheduler pytz tzlocal tzdata'
+  nsExec::Exec '"$INSTDIR\backend\.venv\Scripts\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" windows-toasts winsdk'
 
   ; Frontend
   DetailPrint "تحديث الواجهة..."

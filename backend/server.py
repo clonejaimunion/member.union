@@ -124,11 +124,18 @@ app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
 # Background scheduler for deposit maturity notifications (informational only —
-# never touches accounting state). Started in startup_tasks, stopped on shutdown.
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # noqa: E402
+# never touches accounting state). Optional: if APScheduler is unavailable the
+# notifications still work via manual /scan endpoint and the in-app bell.
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore  # noqa: E402
+    _APSCHEDULER_AVAILABLE = True
+except Exception:
+    AsyncIOScheduler = None  # type: ignore
+    _APSCHEDULER_AVAILABLE = False
+
 from deposit_notifications import attach_router as attach_notifications_router, ensure_indexes as ensure_notification_indexes, schedule_daily_scan  # noqa: E402
 
-deposit_notification_scheduler = AsyncIOScheduler()
+deposit_notification_scheduler = AsyncIOScheduler() if _APSCHEDULER_AVAILABLE else None
 
 
 # Static bank master data. Deposits are stored separately per bank_id in MongoDB.
@@ -6659,9 +6666,13 @@ async def startup_tasks():
     # Notifications module — strictly informational, never alters accounting state.
     try:
         await ensure_notification_indexes(db)
-        schedule_daily_scan(deposit_notification_scheduler, db, run_now=True)
-        if not deposit_notification_scheduler.running:
-            deposit_notification_scheduler.start()
+        if _APSCHEDULER_AVAILABLE and deposit_notification_scheduler is not None:
+            schedule_daily_scan(deposit_notification_scheduler, db, run_now=True)
+            if not deposit_notification_scheduler.running:
+                deposit_notification_scheduler.start()
+        else:
+            from deposit_notifications import scan_and_create_notifications as _scan_once  # type: ignore
+            await _scan_once(db)
     except Exception as notif_error:
         logging.getLogger("deposit_notifications").error("init failed: %s", notif_error)
 
@@ -10660,7 +10671,7 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     try:
-        if deposit_notification_scheduler.running:
+        if deposit_notification_scheduler is not None and deposit_notification_scheduler.running:
             deposit_notification_scheduler.shutdown(wait=False)
     except Exception:
         pass
