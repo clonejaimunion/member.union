@@ -28,7 +28,7 @@ export const NotificationBell = () => {
       // Force a fresh scan first so any newly-added deposit shows immediately,
       // even if the running backend is missing the auto_scan optimization.
       try {
-        await api.post("/notifications/deposits/scan?threshold_days=30");
+        await api.post("/notifications/deposits/scan?threshold_days=10");
       } catch {
         /* scan endpoint may not exist on very old builds — fall through to GET */
       }

@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 LOGGER = logging.getLogger("deposit_notifications")
-DEFAULT_THRESHOLD_DAYS = 365  # show all active deposits maturing within a year
+DEFAULT_THRESHOLD_DAYS = 10  # alert only when ≤10 days remain to maturity
 URGENT_THRESHOLD_DAYS = 7
 
 

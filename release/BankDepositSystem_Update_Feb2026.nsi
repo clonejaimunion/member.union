@@ -121,9 +121,18 @@ Section "تطبيق التحديث" SecMain
   SetOutPath "$INSTDIR\frontend\build"
   File /r "patch\frontend\*.*"
 
+  ; Auto-start on Windows logon — minimised — so the in-app bell is alive
+  ; even before the user opens the app manually. No PowerShell, no VBS,
+  ; no Task Scheduler — just a Startup-folder shortcut. The shortcut targets
+  ; the existing silent VBS launcher already bundled with the app.
+  DetailPrint "إضافة اختصار البدء التلقائي مع Windows..."
+  IfFileExists "$INSTDIR\launch_bank_deposit_system.vbs" 0 skip_autostart
+    CreateShortCut "$SMSTARTUP\Bank Deposit System.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\launch_bank_deposit_system.vbs"' "$INSTDIR\accounting_app.ico" 0 SW_SHOWMINIMIZED
+  skip_autostart:
+
   DetailPrint "اكتمل التحديث."
 SectionEnd
 
 Section -post
-  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات:$\r$\n- نظام تنبيهات استحقاق الودائع داخل البرنامج$\r$\n- معالجة تواريخ ISO من قاعدة البيانات$\r$\n- بدون أي تدخل خارجي (لا PowerShell ولا VBS ولا Scheduler)$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
+  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات:$\r$\n- تنبيهات استحقاق الودائع تظهر للودائع التي يتبقى عليها 10 أيام أو أقل$\r$\n- التنبيه يبقى ظاهراً حتى تضغط (تم القراءة)$\r$\n- البرنامج يبدأ تلقائياً عند تسجيل دخول Windows$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
 SectionEnd
