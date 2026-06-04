@@ -1,6 +1,5 @@
 ; ============================================================
-; محدّث النظام المحاسبي - فبراير 2026 (نسخة محسّنة)
-; يبحث تلقائياً في كل أماكن التثبيت المحتملة
+; محدّث النظام المحاسبي - فبراير 2026 (يتضمن نظام تنبيهات الودائع)
 ; ============================================================
 
 Unicode true
@@ -28,56 +27,34 @@ Var FoundPath
 
 Function .onInit
   StrCpy $FoundPath ""
-
-  ; 1) المسار الافتراضي للمستخدم الحالي (الأكثر شيوعاً)
   StrCpy $0 "$LOCALAPPDATA\Bank Deposit Interest System"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
-  ; 2) المسار البديل بـ AppData\Roaming
   StrCpy $0 "$APPDATA\Bank Deposit Interest System"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
-  ; 3) ProgramFiles 64-bit
   StrCpy $0 "$PROGRAMFILES64\Bank Deposit Interest System"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
-  ; 4) ProgramFiles 32-bit
   StrCpy $0 "$PROGRAMFILES32\Bank Deposit Interest System"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
-  ; 5) ProgramFiles بدون مسافات (لو الاسم متغيّر)
   StrCpy $0 "$PROGRAMFILES64\BankDepositSystem"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
   StrCpy $0 "$PROGRAMFILES32\BankDepositSystem"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
-  ; 6) قراءة من Registry (لو سجلّه الـ Setup الأصلي)
-  ReadRegStr $0 HKCU "Software\BankDepositSystem" "InstallDir"
-  ${If} $0 != ""
-    IfFileExists "$0\backend\server.py" 0 +3
-      StrCpy $FoundPath "$0"
-      Goto done
-  ${EndIf}
-
-  ; 7) C:\Bank Deposit Interest System  (لو نسخة بورتابل)
   StrCpy $0 "C:\Bank Deposit Interest System"
   IfFileExists "$0\backend\server.py" 0 +3
     StrCpy $FoundPath "$0"
     Goto done
-
 done:
   ${If} $FoundPath != ""
     StrCpy $INSTDIR "$FoundPath"
@@ -93,10 +70,8 @@ Function .onVerifyInstDir
 FunctionEnd
 
 Section "تطبيق التحديث" SecMain
-
-  ; التحقق النهائي
   IfFileExists "$INSTDIR\backend\server.py" continue_install 0
-    MessageBox MB_OK|MB_ICONSTOP "لم يتم العثور على ملف server.py داخل:$\r$\n$INSTDIR\backend$\r$\n$\r$\nاضغط رجوع وحدد المجلد الصحيح يدوياً."
+    MessageBox MB_OK|MB_ICONSTOP "لم يتم العثور على ملف server.py داخل:$\r$\n$INSTDIR\backend"
     Abort
   continue_install:
 
@@ -105,10 +80,11 @@ Section "تطبيق التحديث" SecMain
   nsExec::Exec 'taskkill /F /IM pythonw.exe'
   nsExec::Exec 'taskkill /F /IM mongod.exe'
   nsExec::Exec 'taskkill /F /IM wscript.exe'
+  nsExec::Exec 'schtasks /End /TN "BankDepositMaturityNotifier"'
   Sleep 1500
 
   ; نسخة احتياطية
-  DetailPrint "إنشاء نسخة احتياطية في backup_feb2026..."
+  DetailPrint "نسخة احتياطية..."
   RMDir /r "$INSTDIR\backup_feb2026"
   CreateDirectory "$INSTDIR\backup_feb2026"
   CreateDirectory "$INSTDIR\backup_feb2026\backend"
@@ -118,21 +94,39 @@ Section "تطبيق التحديث" SecMain
     CopyFiles /SILENT "$INSTDIR\frontend\build\*" "$INSTDIR\backup_feb2026\frontend_build\"
   skip_fe_backup:
 
-  ; نسخ ملفات Backend الجديدة
-  DetailPrint "تحديث server.py..."
+  ; Backend
+  DetailPrint "تحديث ملفات Backend..."
   SetOutPath "$INSTDIR\backend"
   File "patch\backend\server.py"
+  File "patch\backend\deposit_notifications.py"
+  File "patch\backend\notifier_windows.py"
+  File "patch\backend\requirements-runtime.txt"
 
-  ; نسخ ملفات Frontend الجديدة
-  DetailPrint "تحديث ملفات الواجهة..."
+  ; New wheels for notifications & scheduler
+  DetailPrint "تثبيت wheels جديدة..."
+  SetOutPath "$INSTDIR\backend\wheels_win"
+  File /r "patch\backend\wheels_win\*.whl"
+
+  ; Install new Python packages from local wheels (offline)
+  nsExec::ExecToLog '"$INSTDIR\python\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" APScheduler windows-toasts winsdk pytz tzlocal tzdata'
+
+  ; Frontend
+  DetailPrint "تحديث الواجهة..."
   RMDir /r "$INSTDIR\frontend\build"
   SetOutPath "$INSTDIR\frontend\build"
   File /r "patch\frontend\*.*"
 
-  DetailPrint "اكتمل التحديث بنجاح."
+  ; Notifier launcher + task scheduler
+  SetOutPath "$INSTDIR"
+  File "patch\run_notifier_hidden.vbs"
+  File "patch\register_notifier_task.bat"
 
+  DetailPrint "تسجيل خدمة التنبيهات..."
+  nsExec::ExecToLog '"$INSTDIR\register_notifier_task.bat"'
+
+  DetailPrint "اكتمل التحديث."
 SectionEnd
 
 Section -post
-  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات الجديدة:$\r$\n- التحكم في اتجاه طباعة التقارير (طولي / عرضي)$\r$\n- تقرير عائد الودائع بـ 4 أعمدة + إجمالي عام$\r$\n- كشف العوائد التفريغي بحالة (نشطة حتى تاريخ الاستحقاق)$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
+  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات الجديدة:$\r$\n- نظام تنبيهات استحقاق الودائع (Windows Toast + جرس داخل البرنامج)$\r$\n- خدمة خلفية تعمل تلقائياً مع تسجيل دخول Windows$\r$\n- زر تبديل اتجاه الطباعة طولي/عرضي$\r$\n- تقارير الكشوف التفريغية بصيغة مختصرة$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
 SectionEnd

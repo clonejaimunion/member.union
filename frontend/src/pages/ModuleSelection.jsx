@@ -3,6 +3,7 @@ import { ArrowRight, Banknote, BarChart3, BookOpenText, Building2, FileBarChart,
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CreditLine } from "@/components/CreditLine";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { isModuleEnabled } from "@/lib/modules";
@@ -225,6 +226,7 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3" data-testid="module-selection-actions">
+            <NotificationBell />
             <Badge className="border-slate-200 bg-white px-3 py-1 text-slate-700 shadow-sm hover:bg-white" data-testid="module-selection-user-badge">{user?.username}</Badge>
             {privilegedAdmin && (
               <Button asChild variant="outline" className="h-11 rounded-lg bg-white" data-testid="module-selection-admin-button">

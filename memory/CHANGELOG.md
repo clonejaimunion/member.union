@@ -2,6 +2,47 @@
 
 > تم نقل السجل التفصيلي القديم من PRD.md هنا لأن الملف تجاوز 700 سطر.
 
+## ميزة جديدة كبيرة — 2026-02-04 — نظام تنبيهات استحقاق الودائع
+### Backend
+- **module جديد** `/app/backend/deposit_notifications.py` (مستقل تماماً عن الـ accounting):
+  - `MaturityNotification` Pydantic model + `deposit_notifications` MongoDB collection بـ unique index على `(organization_id, deposit_id, notification_date)`.
+  - `scan_and_create_notifications()` يفحص الودائع النشطة فقط. يستثني `matured/closed/renewed/past-due/beyond-threshold`.
+  - **APScheduler AsyncIO** يجدول `CronTrigger(hour=8, minute=0)` يومياً + initial scan عند الإقلاع.
+  - **3 endpoints** تحت `/api/notifications/deposits` (list مع `only_unread`، `mark-as-read`، `scan` manual).
+  - **عدم التأثير على المحاسبة**: pytest يتأكد أن `journal_entries / reconciliations / revenues / expenses` لا تتغير بعد scan.
+- **Wheels offline** للويندوز: APScheduler, pytz, tzlocal, tzdata, windows-toasts, winsdk — مضمومة في `/app/backend/wheels_win/`.
+
+### Windows Background Service
+- **سكربت `notifier_windows.py`** بـ `urllib` (بدون أي SDK ثالث) — يقرأ unread notifications كل 6 ساعات.
+- **Windows Toast Reminder Scenario** (sticky حتى يتفاعل المستخدم) عبر `windows-toasts` + `winsdk`. كل toast يحتوي زرين: "تم القراءة" / "فتح الوديعة".
+- **Task Scheduler**: مهمة `BankDepositMaturityNotifier` تُسجّل تلقائياً عند التثبيت/التحديث عبر `register_notifier_task.bat` (Trigger=ONLOGON).
+- **Hidden launcher** `run_notifier_hidden.vbs` — يشغّل الـ notifier بدون نافذة console.
+- **Error logging** في `%LOCALAPPDATA%/Bank Deposit Interest System/logs/notifier.log` بدون توقف الخدمة.
+
+### Frontend
+- **مكوّن جديد** `NotificationBell.jsx` في الـ Header (BankShell + ModuleSelection) بـ:
+  - Bell icon + badge للعدد غير المقروء (يصبح BellRing عند وجود إشعارات).
+  - Panel بقائمة الإشعارات (sticky scroll، last 50)، مرتبة (غير مقروء أولاً).
+  - زر "تم القراءة" + زر "فتح الوديعة" يعملان deep-link لـ `/bank/{bank_id}/register?deposit={id}`.
+  - Polling تلقائي كل 60 ثانية + reload عند فتح الـ panel.
+  - Click-outside يقفل الـ panel.
+
+### Tests
+- **pytest** `test_deposit_notifications.py` بـ 4 اختبارات ناجحة:
+  - تحقق صيغة الرسالة العربية بالضبط كما طلب المستخدم.
+  - scanner يستثني الحالات غير النشطة + خارج النافذة + الماضية.
+  - Idempotent (لا يكرر نفس الإشعار في نفس اليوم).
+  - **عدم لمس collections المحاسبة** بعد scan كامل.
+
+### Build & Distribution
+- **Updater EXE جديد** بحجم 34 MB يتضمن:
+  - تحديث `server.py` + ملفات notifications.
+  - تثبيت الـ wheels الجديدة من `wheels_win/` (offline pip install).
+  - تسجيل `BankDepositMaturityNotifier` task scheduler تلقائياً.
+- **NSIS الأصلي** `local_install/BankDepositSystem.nsi` تم تحديثه لاستدعاء `register_notifier_task.bat` بعد التثبيت + uninstall section يحذف المهمة عند إزالة البرنامج.
+
+
+
 ## تحسين — 2026-02-04 — كشف العوائد التفريغي (تاب "تصفية عائد الفترة")
 - **Backend**: تمت إضافة الحقل الاختياري `maturity_date` على `DepositStatementRow`، ويُملأ من `deposit.maturity_datetime` داخل endpoint `/api/banks/{bank_id}/statements/detailed`.
 - **Frontend**: تم إنشاء قسم طباعة جديد `detailed-interest-print-report` داخل `StatementsPage.jsx` يعرض جدول بـ 5 أعمدة فقط حسب المطلوب:

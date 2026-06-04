@@ -20,10 +20,16 @@ Section "Install"
   CreateShortCut "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\launch_bank_deposit_system.vbs"' "$INSTDIR\accounting_app.ico" 0
   CreateShortCut "$DESKTOP\Bank Deposit System.lnk" "$SYSDIR\wscript.exe" '"$INSTDIR\launch_bank_deposit_system.vbs"' "$INSTDIR\accounting_app.ico" 0
 
+  ; Register the deposit-maturity notifier as a Windows Task Scheduler entry
+  ; that runs at user logon. The .bat handles both registration and immediate start.
+  nsExec::ExecToLog '"$INSTDIR\register_notifier_task.bat"'
+
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section "Uninstall"
+  ; Remove the scheduled notifier task on uninstall.
+  nsExec::ExecToLog 'schtasks /Delete /TN "BankDepositMaturityNotifier" /F'
   Delete "$DESKTOP\Bank Deposit System.lnk"
   Delete "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk"
   RMDir "$SMPROGRAMS\Bank Deposit Interest System"

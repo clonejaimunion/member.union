@@ -6,6 +6,7 @@ import { bankPalette, fallbackBanks } from "@/lib/banks";
 import { useAuth } from "@/contexts/AuthContext";
 import { BankLogo } from "@/components/BankLogo";
 import { CreditLine } from "@/components/CreditLine";
+import { NotificationBell } from "@/components/NotificationBell";
 import { api } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -63,6 +64,7 @@ export const BankShell = ({ children }) => {
             <Badge className="w-fit border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 hover:bg-emerald-50" data-testid="bank-data-separation-badge">
               بيانات البنك منفصلة بالكامل
             </Badge>
+            <NotificationBell />
             {user?.role === "admin" && (
               <Button asChild variant="outline" className="h-11 rounded-lg border-slate-300 bg-white px-5 text-slate-800" data-testid="admin-panel-button">
                 <Link to="/secure-admin-control-panel"><ShieldCheck className="h-4 w-4" /> لوحة الأدمن</Link>

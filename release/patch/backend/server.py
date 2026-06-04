@@ -123,6 +123,13 @@ app = FastAPI()
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Background scheduler for deposit maturity notifications (informational only —
+# never touches accounting state). Started in startup_tasks, stopped on shutdown.
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # noqa: E402
+from deposit_notifications import attach_router as attach_notifications_router, ensure_indexes as ensure_notification_indexes, schedule_daily_scan  # noqa: E402
+
+deposit_notification_scheduler = AsyncIOScheduler()
+
 
 # Static bank master data. Deposits are stored separately per bank_id in MongoDB.
 BANKS = {
@@ -6649,6 +6656,14 @@ async def startup_tasks():
     await db.membership_import_previews.create_index([("organization_id", 1), ("id", 1)], unique=True)
     await db.membership_batch_payments.create_index([("organization_id", 1), ("payment_date", -1)])
     await db.login_attempts.create_index("identifier", unique=True)
+    # Notifications module — strictly informational, never alters accounting state.
+    try:
+        await ensure_notification_indexes(db)
+        schedule_daily_scan(deposit_notification_scheduler, db, run_now=True)
+        if not deposit_notification_scheduler.running:
+            deposit_notification_scheduler.start()
+    except Exception as notif_error:
+        logging.getLogger("deposit_notifications").error("init failed: %s", notif_error)
 
 # Add your routes to the router instead of directly to app
 @api_router.get("/health")
@@ -10414,6 +10429,8 @@ async def restore_backup(password: str = Form(...), backup_file: UploadFile = Fi
     return {"message": "تمت استعادة النسخة الاحتياطية وتسجيل العملية في سجل التدقيق", "collections": list(data.keys())}
 
 # Include the router in the main app
+# Attach notifications routes BEFORE include_router so they are part of api_router.
+attach_notifications_router(api_router, db, get_current_user)
 app.include_router(api_router)
 
 
@@ -10642,4 +10659,9 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    try:
+        if deposit_notification_scheduler.running:
+            deposit_notification_scheduler.shutdown(wait=False)
+    except Exception:
+        pass
     client.close()
