@@ -208,7 +208,7 @@ export default function StatementsPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" data-testid="detailed-interest-statement-heading">
                 <div data-testid="detailed-interest-title-block">
                   <h3 className="text-2xl font-extrabold text-slate-950" data-testid="detailed-interest-statement-title">كشف العوائد التفريغي</h3>
-                  <p className="mt-1 text-sm font-bold text-slate-500" data-testid="detailed-interest-period-label">{combinedPeriodLabel}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-500" data-testid="detailed-interest-period-label">عائد الفترة: {detailedPeriodLabel}</p>
                 </div>
                 <div className="flex flex-wrap items-end gap-3 print:hidden" data-testid="detailed-interest-actions">
                   <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3" data-testid="current-interest-filter-panel">
@@ -248,8 +248,8 @@ export default function StatementsPage() {
                     </div>
                   </div>
                   <ExportReportButtons
-                    title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${combinedPeriodLabel}`}
-                    fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${combinedPeriodLabel}`}
+                    title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${detailedPeriodLabel}${selectedDepositId === "all" ? "" : ` - وديعة رقم ${deposits.find((deposit) => deposit.id === selectedDepositId)?.deposit_number || ""}`}`}
+                    fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${detailedPeriodLabel}`}
                     selectors={["[data-testid='detailed-interest-print-report']"]}
                     printSelectors={["[data-testid='detailed-interest-print-report']"]}
                     disabled={!detailed || loading}
