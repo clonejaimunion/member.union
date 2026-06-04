@@ -1,17 +1,21 @@
-; ========================================================
-; محدّث النظام المحاسبي - فبراير 2026
-; ========================================================
+; ============================================================
+; محدّث النظام المحاسبي - فبراير 2026 (نسخة محسّنة)
+; يبحث تلقائياً في كل أماكن التثبيت المحتملة
+; ============================================================
 
 Unicode true
 Name "تحديث النظام المحاسبي - فبراير 2026"
 OutFile "BankDepositSystem_Update_Feb2026.exe"
-InstallDir "$PROGRAMFILES64\BankDepositSystem"
-RequestExecutionLevel admin
+RequestExecutionLevel user
 ShowInstDetails show
 
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 !define MUI_ICON   "..\local_install\accounting_app.ico"
 !define MUI_UNICON "..\local_install\accounting_app.ico"
+
+!define MUI_DIRECTORYPAGE_TEXT_TOP "حدد مجلد تثبيت البرنامج (سيتم اكتشافه تلقائياً)"
+!define MUI_DIRECTORYPAGE_TEXT_DESTINATION "مجلد البرنامج"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -20,40 +24,102 @@ ShowInstDetails show
 !insertmacro MUI_LANGUAGE "Arabic"
 !insertmacro MUI_LANGUAGE "English"
 
+Var FoundPath
+
 Function .onInit
-  ReadRegStr $0 HKLM "Software\BankDepositSystem" "InstallDir"
+  StrCpy $FoundPath ""
+
+  ; 1) المسار الافتراضي للمستخدم الحالي (الأكثر شيوعاً)
+  StrCpy $0 "$LOCALAPPDATA\Bank Deposit Interest System"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  ; 2) المسار البديل بـ AppData\Roaming
+  StrCpy $0 "$APPDATA\Bank Deposit Interest System"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  ; 3) ProgramFiles 64-bit
+  StrCpy $0 "$PROGRAMFILES64\Bank Deposit Interest System"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  ; 4) ProgramFiles 32-bit
+  StrCpy $0 "$PROGRAMFILES32\Bank Deposit Interest System"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  ; 5) ProgramFiles بدون مسافات (لو الاسم متغيّر)
+  StrCpy $0 "$PROGRAMFILES64\BankDepositSystem"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  StrCpy $0 "$PROGRAMFILES32\BankDepositSystem"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+  ; 6) قراءة من Registry (لو سجلّه الـ Setup الأصلي)
+  ReadRegStr $0 HKCU "Software\BankDepositSystem" "InstallDir"
   ${If} $0 != ""
-    StrCpy $INSTDIR "$0"
+    IfFileExists "$0\backend\server.py" 0 +3
+      StrCpy $FoundPath "$0"
+      Goto done
   ${EndIf}
-  IfFileExists "$PROGRAMFILES64\BankDepositSystem\backend\server.py" 0 +2
-    StrCpy $INSTDIR "$PROGRAMFILES64\BankDepositSystem"
-  IfFileExists "$PROGRAMFILES32\BankDepositSystem\backend\server.py" 0 +2
-    StrCpy $INSTDIR "$PROGRAMFILES32\BankDepositSystem"
+
+  ; 7) C:\Bank Deposit Interest System  (لو نسخة بورتابل)
+  StrCpy $0 "C:\Bank Deposit Interest System"
+  IfFileExists "$0\backend\server.py" 0 +3
+    StrCpy $FoundPath "$0"
+    Goto done
+
+done:
+  ${If} $FoundPath != ""
+    StrCpy $INSTDIR "$FoundPath"
+  ${Else}
+    StrCpy $INSTDIR "$LOCALAPPDATA\Bank Deposit Interest System"
+  ${EndIf}
+FunctionEnd
+
+Function .onVerifyInstDir
+  IfFileExists "$INSTDIR\backend\server.py" PathGood 0
+    Abort
+  PathGood:
 FunctionEnd
 
 Section "تطبيق التحديث" SecMain
 
-  DetailPrint "إيقاف الخدمات الجارية..."
-  nsExec::Exec 'taskkill /F /IM python.exe'
-  nsExec::Exec 'taskkill /F /IM mongod.exe'
-  Sleep 1500
-
-  ; التحقق من وجود البرنامج
+  ; التحقق النهائي
   IfFileExists "$INSTDIR\backend\server.py" continue_install 0
-    MessageBox MB_OK|MB_ICONSTOP "لم يتم العثور على البرنامج في:$\r$\n$INSTDIR$\r$\n$\r$\nيرجى تثبيت البرنامج أولاً أو تحديد مساره يدوياً."
-    Abort "البرنامج غير موجود"
+    MessageBox MB_OK|MB_ICONSTOP "لم يتم العثور على ملف server.py داخل:$\r$\n$INSTDIR\backend$\r$\n$\r$\nاضغط رجوع وحدد المجلد الصحيح يدوياً."
+    Abort
   continue_install:
 
+  DetailPrint "إيقاف خدمات البرنامج..."
+  nsExec::Exec 'taskkill /F /IM python.exe'
+  nsExec::Exec 'taskkill /F /IM pythonw.exe'
+  nsExec::Exec 'taskkill /F /IM mongod.exe'
+  nsExec::Exec 'taskkill /F /IM wscript.exe'
+  Sleep 1500
+
   ; نسخة احتياطية
-  DetailPrint "إنشاء نسخة احتياطية..."
+  DetailPrint "إنشاء نسخة احتياطية في backup_feb2026..."
+  RMDir /r "$INSTDIR\backup_feb2026"
   CreateDirectory "$INSTDIR\backup_feb2026"
   CreateDirectory "$INSTDIR\backup_feb2026\backend"
   CopyFiles /SILENT "$INSTDIR\backend\server.py" "$INSTDIR\backup_feb2026\backend\server.py"
-  CreateDirectory "$INSTDIR\backup_feb2026\frontend_build"
-  CopyFiles /SILENT "$INSTDIR\frontend\build\*" "$INSTDIR\backup_feb2026\frontend_build\"
+  IfFileExists "$INSTDIR\frontend\build\index.html" 0 skip_fe_backup
+    CreateDirectory "$INSTDIR\backup_feb2026\frontend_build"
+    CopyFiles /SILENT "$INSTDIR\frontend\build\*" "$INSTDIR\backup_feb2026\frontend_build\"
+  skip_fe_backup:
 
   ; نسخ ملفات Backend الجديدة
-  DetailPrint "تحديث ملفات الـ Backend..."
+  DetailPrint "تحديث server.py..."
   SetOutPath "$INSTDIR\backend"
   File "patch\backend\server.py"
 
@@ -63,7 +129,7 @@ Section "تطبيق التحديث" SecMain
   SetOutPath "$INSTDIR\frontend\build"
   File /r "patch\frontend\*.*"
 
-  DetailPrint "اكتمل التحديث بنجاح!"
+  DetailPrint "اكتمل التحديث بنجاح."
 
 SectionEnd
 
