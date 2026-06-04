@@ -116,11 +116,41 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.deposit_notifications.create_index("created_at")
 
 
+def parse_datetime_value(value):
+    """Accept datetime, ISO string, or date — return a timezone-aware datetime or None.
+
+    Deposits are stored with `maturity_datetime` as an ISO string (after
+    serialize_datetime). We must transparently support both representations.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+            except ValueError:
+                return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
 async def scan_and_create_notifications(db: AsyncIOMotorDatabase, threshold_days: int = DEFAULT_THRESHOLD_DAYS) -> ScanSummary:
     """Scan active deposits and create notifications for those within `threshold_days` of maturity.
 
     - Strictly read-only on `deposits` (no status changes here).
     - Idempotent per (deposit, calendar day) via unique index — duplicates are silently skipped.
+    - Tolerates both datetime objects and ISO strings for `maturity_datetime`/`creation_datetime`.
     """
     summary = ScanSummary(
         scanned_at=now_utc(),
@@ -137,8 +167,8 @@ async def scan_and_create_notifications(db: AsyncIOMotorDatabase, threshold_days
         async for deposit in cursor:
             summary.candidates_checked += 1
             try:
-                maturity = deposit.get("maturity_datetime")
-                if not isinstance(maturity, datetime):
+                maturity = parse_datetime_value(deposit.get("maturity_datetime"))
+                if maturity is None:
                     continue
                 maturity_date = maturity.date()
                 if maturity_date < today_dt:
@@ -148,7 +178,8 @@ async def scan_and_create_notifications(db: AsyncIOMotorDatabase, threshold_days
                 remaining = (maturity_date - today_dt).days
                 bank = await db.banks.find_one({"id": deposit.get("bank_id")}, {"_id": 0, "name": 1})
                 bank_name = (bank or {}).get("name") or "—"
-                creation_str = deposit.get("creation_datetime").date().isoformat() if isinstance(deposit.get("creation_datetime"), datetime) else "—"
+                creation_parsed = parse_datetime_value(deposit.get("creation_datetime"))
+                creation_str = creation_parsed.date().isoformat() if creation_parsed else "—"
                 maturity_str = maturity_date.isoformat()
                 deposit_number = deposit.get("deposit_number") or ""
                 account_number = deposit.get("account_number") or ""

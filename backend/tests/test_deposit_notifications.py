@@ -95,7 +95,7 @@ async def test_build_message_matches_required_arabic_format():
 @pytest.mark.asyncio
 async def test_scan_creates_notification_only_for_active_within_window(db):
     await _insert_deposit(db, status="active", maturity_offset_days=3, deposit_number="ACTIVE-NEAR")
-    await _insert_deposit(db, status="active", maturity_offset_days=120, deposit_number="ACTIVE-FAR")
+    await _insert_deposit(db, status="active", maturity_offset_days=500, deposit_number="ACTIVE-FAR")
     await _insert_deposit(db, status="active", maturity_offset_days=-5, deposit_number="ACTIVE-PAST")
     await _insert_deposit(db, status="matured", maturity_offset_days=3, deposit_number="MATURED")
     await _insert_deposit(db, status="closed", maturity_offset_days=3, deposit_number="CLOSED")
@@ -112,6 +112,43 @@ async def test_scan_creates_notification_only_for_active_within_window(db):
     assert notification["status"] == "unread"
     assert notification["days_remaining"] == 3
     assert "رقم الوديعة: ACTIVE-NEAR" in notification["message"]
+
+
+@pytest.mark.asyncio
+async def test_scan_handles_iso_string_maturity_datetime(db):
+    """Real deposits store maturity_datetime as ISO string (after serialize_datetime),
+    not as a Python datetime. The scanner must handle both representations."""
+    deposit_id = f"iso-{uuid.uuid4().hex[:8]}"
+    iso_maturity = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    iso_creation = (datetime.now(timezone.utc) - timedelta(days=180)).isoformat()
+    document = {
+        "id": deposit_id,
+        "organization_id": TEST_ORG,
+        "bank_id": TEST_BANK,
+        "account_number": "999999",
+        "deposit_number": "ISO-STRING-TEST",
+        "amount": 2_000_000.0,
+        "monthly_interest_rate": 12.0,
+        # Stored as ISO strings — matches the real /api/banks/{id}/deposits insert path.
+        "creation_datetime": iso_creation,
+        "maturity_datetime": iso_maturity,
+        "is_opening_balance_deposit": False,
+        "status": "active",
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    await db.deposits.insert_one(document)
+
+    summary = await scan_and_create_notifications(db, threshold_days=DEFAULT_THRESHOLD_DAYS)
+    assert summary.errors == []
+
+    notification = await db.deposit_notifications.find_one(
+        {"organization_id": TEST_ORG, "deposit_id": deposit_id},
+        {"_id": 0},
+    )
+    assert notification is not None, "scanner must handle ISO-string maturity_datetime"
+    assert notification["deposit_number"] == "ISO-STRING-TEST"
+    assert notification["days_remaining"] == 5
 
 
 @pytest.mark.asyncio

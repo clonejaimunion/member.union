@@ -82,7 +82,6 @@ Section "تطبيق التحديث" SecMain
   nsExec::Exec 'taskkill /F /IM pythonw.exe'
   nsExec::Exec 'taskkill /F /IM mongod.exe'
   nsExec::Exec 'taskkill /F /IM wscript.exe'
-  nsExec::Exec 'schtasks /End /TN "BankDepositMaturityNotifier"'
   Sleep 1500
 
   ; نسخة احتياطية
@@ -96,17 +95,24 @@ Section "تطبيق التحديث" SecMain
     CopyFiles /SILENT "$INSTDIR\frontend\build\*" "$INSTDIR\backup_feb2026\frontend_build\"
   skip_fe_backup:
 
-  ; Backend
+  ; Backend (server.py + notifications module only — no external schedulers)
   DetailPrint "تحديث ملفات Backend..."
   SetOutPath "$INSTDIR\backend"
   File "patch\backend\server.py"
   File "patch\backend\deposit_notifications.py"
-  File "patch\backend\notifier_windows.py"
   File "patch\backend\requirements-runtime.txt"
+
+  ; Remove any legacy PowerShell/VBS/Scheduler artefacts from older versions.
+  Delete "$INSTDIR\run_notifier_hidden.vbs"
+  Delete "$INSTDIR\register_notifier_task.bat"
+  Delete "$INSTDIR\show_toast.ps1"
+  Delete "$INSTDIR\backend\notifier_windows.py"
+  nsExec::Exec 'schtasks /Delete /TN "BankDepositMaturityNotifier" /F'
+  nsExec::Exec 'schtasks /Delete /TN "BankDepositMaturityNotifierHourly" /F'
 
   ; The optional Python wheels (APScheduler/winsdk/windows-toasts) were
   ; removed from the updater to reduce size — they are not required for
-  ; the in-app bell or the PowerShell-based external Windows toast.
+  ; the in-app bell.
   DetailPrint "تخطي wheels الاختيارية (غير مطلوبة)..."
 
   ; Frontend
@@ -115,18 +121,9 @@ Section "تطبيق التحديث" SecMain
   SetOutPath "$INSTDIR\frontend\build"
   File /r "patch\frontend\*.*"
 
-  ; Notifier launcher + PowerShell toast script + task scheduler
-  SetOutPath "$INSTDIR"
-  File "patch\run_notifier_hidden.vbs"
-  File "patch\register_notifier_task.bat"
-  File "patch\show_toast.ps1"
-
-  DetailPrint "تسجيل خدمة التنبيهات..."
-  nsExec::ExecToLog '"$INSTDIR\register_notifier_task.bat"'
-
   DetailPrint "اكتمل التحديث."
 SectionEnd
 
 Section -post
-  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات الجديدة:$\r$\n- نظام تنبيهات استحقاق الودائع (Windows Toast + جرس داخل البرنامج)$\r$\n- خدمة خلفية تعمل تلقائياً مع تسجيل دخول Windows$\r$\n- زر تبديل اتجاه الطباعة طولي/عرضي$\r$\n- تقارير الكشوف التفريغية بصيغة مختصرة$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
+  MessageBox MB_OK|MB_ICONINFORMATION "تم تطبيق التحديث بنجاح.$\r$\n$\r$\nالميزات:$\r$\n- نظام تنبيهات استحقاق الودائع داخل البرنامج$\r$\n- معالجة تواريخ ISO من قاعدة البيانات$\r$\n- بدون أي تدخل خارجي (لا PowerShell ولا VBS ولا Scheduler)$\r$\n$\r$\nنسخة احتياطية محفوظة في:$\r$\n$INSTDIR\backup_feb2026"
 SectionEnd
