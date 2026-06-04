@@ -48,7 +48,7 @@ export default function AccruedInterestPage() {
   return (
     <BankShell>
       <div className="space-y-6" data-testid="accrued-interest-page">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:shadow-none sm:p-8" data-testid="accrued-heading-section">
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden sm:p-8" data-testid="accrued-heading-section">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm font-extrabold text-emerald-700" data-testid="accrued-eyebrow">فوائد ودائع مستحقة</p>
@@ -58,6 +58,17 @@ export default function AccruedInterestPage() {
               </p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row print:hidden" data-testid="accrued-actions">
+              <select
+                value={selectedDepositId}
+                onChange={(event) => updateFilters({ deposit_id: event.target.value })}
+                className="h-12 min-w-[220px] rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold text-slate-800 outline-none focus:border-slate-900"
+                data-testid="accrued-deposit-selector"
+              >
+                <option value="all" data-testid="accrued-deposit-option-all">كل الودائع المسجلة</option>
+                {deposits.map((deposit) => (
+                  <option key={deposit.id} value={deposit.id} data-testid={`accrued-deposit-option-${deposit.id}`}>وديعة رقم {deposit.deposit_number}</option>
+                ))}
+              </select>
               <select
                 value={report?.year || selectedYear || ""}
                 onChange={(event) => updateFilters({ year: event.target.value })}
@@ -71,8 +82,10 @@ export default function AccruedInterestPage() {
               <ExportReportButtons
                 title={`تقرير المستحقات السنوية - ${report?.bank?.name || bankId} - ${report?.year || ""}`}
                 fileName={`تقرير-المستحقات-${report?.bank?.name || bankId}-${report?.year || ""}`}
-                selectors={["[data-testid='accrued-heading-section']", "[data-testid='accrued-kpi-grid']", "[data-testid='accrued-deposit-sections']", "[data-testid='accrued-table-wrapper']"]}
+                selectors={["[data-testid='accrued-print-report']"]}
+                printSelectors={["[data-testid='accrued-print-report']"]}
                 disabled={!report || loading}
+                pdfLabel="طباعة التقرير"
                 pdfTestId="print-accrued-pdf-button"
                 excelTestId="export-accrued-excel-button"
                 wordTestId="export-accrued-word-button"
@@ -85,20 +98,49 @@ export default function AccruedInterestPage() {
           <section className="rounded-xl border border-slate-200 bg-white p-10 text-center font-extrabold" data-testid="accrued-loading-state">جاري تحميل تقرير المستحقات...</section>
         ) : report ? (
           <section className="space-y-5" data-testid="accrued-print-area">
-            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="accrued-deposit-picker-section">
-              <h3 className="mb-4 text-xl font-extrabold text-slate-950" data-testid="accrued-deposit-picker-title">اختيار الوديعة برقم الوديعة</h3>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="accrued-deposit-picker-grid">
-                <button type="button" onClick={() => updateFilters({ deposit_id: "all" })} className={`rounded-xl border p-4 text-right font-extrabold ${selectedDepositId === "all" ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800"}`} data-testid="accrued-deposit-all-button">كل الودائع</button>
-                {deposits.map((deposit) => (
-                  <button key={deposit.id} type="button" onClick={() => updateFilters({ deposit_id: deposit.id })} className={`rounded-xl border p-4 text-right transition-transform hover:-translate-y-0.5 ${selectedDepositId === deposit.id ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-white"}`} data-testid={`accrued-deposit-button-${deposit.id}`}>
-                    <p className="text-xs font-bold opacity-70" data-testid={`accrued-deposit-button-${deposit.id}-label`}>رقم الوديعة</p>
-                    <p className="mt-1 text-lg font-extrabold" data-testid={`accrued-deposit-button-${deposit.id}-number`}>{deposit.deposit_number}</p>
-                  </button>
-                ))}
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none" data-testid="accrued-print-report">
+              <div className="mb-4 flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between" data-testid="accrued-print-header">
+                <div>
+                  <p className="text-xs font-extrabold text-emerald-700" data-testid="accrued-print-eyebrow">تقرير عائد الودائع</p>
+                  <h3 className="text-2xl font-extrabold text-slate-950" data-testid="accrued-print-title">{report.bank.name} — {selectedDepositId === "all" ? "كل الودائع" : `وديعة رقم ${deposits.find((deposit) => deposit.id === selectedDepositId)?.deposit_number || ""}`}</h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm font-extrabold text-slate-700" data-testid="accrued-print-meta">
+                  <span data-testid="accrued-print-year">السنة: {report.year}</span>
+                  <span data-testid="accrued-print-rows-count">عدد الودائع: {report.rows.length}</span>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200" data-testid="accrued-print-table-wrapper">
+                <Table data-testid="accrued-print-table">
+                  <TableHeader className="bg-slate-950">
+                    <TableRow className="hover:bg-slate-950" data-testid="accrued-print-table-header-row">
+                      <TableHead className="text-right font-extrabold text-white" data-testid="accrued-print-header-account">رقم الحساب</TableHead>
+                      <TableHead className="text-right font-extrabold text-white" data-testid="accrued-print-header-deposit">رقم الوديعة</TableHead>
+                      <TableHead className="text-right font-extrabold text-white" data-testid="accrued-print-header-amount">مبلغ الوديعة</TableHead>
+                      <TableHead className="text-right font-extrabold text-white" data-testid="accrued-print-header-interest">العائد عن الفترة</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.rows.length === 0 && (
+                      <TableRow data-testid="accrued-print-empty-row"><TableCell colSpan={4} className="py-6 text-center font-extrabold text-slate-500">لا توجد ودائع مطابقة للفلتر</TableCell></TableRow>
+                    )}
+                    {report.rows.map((row) => (
+                      <TableRow key={row.deposit_id} data-testid={`accrued-print-row-${row.deposit_id}`}>
+                        <TableCell className="font-bold" data-testid={`accrued-print-row-${row.deposit_id}-account`}>{row.account_number}</TableCell>
+                        <TableCell className="font-extrabold" data-testid={`accrued-print-row-${row.deposit_id}-deposit`}>{row.deposit_number}</TableCell>
+                        <TableCell data-testid={`accrued-print-row-${row.deposit_id}-amount`}>{formatCurrency(row.amount)}</TableCell>
+                        <TableCell className="font-extrabold text-amber-800" data-testid={`accrued-print-row-${row.deposit_id}-interest`}>{formatCurrency(row.accrued_interest_amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="border-t-2 border-slate-300 bg-amber-50 hover:bg-amber-50" data-testid="accrued-print-grand-total-row">
+                      <TableCell colSpan={3} className="text-lg font-extrabold text-slate-950" data-testid="accrued-print-grand-total-label">الإجمالي العام للعائد عن الفترة</TableCell>
+                      <TableCell className="text-lg font-extrabold text-slate-950" data-testid="accrued-print-grand-total-value">{formatCurrency(report.total_accrued_interest)}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
               </div>
             </section>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="accrued-kpi-grid">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3 print:hidden" data-testid="accrued-kpi-grid">
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="accrued-bank-card">
                 <ReceiptText className="mb-3 h-6 w-6" />
                 <p className="text-sm font-bold text-slate-300" data-testid="accrued-bank-label">البنك</p>
@@ -116,7 +158,7 @@ export default function AccruedInterestPage() {
               </div>
             </div>
 
-            <div className="space-y-4" data-testid="accrued-deposit-sections">
+            <div className="space-y-4 print:hidden" data-testid="accrued-deposit-sections">
               {report.rows.map((row) => (
                 <section key={row.deposit_id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:break-inside-avoid print:shadow-none" data-testid={`accrued-deposit-section-${row.deposit_id}`}>
                   <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" data-testid={`accrued-deposit-section-${row.deposit_id}-header`}>
@@ -135,7 +177,7 @@ export default function AccruedInterestPage() {
               ))}
             </div>
 
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:shadow-none" data-testid="accrued-table-wrapper">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:hidden" data-testid="accrued-table-wrapper">
               <Table data-testid="accrued-table">
                 <TableHeader className="bg-slate-950">
                   <TableRow className="hover:bg-slate-950" data-testid="accrued-table-header-row">
