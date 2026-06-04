@@ -126,6 +126,12 @@ export default function StatementsPage() {
   const detailedPeriodLabel = detailedFilter.period_type === "monthly" ? `${monthLabels[detailedFilter.month]} / ${detailedFilter.year}` : `سنة ${detailedFilter.year}`;
   const previousPeriodLabel = previousFilter.period_type === "monthly" ? `${monthLabels[previousFilter.month]} / ${previousFilter.year}` : `سنة ${previousFilter.year}`;
   const combinedPeriodLabel = `عائد الفترة: ${detailedPeriodLabel} — مستحق سنوات سابقة: ${previousPeriodLabel}`;
+  const totalCurrentInterest = useMemo(() => filteredDetailedRows.reduce((sum, row) => sum + Number(row.current_year_interest || 0), 0), [filteredDetailedRows]);
+  const formatActiveStatus = (row) => {
+    const baseLabel = statusLabels[row.status] || "نشطة";
+    if (row.status === "active" && row.maturity_date) return `${baseLabel} حتى ${row.maturity_date}`;
+    return baseLabel;
+  };
 
   return (
     <BankShell>
@@ -244,8 +250,8 @@ export default function StatementsPage() {
                   <ExportReportButtons
                     title={`كشف العوائد التفريغي - ${detailed?.bank?.name || bankId} - ${combinedPeriodLabel}`}
                     fileName={`كشف-العوائد-التفريغي-${detailed?.bank?.name || bankId}-${combinedPeriodLabel}`}
-                    selectors={["[data-testid='detailed-interest-statement-section']"]}
-                    printSelectors={["[data-testid='detailed-interest-statement-section']"]}
+                    selectors={["[data-testid='detailed-interest-print-report']"]}
+                    printSelectors={["[data-testid='detailed-interest-print-report']"]}
                     disabled={!detailed || loading}
                     pdfLabel="طباعة PDF"
                     pdfTestId="print-detailed-interest-pdf-button"
@@ -254,7 +260,52 @@ export default function StatementsPage() {
                   />
                 </div>
               </div>
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" data-testid="detailed-interest-table-wrapper">
+
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none" data-testid="detailed-interest-print-report">
+                <div className="mb-4 flex flex-col gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between" data-testid="detailed-interest-print-header">
+                  <div>
+                    <p className="text-xs font-extrabold text-emerald-700" data-testid="detailed-interest-print-eyebrow">كشف العوائد التفريغي</p>
+                    <h3 className="text-2xl font-extrabold text-slate-950" data-testid="detailed-interest-print-title">{detailed?.bank?.name || "—"} — {selectedDepositId === "all" ? "كل الودائع" : `وديعة رقم ${deposits.find((deposit) => deposit.id === selectedDepositId)?.deposit_number || ""}`}</h3>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-sm font-extrabold text-slate-700" data-testid="detailed-interest-print-meta">
+                    <span data-testid="detailed-interest-print-period">{detailedPeriodLabel}</span>
+                    <span data-testid="detailed-interest-print-rows-count">عدد الودائع: {filteredDetailedRows.length}</span>
+                  </div>
+                </div>
+                <div className="overflow-hidden rounded-xl border border-slate-200" data-testid="detailed-interest-print-table-wrapper">
+                  <Table data-testid="detailed-interest-print-table">
+                    <TableHeader className="bg-slate-950">
+                      <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-print-header-row">
+                        <TableHead className="text-right font-extrabold text-white" data-testid="detailed-interest-print-header-serial">مسلسل</TableHead>
+                        <TableHead className="text-right font-extrabold text-white" data-testid="detailed-interest-print-header-deposit">رقم الوديعة</TableHead>
+                        <TableHead className="text-right font-extrabold text-white" data-testid="detailed-interest-print-header-status">الحالة</TableHead>
+                        <TableHead className="text-right font-extrabold text-white" data-testid="detailed-interest-print-header-amount">مبلغ الوديعة</TableHead>
+                        <TableHead className="text-right font-extrabold text-white" data-testid="detailed-interest-print-header-interest">عائد {detailedPeriodLabel}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredDetailedRows.length === 0 && (
+                        <TableRow data-testid="detailed-interest-print-empty-row"><TableCell colSpan={5} className="py-6 text-center font-extrabold text-slate-500">لا توجد ودائع مطابقة للفلتر</TableCell></TableRow>
+                      )}
+                      {filteredDetailedRows.map((row) => (
+                        <TableRow key={row.deposit_id} data-testid={`detailed-interest-print-row-${row.deposit_id}`}>
+                          <TableCell data-testid={`detailed-interest-print-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
+                          <TableCell className="font-extrabold" data-testid={`detailed-interest-print-row-${row.deposit_id}-deposit`}>{row.deposit_number}</TableCell>
+                          <TableCell className="font-bold" data-testid={`detailed-interest-print-row-${row.deposit_id}-status`}>{formatActiveStatus(row)}</TableCell>
+                          <TableCell data-testid={`detailed-interest-print-row-${row.deposit_id}-amount`}>{formatCurrency(row.amount)}</TableCell>
+                          <TableCell className="font-extrabold text-emerald-800" data-testid={`detailed-interest-print-row-${row.deposit_id}-interest`}>{formatCurrency(row.current_year_interest)}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="border-t-2 border-slate-300 bg-emerald-50 hover:bg-emerald-50" data-testid="detailed-interest-print-grand-total-row">
+                        <TableCell colSpan={4} className="text-lg font-extrabold text-slate-950" data-testid="detailed-interest-print-grand-total-label">إجمالي العائد عن {detailedPeriodLabel}</TableCell>
+                        <TableCell className="text-lg font-extrabold text-slate-950" data-testid="detailed-interest-print-grand-total-value">{formatCurrency(totalCurrentInterest)}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:hidden" data-testid="detailed-interest-table-wrapper">
                 <Table data-testid="detailed-interest-table">
                   <TableHeader className="bg-slate-950">
                     <TableRow className="hover:bg-slate-950" data-testid="detailed-interest-header-row">

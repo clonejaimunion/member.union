@@ -480,6 +480,7 @@ class DepositStatementRow(BaseModel):
     previous_years_breakdown: List[PreviousYearBreakdown]
     status: Literal["active", "matured", "renewed", "closed"] = "active"
     renewal_notes: Optional[str] = None
+    maturity_date: Optional[str] = None
 
 
 class BankStatement(BaseModel):
@@ -7318,6 +7319,7 @@ async def get_detailed_statement(
                 previous_years_breakdown=previous_breakdown,
                 status=deposit.status,
                 renewal_notes=deposit.renewal_notes,
+                maturity_date=normalize_datetime(deposit.maturity_datetime).date().isoformat() if deposit.maturity_datetime else None,
             )
         )
 
