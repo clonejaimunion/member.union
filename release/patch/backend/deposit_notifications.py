@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 LOGGER = logging.getLogger("deposit_notifications")
-DEFAULT_THRESHOLD_DAYS = 30
+DEFAULT_THRESHOLD_DAYS = 365  # show all active deposits maturing within a year
 URGENT_THRESHOLD_DAYS = 7
 
 
@@ -256,7 +256,7 @@ def attach_router(api_router: APIRouter, db: AsyncIOMotorDatabase, require_user_
             query["organization_id"] = organization_id or "__none__"
         if only_unread:
             query["status"] = "unread"
-        cursor = db.deposit_notifications.find(query, {"_id": 0}).sort("created_at", -1).limit(max(1, min(limit, 500)))
+        cursor = db.deposit_notifications.find(query, {"_id": 0}).sort([("days_remaining", 1), ("created_at", -1)]).limit(max(1, min(limit, 500)))
         items = await cursor.to_list(length=500)
         unread_filter = {"status": "unread"}
         total_filter: dict = {}

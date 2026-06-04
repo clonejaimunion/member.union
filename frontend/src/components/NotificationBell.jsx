@@ -77,7 +77,10 @@ export const NotificationBell = () => {
 
   const hasUnread = unreadCount > 0;
   const BellIcon = hasUnread ? BellRing : Bell;
-  const sortedItems = useMemo(() => items.slice().sort((a, b) => (a.status === b.status ? new Date(b.created_at) - new Date(a.created_at) : a.status === "unread" ? -1 : 1)), [items]);
+  const sortedItems = useMemo(() => items.slice().sort((a, b) => {
+    if (a.status !== b.status) return a.status === "unread" ? -1 : 1;
+    return Number(a.days_remaining || 0) - Number(b.days_remaining || 0);
+  }), [items]);
 
   return (
     <div className="relative" ref={panelRef} data-testid="notification-bell-wrapper">
@@ -108,22 +111,28 @@ export const NotificationBell = () => {
             )}
             {sortedItems.map((notification) => {
               const isUnread = notification.status === "unread";
-              const isUrgent = notification.urgency === "urgent" || (notification.days_remaining != null && notification.days_remaining <= 7);
+              const days = Number(notification.days_remaining || 0);
+              const isUrgent = days <= 7;
+              const isSoon = days > 7 && days <= 30;
+              const bgUnread = isUrgent ? "bg-rose-50/70" : isSoon ? "bg-amber-50/60" : "bg-sky-50/60";
+              const titleColor = isUrgent ? "text-rose-700" : isSoon ? "text-amber-700" : "text-sky-700";
+              const dotColor = isUrgent ? "bg-rose-600" : isSoon ? "bg-amber-500" : "bg-sky-500";
+              const label = isUrgent ? "⚠️ استحقاق عاجل" : isSoon ? "تنبيه استحقاق وديعة" : "وديعة نشطة";
               return (
                 <div
                   key={notification.id}
-                  className={`border-b border-slate-100 px-4 py-3 ${isUnread ? (isUrgent ? "bg-rose-50/70" : "bg-amber-50/60") : "bg-white"}`}
+                  className={`border-b border-slate-100 px-4 py-3 ${isUnread ? bgUnread : "bg-white"}`}
                   data-testid={`notification-bell-item-${notification.id}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
-                      <p className={`flex items-center gap-2 text-xs font-extrabold ${isUrgent ? "text-rose-700" : "text-amber-700"}`} data-testid={`notification-bell-item-${notification.id}-title`}>
-                        {isUnread && <span className={`inline-block h-2 w-2 rounded-full ${isUrgent ? "bg-rose-600" : "bg-amber-500"}`} data-testid={`notification-bell-item-${notification.id}-dot`} />}
-                        {isUrgent ? "⚠️ استحقاق عاجل" : (notification.title || "تنبيه استحقاق وديعة")}
+                      <p className={`flex items-center gap-2 text-xs font-extrabold ${titleColor}`} data-testid={`notification-bell-item-${notification.id}-title`}>
+                        {isUnread && <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} data-testid={`notification-bell-item-${notification.id}-dot`} />}
+                        {label}
                       </p>
                       <p className="mt-1 text-sm font-bold text-slate-900" data-testid={`notification-bell-item-${notification.id}-deposit`}>وديعة {notification.deposit_number} — {notification.bank_name}</p>
                       <p className="text-xs font-bold text-slate-600" data-testid={`notification-bell-item-${notification.id}-amount`}>{formatAmount(notification.amount)} جنيه</p>
-                      <p className="mt-1 text-xs font-bold text-slate-500" data-testid={`notification-bell-item-${notification.id}-meta`}>تاريخ الاستحقاق: {notification.maturity_date} — متبقي {notification.days_remaining} يوم</p>
+                      <p className="mt-1 text-xs font-bold text-slate-500" data-testid={`notification-bell-item-${notification.id}-meta`}>تاريخ الاستحقاق: {notification.maturity_date} — متبقي {days} يوم</p>
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2" data-testid={`notification-bell-item-${notification.id}-actions`}>
