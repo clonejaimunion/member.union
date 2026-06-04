@@ -371,6 +371,15 @@ export default function StatementsPage() {
                         <TableCell className="max-w-xs whitespace-pre-wrap text-xs font-bold" data-testid={`volume-row-${row.deposit_id}-notes`}>{row.renewal_notes || "—"}</TableCell>
                       </TableRow>
                     ))}
+                    {filteredVolumeRows.length > 0 && (
+                      <TableRow className="border-t-2 border-emerald-700 bg-emerald-50 hover:bg-emerald-50" data-testid="volume-grand-total-row">
+                        <TableCell colSpan={4} className="text-base font-extrabold text-slate-950" data-testid="volume-grand-total-label">الإجمالي العام</TableCell>
+                        <TableCell className="text-base font-extrabold text-emerald-900" data-testid="volume-grand-total-amount">{formatCurrency(filteredVolumeRows.reduce((sum, row) => sum + Number(row.amount || 0), 0))}</TableCell>
+                        <TableCell data-testid="volume-grand-total-rate-cell">—</TableCell>
+                        <TableCell className="text-base font-extrabold text-emerald-900" data-testid="volume-grand-total-monthly-interest">{formatCurrency(filteredVolumeRows.reduce((sum, row) => sum + Number(row.monthly_interest_amount || 0), 0))}</TableCell>
+                        <TableCell data-testid="volume-grand-total-notes-cell">—</TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
