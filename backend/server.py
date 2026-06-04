@@ -504,6 +504,7 @@ class DepositVolumeRow(BaseModel):
     monthly_interest_amount: float
     status: Literal["active", "matured", "renewed", "closed"] = "active"
     renewal_notes: Optional[str] = None
+    maturity_date: Optional[str] = None
 
 
 class DepositVolumeStatement(BaseModel):
@@ -7365,6 +7366,7 @@ async def get_volume_statement(
                 monthly_interest_amount=annual_interest,
                 status=deposit.status,
                 renewal_notes=deposit.renewal_notes,
+                maturity_date=normalize_datetime(deposit.maturity_datetime).date().isoformat() if deposit.maturity_datetime else None,
             )
         )
 

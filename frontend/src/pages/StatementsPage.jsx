@@ -363,7 +363,7 @@ export default function StatementsPage() {
                       <TableRow key={row.deposit_id} data-testid={`volume-row-${row.deposit_id}`}>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-serial`}>{row.serial}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`volume-row-${row.deposit_id}-deposit-number`}>{row.deposit_number}</TableCell>
-                        <TableCell data-testid={`volume-row-${row.deposit_id}-status`}>{statusLabels[row.status] || "نشطة"}</TableCell>
+                        <TableCell data-testid={`volume-row-${row.deposit_id}-status`}>{row.status === "active" && row.maturity_date ? `نشطة حتى ${row.maturity_date}` : (statusLabels[row.status] || "نشطة")}</TableCell>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-account-number`}>{row.account_number}</TableCell>
                         <TableCell className="font-extrabold" data-testid={`volume-row-${row.deposit_id}-amount`}>{formatCurrency(row.amount)}</TableCell>
                         <TableCell data-testid={`volume-row-${row.deposit_id}-rate`}>{formatNumber(row.monthly_interest_rate)}%</TableCell>
