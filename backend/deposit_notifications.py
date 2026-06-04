@@ -233,11 +233,19 @@ def attach_router(api_router: APIRouter, db: AsyncIOMotorDatabase, require_user_
     async def list_deposit_notifications(
         only_unread: bool = False,
         limit: int = 100,
+        auto_scan: bool = True,
         current_user: dict = Depends(require_user_dep),
     ):
         organization_id = current_user.get("organization_id")
         if not organization_id:
             raise HTTPException(status_code=400, detail="مستخدم بدون جهة")
+        # On-demand scan so new deposits show their notification immediately
+        # (without waiting for the daily 08:00 cron). Cheap & idempotent.
+        if auto_scan:
+            try:
+                await scan_and_create_notifications(db)
+            except Exception as scan_error:
+                LOGGER.warning("on-demand scan failed: %s", scan_error)
         query: dict = {"organization_id": organization_id}
         if only_unread:
             query["status"] = "unread"
