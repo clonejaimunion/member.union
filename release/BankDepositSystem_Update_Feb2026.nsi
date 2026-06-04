@@ -1,8 +1,10 @@
 ; ============================================================
-; محدّث النظام المحاسبي - فبراير 2026 (يتضمن نظام تنبيهات الودائع)
+; محدّث النظام المحاسبي - فبراير 2026 (نسخة مضغوطة LZMA)
 ; ============================================================
 
 Unicode true
+SetCompressor /SOLID lzma
+SetCompressorDictSize 32
 Name "تحديث النظام المحاسبي - فبراير 2026"
 OutFile "BankDepositSystem_Update_Feb2026.exe"
 RequestExecutionLevel user
@@ -102,14 +104,10 @@ Section "تطبيق التحديث" SecMain
   File "patch\backend\notifier_windows.py"
   File "patch\backend\requirements-runtime.txt"
 
-  ; New wheels for notifications & scheduler (optional — install best-effort)
-  DetailPrint "تثبيت wheels جديدة (اختيارية)..."
-  SetOutPath "$INSTDIR\backend\wheels_win"
-  File /r "patch\backend\wheels_win\*.whl"
-
-  ; best-effort: do not abort if optional packages fail to install
-  nsExec::Exec '"$INSTDIR\backend\.venv\Scripts\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" APScheduler pytz tzlocal tzdata'
-  nsExec::Exec '"$INSTDIR\backend\.venv\Scripts\python.exe" -m pip install --no-index --find-links "$INSTDIR\backend\wheels_win" windows-toasts winsdk'
+  ; The optional Python wheels (APScheduler/winsdk/windows-toasts) were
+  ; removed from the updater to reduce size — they are not required for
+  ; the in-app bell or the PowerShell-based external Windows toast.
+  DetailPrint "تخطي wheels الاختيارية (غير مطلوبة)..."
 
   ; Frontend
   DetailPrint "تحديث الواجهة..."
