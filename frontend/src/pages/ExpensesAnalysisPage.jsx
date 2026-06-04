@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreditLine } from "@/components/CreditLine";
+import { PrintOrientationToggle } from "@/components/PrintOrientationToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { formatCurrency, formatEgpLabel } from "@/lib/format";
+import { usePrintOrientation, printWithOrientation } from "@/lib/printOrientation";
 
 const organizationLabels = {
   general_union: "النقابة العامة",
@@ -109,6 +111,7 @@ export default function ExpensesAnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ organization_scope: "social_solidarity_project", period_type: "monthly", year: "", month: "" });
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [orientation, setOrientation] = usePrintOrientation("landscape");
 
   const loadExpenses = useCallback(() => {
     setLoading(true);
@@ -186,7 +189,7 @@ export default function ExpensesAnalysisPage() {
     const tableRows = [...rows, totalRow];
     const emptyRow = `<tr><td colspan="${headers.length}">لا توجد مصروفات مطابقة لهذه الاختيارات</td></tr>`;
     const tableBody = tableRows.length > 1 ? tableRows.map((row, rowIndex) => `<tr>${row.map((cell) => `<td${rowIndex === tableRows.length - 1 ? " style='font-weight:700;background:#fef2f2;'" : ""}>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("") : emptyRow;
-    const workbookMeta = forExcel ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>تحليل المصروفات</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>` : "";
+    const workbookMeta = forExcel ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>تحليل المصروفات</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/><x:PageSetup><x:Layout x:Orientation="${orientation === "landscape" ? "Landscape" : "Portrait"}"/></x:PageSetup></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>` : "";
 
     return `<!doctype html>
 <html dir="rtl" lang="ar">
@@ -194,6 +197,7 @@ export default function ExpensesAnalysisPage() {
   <meta charset="utf-8" />
   ${workbookMeta}
   <style>
+    @page { size: A4 ${orientation}; margin: 7mm; }
     body { font-family: Tahoma, Arial, sans-serif; direction: rtl; color: #111827; }
     h1 { font-size: 20px; margin: 0 0 6px; }
     p { margin: 0 0 12px; font-weight: 700; }
@@ -211,9 +215,9 @@ export default function ExpensesAnalysisPage() {
   </table>
 </body>
 </html>`;
-  }, [categoryTotals, dynamicOrganizationLabels, filters.organization_scope, grandTotal, periodLabel, visibleAnalysisRows]);
+  }, [categoryTotals, dynamicOrganizationLabels, filters.organization_scope, grandTotal, orientation, periodLabel, visibleAnalysisRows]);
 
-  const exportToPdf = () => window.print();
+  const exportToPdf = () => printWithOrientation(orientation);
   const exportToExcel = () => triggerDownload(buildExportTableHtml(true), `${exportFileBaseName}.xls`, "application/vnd.ms-excel;charset=utf-8");
   const exportToWord = () => triggerDownload(buildExportTableHtml(false), `${exportFileBaseName}.doc`, "application/msword;charset=utf-8");
 
@@ -279,7 +283,8 @@ export default function ExpensesAnalysisPage() {
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:hidden" data-testid="expenses-analysis-filters-section">
           <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="expenses-analysis-filters-heading">
             <div><h2 className="text-3xl font-extrabold" data-testid="expenses-analysis-filters-title">اختيارات التقرير</h2><p className="mt-1 text-sm font-bold text-slate-500" data-testid="expenses-analysis-filters-description">التقرير يعتمد فقط على المصروفات المسجلة ولا يحتوي على إدخال بيانات.</p></div>
-            <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-filter-actions">
+            <div className="flex flex-wrap items-center gap-2" data-testid="expenses-analysis-filter-actions">
+              <PrintOrientationToggle orientation={orientation} onChange={setOrientation} testIdPrefix="expenses-analysis-orientation" />
               <Button type="button" onClick={loadExpenses} variant="outline" className="h-11 rounded-lg bg-white" data-testid="refresh-expenses-analysis-button"><RotateCcw className="h-4 w-4" /> تحديث</Button>
               <Button type="button" onClick={() => setPreviewOpen(true)} variant="outline" className="h-11 rounded-lg bg-white" data-testid="preview-expenses-analysis-button"><Eye className="h-4 w-4" /> معاينة التقرير</Button>
               <Button type="button" onClick={exportToPdf} disabled={!hasCompletePeriod || loading} className="h-11 rounded-lg bg-slate-950 text-white disabled:opacity-50" data-testid="export-expenses-analysis-pdf-button"><FileDown className="h-4 w-4" /> PDF</Button>
@@ -303,7 +308,8 @@ export default function ExpensesAnalysisPage() {
           <section className="w-full max-w-7xl rounded-xl bg-white p-4 shadow-2xl" role="dialog" aria-modal="true" data-testid="expenses-analysis-preview-modal">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3" data-testid="expenses-analysis-preview-modal-actions">
               <h3 className="text-2xl font-extrabold text-slate-950" data-testid="expenses-analysis-preview-modal-title">معاينة تقرير تحليل المصروفات</h3>
-              <div className="flex flex-wrap gap-2" data-testid="expenses-analysis-preview-modal-buttons">
+              <div className="flex flex-wrap items-center gap-2" data-testid="expenses-analysis-preview-modal-buttons">
+                <PrintOrientationToggle orientation={orientation} onChange={setOrientation} testIdPrefix="expenses-analysis-preview-orientation" />
                 <Button type="button" onClick={exportToPdf} className="h-11 rounded-lg bg-slate-950 text-white" data-testid="print-expenses-analysis-preview-button"><Printer className="h-4 w-4" /> طباعة PDF</Button>
                 <Button type="button" onClick={exportToExcel} variant="outline" className="h-11 rounded-lg bg-white" data-testid="export-expenses-analysis-preview-excel-button"><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
                 <Button type="button" onClick={exportToWord} variant="outline" className="h-11 rounded-lg bg-white" data-testid="export-expenses-analysis-preview-word-button"><FileText className="h-4 w-4" /> Word</Button>

@@ -2,6 +2,24 @@
 
 > تم نقل السجل التفصيلي القديم من PRD.md هنا لأن الملف تجاوز 700 سطر.
 
+## ميزة جديدة — 2026-02-04 — التحكم في اتجاه ورق الطباعة لكل التقارير
+- تم إضافة Toggle (طولي/عرضي) موحّد بجانب أزرار PDF/Excel/Word في كل التقارير عبر تحديث المكوّن المركزي `ExportReportButtons.jsx`. يحفظ الخيار في localStorage تحت المفتاح `report.print.orientation`.
+- إنشاء وحدة جديدة `/app/frontend/src/lib/printOrientation.js` تحتوي على:
+  - `usePrintOrientation` React hook لإدارة الاتجاه بشكل تفاعلي مع `storage` event.
+  - `printWithOrientation(orientation)` يحقن stylesheet مؤقتاً يفرض `@page { size: A4 ${orientation} }` ثم يستدعي `window.print()` ويزيل الـ style بعدها.
+  - `printNow()` يقرأ آخر اتجاه من localStorage ويطبع به.
+  - الـ stylesheet يفرض الاتجاه على كل القواعد المسماة (`expenses-analysis-landscape`, `reconciliation-single-page`) بحيث يعمل في صفحات مذكرة التسوية وتحليل المصروفات بدون تعارض.
+- إنشاء مكوّن `PrintOrientationToggle.jsx` (segmented control) مع `data-testid` كامل ودعم RTL وأيقونات `ArrowDownToLine` / `ArrowRightFromLine`.
+- Excel: تم تمرير الاتجاه عبر `<x:PageSetup><x:Layout x:Orientation="Portrait|Landscape"/></x:PageSetup>` داخل الـ workbook XML.
+- Word: تم تطبيق `@page { size: A4 portrait|landscape }` في الـ HTML المُولّد.
+- BanqueMisrPrintPage: تم تعديل دالة `printRequest` لتقبل `orientation` وتمرّره إلى الـ popup print window. كل أزرار الطباعة (حفظ ثم طباعة، إعادة طباعة، طباعة الطلب المحفوظ) تستخدم نفس الاختيار.
+- ExpensesAnalysisPage: تم دمج الاتجاه في كل من `exportToPdf`/`exportToExcel`/`exportToWord`، وأضيف Toggle في قسم الفلاتر وآخر في Modal المعاينة.
+- ActuarialStudyPage: استبدال `window.print()` بـ `printWithOrientation(orientation)` مع Toggle محلي.
+- استبدال كل `window.print()` المتفرّقة في `FeasibilityStudyPage`, `CustodyAdvancesPage`, `FixedAssetsPage`, `MembershipPage`, `FinancialStatementsPage`, `TreasuryBanksPage`, `BankReconciliationPage` بـ `printNow()` بحيث تحترم آخر اختيار للمستخدم.
+- تحقق آلي: 6/6 pytest عبر `/app/backend/tests/test_print_orientation_module.py` + smoke browser test أكّد ظهور الـ Toggle في صفحات Expenses, Ledger, Financial Statements, Membership (5 toggles), Expenses Analysis، وحفظ القيمة في localStorage عند التبديل.
+
+
+
 ## إصلاح — 2026-05-08 — توقف شاشة البداية عند 92% في Windows
 - تم إصلاح سبب التعليق المحتمل عند 92% عبر إيقاف الاعتماد على تثبيت pip الشبكي أثناء التشغيل الصامت، وإضافة حزم Windows محلية داخل `backend/wheels_win` مع `requirements-runtime.txt` خفيف.
 - تم تعديل `start_system_worker.bat` لاستخدام الحزم المحلية `--no-index --find-links`، وتخطي التثبيت المتكرر بعد نجاح فحص التبعيات، وتقليل أي fallback شبكي إلى timeout/retries قصيرة.

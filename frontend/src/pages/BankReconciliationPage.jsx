@@ -15,6 +15,7 @@ import { formatDateTime, sanitizeDayMonthInput, sanitizeDecimalInput, sanitizeDi
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { BankLogo } from "@/components/BankLogo";
+import { printNow } from "@/lib/printOrientation";
 
 const currentDayMonth = () => {
   const now = new Date();
@@ -396,7 +397,7 @@ export default function BankReconciliationPage() {
     setTimeout(() => {
       const printWindow = window.open("", "_blank", "width=900,height=1200");
       if (!printWindow) {
-        window.print();
+        printNow();
         return;
       }
       const meta = periodMeta(item.period_label);

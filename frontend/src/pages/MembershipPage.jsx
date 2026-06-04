@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { printNow } from "@/lib/printOrientation";
 
 const today = new Date();
 const currentYear = today.getFullYear();
@@ -306,7 +307,7 @@ export default function MembershipPage() {
     }
   };
 
-  const printSelected = () => window.print();
+  const printSelected = () => printNow();
 
   const MemberActions = ({ member, prefix }) => (
     <div className="flex flex-wrap gap-2" data-testid={`${prefix}-${member.id}-actions`}>

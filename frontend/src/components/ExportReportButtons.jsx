@@ -1,6 +1,8 @@
 import { FileDown, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { PrintOrientationToggle } from "@/components/PrintOrientationToggle";
+import { usePrintOrientation, printWithOrientation } from "@/lib/printOrientation";
 
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
@@ -51,17 +53,23 @@ const cloneReportContent = (selectors) => {
   return container.innerHTML;
 };
 
-const buildOfficeHtml = ({ title, selectors, excel = false }) => {
+const buildOfficeHtml = ({ title, selectors, excel = false, orientation = "portrait" }) => {
   const bodyHtml = cloneReportContent(selectors);
   const isReconciliationMemo = (selectors || []).some((selector) => String(selector).includes("reconciliation-print-report"));
-  const workbookMeta = excel ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>${escapeHtml(title || "تقرير")}</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>` : "";
+  const excelOrientation = orientation === "landscape" ? "Landscape" : "Portrait";
+  const workbookMeta = excel
+    ? `<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>${escapeHtml(title || "تقرير")}</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/><x:Print><x:LeftToRight/></x:Print><x:PageSetup><x:Layout x:Orientation="${excelOrientation}"/></x:PageSetup></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>`
+    : "";
+  const pageSize = orientation === "landscape" ? "A4 landscape" : "A4 portrait";
   return `<!doctype html>
 <html dir="rtl" lang="ar" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:w="urn:schemas-microsoft-com:office:word">
 <head>
   <meta charset="utf-8" />
   ${workbookMeta}
   <style>
-    @page { size: A4 portrait; margin: ${isReconciliationMemo ? "5mm" : "6mm"}; }
+    @page { size: ${pageSize}; margin: ${isReconciliationMemo ? "5mm" : "6mm"}; }
+    @page expenses-analysis-landscape { size: ${pageSize}; margin: 7mm; }
+    @page reconciliation-single-page { size: ${pageSize}; margin: 5mm; }
     body { direction: rtl; font-family: Tahoma, Arial, sans-serif; color: #111827; ${isReconciliationMemo ? "width:200mm;height:287mm;overflow:hidden;margin:0;padding:0;" : ""} }
     h1, h2, h3, p { margin: 0 0 6px; }
     ${isReconciliationMemo ? "body > h1 { display:none; }" : ""}
@@ -84,30 +92,31 @@ const buildOfficeHtml = ({ title, selectors, excel = false }) => {
 </html>`;
 };
 
-export const exportReportToOffice = ({ title, fileName, selectors, type }) => {
+export const exportReportToOffice = ({ title, fileName, selectors, type, orientation = "portrait" }) => {
   const excel = type === "excel";
   const extension = excel ? "xls" : "doc";
   const mimeType = excel ? "application/vnd.ms-excel;charset=utf-8" : "application/msword;charset=utf-8";
-  downloadContent(buildOfficeHtml({ title, selectors, excel }), `${safeFileName(fileName || title)}.${extension}`, mimeType);
+  downloadContent(buildOfficeHtml({ title, selectors, excel, orientation }), `${safeFileName(fileName || title)}.${extension}`, mimeType);
 };
 
-export const ExportReportButtons = ({ title, fileName, selectors, printSelectors = null, disabled = false, className = "", pdfLabel = "PDF", pdfTestId, excelTestId, wordTestId }) => {
+export const ExportReportButtons = ({ title, fileName, selectors, printSelectors = null, disabled = false, className = "", pdfLabel = "PDF", pdfTestId, excelTestId, wordTestId, showOrientationToggle = true, orientationTestIdPrefix }) => {
   const { user } = useAuth();
+  const [orientation, setOrientation] = usePrintOrientation("portrait");
   const reportTitle = user?.organization_name ? `${user.organization_name} - ${title}` : title;
   const reportFileName = user?.organization_name ? `${user.organization_name}-${fileName || title}` : fileName;
-  const exportExcel = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "excel" });
-  const exportWord = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "word" });
+  const exportExcel = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "excel", orientation });
+  const exportWord = () => exportReportToOffice({ title: reportTitle, fileName: reportFileName, selectors, type: "word", orientation });
   const printPdf = () => {
     if (!printSelectors) {
-      window.print();
+      printWithOrientation(orientation);
       return;
     }
     const printWindow = window.open("", "_blank", "width=1200,height=800");
     if (!printWindow) {
-      window.print();
+      printWithOrientation(orientation);
       return;
     }
-    printWindow.document.write(buildOfficeHtml({ title: reportTitle, selectors: printSelectors, excel: false }));
+    printWindow.document.write(buildOfficeHtml({ title: reportTitle, selectors: printSelectors, excel: false, orientation }));
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => {
@@ -117,7 +126,10 @@ export const ExportReportButtons = ({ title, fileName, selectors, printSelectors
   };
 
   return (
-    <div className={`flex flex-wrap gap-2 print:hidden ${className}`} data-export-exclude="true" data-testid={`${pdfTestId || "report-export-pdf-button"}-group`}>
+    <div className={`flex flex-wrap items-center gap-2 print:hidden ${className}`} data-export-exclude="true" data-testid={`${pdfTestId || "report-export-pdf-button"}-group`}>
+      {showOrientationToggle && (
+        <PrintOrientationToggle orientation={orientation} onChange={setOrientation} testIdPrefix={orientationTestIdPrefix || `${pdfTestId || "report-export"}-orientation`} />
+      )}
       <Button type="button" onClick={printPdf} disabled={disabled} className="h-11 rounded-lg bg-slate-950 px-5 text-white disabled:opacity-50" data-testid={pdfTestId || "report-export-pdf-button"}>
         <FileDown className="h-4 w-4" /> {pdfLabel}
       </Button>

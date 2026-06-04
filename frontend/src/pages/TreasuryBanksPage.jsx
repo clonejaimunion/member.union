@@ -11,6 +11,7 @@ import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
+import { printNow } from "@/lib/printOrientation";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const startOfYear = () => `${new Date().getFullYear()}-01-01`;
@@ -101,18 +102,18 @@ export default function TreasuryBanksPage() {
     return account ? `${account.code || ""} - ${account.name}` : "حساب محدد";
   }, [accountOptions, filters.account_id, filters.account_kind]);
 
-  const openPrintWindow = (printNow = true) => {
+  const openPrintWindow = (printNowAfter = true) => {
     const reportNode = document.querySelector("[data-testid='treasury-banks-print-section']");
     const printWindow = window.open("", "_blank", "width=1200,height=800");
     if (!printWindow || !reportNode) {
-      window.print();
+      printNow();
       return;
     }
     const title = `الخزينة والبنوك - ${selectedAccountName}`;
     printWindow.document.write(buildPrintableHtml(title, reportNode.outerHTML));
     printWindow.document.close();
     printWindow.focus();
-    if (printNow) setTimeout(() => printWindow.print(), 250);
+    if (printNowAfter) setTimeout(() => printWindow.print(), 250);
   };
 
   return (
