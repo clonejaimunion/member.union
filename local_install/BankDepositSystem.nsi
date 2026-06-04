@@ -28,8 +28,9 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
-  ; Remove the scheduled notifier task on uninstall.
+  ; Remove both scheduled notifier tasks on uninstall.
   nsExec::ExecToLog 'schtasks /Delete /TN "BankDepositMaturityNotifier" /F'
+  nsExec::ExecToLog 'schtasks /Delete /TN "BankDepositMaturityNotifierHourly" /F'
   Delete "$DESKTOP\Bank Deposit System.lnk"
   Delete "$SMPROGRAMS\Bank Deposit Interest System\Bank Deposit System.lnk"
   RMDir "$SMPROGRAMS\Bank Deposit Interest System"

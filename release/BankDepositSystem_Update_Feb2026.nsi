@@ -117,10 +117,11 @@ Section "تطبيق التحديث" SecMain
   SetOutPath "$INSTDIR\frontend\build"
   File /r "patch\frontend\*.*"
 
-  ; Notifier launcher + task scheduler
+  ; Notifier launcher + PowerShell toast script + task scheduler
   SetOutPath "$INSTDIR"
   File "patch\run_notifier_hidden.vbs"
   File "patch\register_notifier_task.bat"
+  File "patch\show_toast.ps1"
 
   DetailPrint "تسجيل خدمة التنبيهات..."
   nsExec::ExecToLog '"$INSTDIR\register_notifier_task.bat"'
