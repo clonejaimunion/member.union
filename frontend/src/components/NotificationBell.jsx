@@ -6,10 +6,21 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 const POLL_INTERVAL_MS = 60_000;
+const RENOTIFY_INTERVAL_MS = 5 * 60_000; // re-show the same unread toast every 5 min
 
 const formatAmount = (value) => {
   const numeric = Number(value || 0);
   return numeric.toLocaleString("ar-EG", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+};
+
+const requestDesktopPermission = () => {
+  if (typeof window === "undefined" || !("Notification" in window)) return Promise.resolve("unsupported");
+  if (Notification.permission === "granted" || Notification.permission === "denied") return Promise.resolve(Notification.permission);
+  try {
+    return Notification.requestPermission().catch(() => "denied");
+  } catch {
+    return Promise.resolve("denied");
+  }
 };
 
 export const NotificationBell = () => {
@@ -20,6 +31,40 @@ export const NotificationBell = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const panelRef = useRef(null);
+  const desktopShownRef = useRef(new Map()); // notification_id -> last shown timestamp
+
+  useEffect(() => {
+    // Ask for desktop permission once after login — silent if already decided.
+    if (user) requestDesktopPermission();
+  }, [user]);
+
+  const fireDesktopNotification = useCallback((notification) => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    const now = Date.now();
+    const lastShown = desktopShownRef.current.get(notification.id) || 0;
+    if (now - lastShown < RENOTIFY_INTERVAL_MS) return; // throttle re-notify
+    try {
+      const days = Number(notification.days_remaining || 0);
+      const title = days <= 7 ? "⚠️ استحقاق وديعة عاجل" : "تنبيه استحقاق وديعة";
+      const body = `وديعة ${notification.deposit_number} — ${notification.bank_name}\n${formatAmount(notification.amount)} جنيه\nتاريخ الاستحقاق: ${notification.maturity_date} — متبقي ${days} يوم`;
+      const toast = new Notification(title, {
+        body,
+        tag: `deposit-${notification.id}`, // replace previous toast for same id
+        requireInteraction: true, // sticky — stays until user interacts
+        renotify: true,
+        silent: false,
+      });
+      toast.onclick = () => {
+        window.focus();
+        if (notification.bank_id) navigate(`/bank/${notification.bank_id}/register`);
+        toast.close();
+      };
+      desktopShownRef.current.set(notification.id, now);
+    } catch {
+      /* silent: never break the host UI */
+    }
+  }, [navigate]);
 
   const loadNotifications = useCallback(async () => {
     if (!user) return;
@@ -33,14 +78,17 @@ export const NotificationBell = () => {
         /* scan endpoint may not exist on very old builds — fall through to GET */
       }
       const response = await api.get("/notifications/deposits", { params: { limit: 50 } });
-      setItems(response.data.items || []);
+      const list = response.data.items || [];
+      setItems(list);
       setUnreadCount(response.data.unread_count || 0);
+      // Desktop toast for every unread item (throttled per-id).
+      list.filter((row) => row.status === "unread").forEach(fireDesktopNotification);
     } catch {
       /* silent: never break the host UI */
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, fireDesktopNotification]);
 
   useEffect(() => {
     loadNotifications();
