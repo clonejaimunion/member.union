@@ -6,7 +6,19 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 const POLL_INTERVAL_MS = 60_000;
-const RENOTIFY_INTERVAL_MS = 5 * 60_000; // re-show the same unread toast every 5 min
+const RENOTIFY_INTERVAL_MS = 5 * 60_000;
+let serviceWorkerReadyPromise = null;
+
+const ensureServiceWorker = () => {
+  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return Promise.resolve(null);
+  if (!serviceWorkerReadyPromise) {
+    serviceWorkerReadyPromise = navigator.serviceWorker
+      .register("/notifications-sw.js", { scope: "/" })
+      .then(() => navigator.serviceWorker.ready)
+      .catch(() => null);
+  }
+  return serviceWorkerReadyPromise;
+};
 
 const formatAmount = (value) => {
   const numeric = Number(value || 0);
@@ -34,27 +46,41 @@ export const NotificationBell = () => {
   const desktopShownRef = useRef(new Map()); // notification_id -> last shown timestamp
 
   useEffect(() => {
-    // Ask for desktop permission once after login — silent if already decided.
-    if (user) requestDesktopPermission();
-  }, [user]);
+    if (!user) return;
+    requestDesktopPermission().then((perm) => {
+      if (perm === "granted") ensureServiceWorker();
+    });
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      const handler = (event) => {
+        if (event.data?.type === "open-deposit" && event.data?.url) {
+          navigate(event.data.url);
+        }
+      };
+      navigator.serviceWorker.addEventListener("message", handler);
+      return () => navigator.serviceWorker.removeEventListener("message", handler);
+    }
+    return undefined;
+  }, [user, navigate]);
 
-  const fireDesktopNotification = useCallback((notification) => {
+  const fireDesktopNotification = useCallback(async (notification) => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
     const now = Date.now();
     const lastShown = desktopShownRef.current.get(notification.id) || 0;
-    if (now - lastShown < RENOTIFY_INTERVAL_MS) return; // throttle re-notify
+    if (now - lastShown < RENOTIFY_INTERVAL_MS) return;
     try {
+      const registration = await ensureServiceWorker();
+      if (registration && registration.active) {
+        // Sticky desktop toast via Service Worker — survives tab focus loss.
+        registration.active.postMessage({ type: "show-deposit-notification", notification });
+        desktopShownRef.current.set(notification.id, now);
+        return;
+      }
+      // Fallback: simple in-tab notification (less reliable but still useful).
       const days = Number(notification.days_remaining || 0);
       const title = days <= 7 ? "⚠️ استحقاق وديعة عاجل" : "تنبيه استحقاق وديعة";
       const body = `وديعة ${notification.deposit_number} — ${notification.bank_name}\n${formatAmount(notification.amount)} جنيه\nتاريخ الاستحقاق: ${notification.maturity_date} — متبقي ${days} يوم`;
-      const toast = new Notification(title, {
-        body,
-        tag: `deposit-${notification.id}`, // replace previous toast for same id
-        requireInteraction: true, // sticky — stays until user interacts
-        renotify: true,
-        silent: false,
-      });
+      const toast = new Notification(title, { body, tag: `deposit-${notification.id}`, requireInteraction: true });
       toast.onclick = () => {
         window.focus();
         if (notification.bank_id) navigate(`/bank/${notification.bank_id}/register`);
@@ -62,7 +88,7 @@ export const NotificationBell = () => {
       };
       desktopShownRef.current.set(notification.id, now);
     } catch {
-      /* silent: never break the host UI */
+      /* silent */
     }
   }, [navigate]);
 
@@ -145,7 +171,10 @@ export const NotificationBell = () => {
         )}
       </button>
       {open && (
-        <div className="absolute left-0 mt-2 w-[420px] origin-top-left rounded-xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5 z-50" data-testid="notification-bell-panel">
+        <div className="fixed inset-0 z-[9998] bg-slate-950/30 backdrop-blur-sm" onClick={() => setOpen(false)} data-testid="notification-bell-overlay" />
+      )}
+      {open && (
+        <div className="absolute left-0 top-12 mt-2 w-[420px] origin-top-left rounded-xl border border-slate-200 bg-white shadow-2xl ring-1 ring-black/5 z-[9999]" data-testid="notification-bell-panel">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3" data-testid="notification-bell-header">
             <h4 className="text-sm font-extrabold text-slate-950" data-testid="notification-bell-title">تنبيهات استحقاق الودائع</h4>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} className="h-8 w-8 p-0" data-testid="notification-bell-close-button"><X className="h-4 w-4" /></Button>
