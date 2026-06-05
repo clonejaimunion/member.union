@@ -216,7 +216,7 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="module-selection-page">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="module-selection-header">
+      <header className="relative z-50 border-b border-slate-200 bg-white/90 backdrop-blur" data-testid="module-selection-header">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3" data-testid="module-selection-brand">
             <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm" data-testid="module-selection-brand-icon"><img src={officialSystemLogo} alt="الشعار الرسمي للنظام" className="h-full w-full object-contain" data-testid="module-selection-official-logo" /></div>
