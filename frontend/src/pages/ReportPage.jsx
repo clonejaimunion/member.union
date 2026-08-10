@@ -7,6 +7,7 @@ import { ExportReportButtons, exportReportToOffice, buildOfficeHtml } from "@/co
 import { ReportTable } from "@/components/ReportTable";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { bankPalette } from "@/lib/banks";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 
 export default function ReportPage({ type }) {
@@ -191,7 +192,17 @@ export default function ReportPage({ type }) {
                   <p style={{ fontWeight: 700, fontSize: "16px", margin: 0 }}>النقابة العامة للعاملين بالزراعة والري</p>
                   <p style={{ fontWeight: 700, fontSize: "16px", margin: "2px 0 0" }}>صندوق التكافل الاجتماعي</p>
                 </div>
-                <h3 style={{ textAlign: "center", fontWeight: 800, fontSize: "18px", margin: "8px 0 12px" }}>تقرير العائد الشهري عن سنة {report.year}</h3>
+                <h3 style={{ textAlign: "center", fontWeight: 800, fontSize: "18px", margin: "8px 0 6px" }}>تقرير العائد الشهري عن سنة {report.year}</h3>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", margin: "0 0 14px" }}>
+                  {(report?.bank?.logo_url || bankPalette[bankId]?.logo) && (
+                    <img
+                      src={report?.bank?.logo_url || bankPalette[bankId]?.logo}
+                      alt={`شعار ${report?.bank?.name || "البنك"}`}
+                      style={{ height: "48px", width: "48px", objectFit: "contain" }}
+                    />
+                  )}
+                  <span style={{ fontWeight: 800, fontSize: "16px" }}>{report?.bank?.name || "البنك"}</span>
+                </div>
                 <table>
                   <tbody>
                     <tr><th>رقم الحساب</th><td>{deposit?.account_number || "—"}</td><th>رقم الوديعة</th><td>{deposit?.deposit_number || "—"}</td></tr>
