@@ -6314,7 +6314,7 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
     start = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime)
     end = normalize_datetime(deposit.maturity_datetime)
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
+    daily_interest = annual_interest / days_in_year(year)
     rows = []
     total = 0.0
 
@@ -6333,7 +6333,7 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             interest = daily_interest * active_days
 
         rounded_interest = round(interest, 2)
-        total += rounded_interest
+        total += interest
         rows.append(
             InterestRow(
                 serial=month,
@@ -6357,7 +6357,7 @@ def calculate_deposit_interest_for_period(deposit: Deposit, period_from: date, p
     if overlap_end <= overlap_start:
         return 0.0
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = math.floor((annual_interest / days_in_year(period_from.year)) * 100) / 100
+    daily_interest = annual_interest / days_in_year(period_from.year)
     active_days = (overlap_end - overlap_start).total_seconds() / 86400
     return round(daily_interest * active_days, 2)
 
@@ -6457,7 +6457,7 @@ async def calculate_total_deposit_interest_for_period(organization_id: str, peri
 
 def calculate_daily_interest_amount(deposit: Deposit, year: int) -> tuple[float, float]:
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = math.floor((annual_interest / days_in_year(year)) * 100) / 100
+    daily_interest = annual_interest / days_in_year(year)
     return round(annual_interest, 2), daily_interest
 
 
@@ -6508,7 +6508,7 @@ def calculate_accrued_interest_for_year(deposit: Deposit, year: int) -> dict:
     accrued_interest = round(daily_interest * accrued_days, 2)
     return {
         "annual_interest_amount": annual_interest,
-        "daily_interest_amount": daily_interest,
+        "daily_interest_amount": round(daily_interest, 2),
         "last_payment_date": last_payment_day.isoformat(),
         "accrued_until_date": period_end.isoformat(),
         "accrued_days": accrued_days,
