@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, Check, ChevronDown, ClipboardPenLine, Sigma } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ClipboardPenLine, FileDown, FileSpreadsheet, Printer, Sigma } from "lucide-react";
 import { BankShell } from "@/components/BankShell";
 import { DepositSummary } from "@/components/DepositSummary";
-import { ExportReportButtons } from "@/components/ExportReportButtons";
+import { ExportReportButtons, exportReportToOffice, buildOfficeHtml } from "@/components/ExportReportButtons";
 import { ReportTable } from "@/components/ReportTable";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 
 export default function ReportPage({ type }) {
   const { bankId } = useParams();
@@ -39,6 +39,27 @@ export default function ReportPage({ type }) {
   }, [deposits, selectedValue, report]);
 
   const exportTitle = `${title} - ${report?.bank?.name || bankId} - ${selectedDepositLabel}`;
+
+  const deposit = report?.deposit;
+  const annualRate = Number(deposit?.monthly_interest_rate || 0);
+  const dailyInterestAmount = (Number(deposit?.amount || 0) * annualRate) / 100 / 365;
+
+  const A4_SELECTOR = "[data-testid='interest-a4-report']";
+  const a4Title = `تقرير العائد الشهري عن سنة ${report?.year || ""}`;
+
+  const printInterestA4 = () => {
+    const printWindow = window.open("", "_blank", "width=1000,height=800");
+    if (!printWindow) return;
+    printWindow.document.write(buildOfficeHtml({ title: " ", selectors: [A4_SELECTOR], excel: false, orientation: "portrait" }));
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 300);
+  };
+
+  const exportInterestExcel = () => exportReportToOffice({ title: a4Title, fileName: a4Title, selectors: [A4_SELECTOR], type: "excel", orientation: "portrait" });
 
   const changeDeposit = (value) => {
     if (value) {
@@ -148,11 +169,53 @@ export default function ReportPage({ type }) {
                     <h3 className="text-2xl font-extrabold text-slate-950" data-testid="monthly-report-title">{report.year}</h3>
                   </div>
                 </div>
-                <div className="hidden items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-extrabold text-slate-700 sm:flex" data-testid="monthly-report-total-chip">
-                  <Sigma className="h-4 w-4" /> {formatCurrency(report.total_interest)}
+                <div className="flex flex-wrap items-center gap-2 print:hidden" data-export-exclude="true" data-testid="monthly-report-actions">
+                  <Button type="button" onClick={printInterestA4} className="h-11 rounded-lg bg-slate-950 px-5 text-white" data-testid="interest-print-a4-button">
+                    <Printer className="h-4 w-4" /> طباعة A4
+                  </Button>
+                  <Button type="button" onClick={printInterestA4} variant="outline" className="h-11 rounded-lg bg-white px-5" data-testid="interest-export-pdf-button">
+                    <FileDown className="h-4 w-4" /> PDF
+                  </Button>
+                  <Button type="button" onClick={exportInterestExcel} variant="outline" className="h-11 rounded-lg bg-white px-5" data-testid="interest-export-excel-button">
+                    <FileSpreadsheet className="h-4 w-4" /> Excel
+                  </Button>
+                  <span className="hidden items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-extrabold text-slate-700 sm:flex" data-testid="monthly-report-total-chip">
+                    <Sigma className="h-4 w-4" /> {formatCurrency(report.total_interest)}
+                  </span>
                 </div>
               </div>
               <ReportTable rows={report.rows} total={report.total_interest} />
+
+              <section className="hidden" data-testid="interest-a4-report">
+                <div style={{ textAlign: "right", marginBottom: "10px" }}>
+                  <p style={{ fontWeight: 700, fontSize: "16px", margin: 0 }}>النقابة العامة للعاملين بالزراعة والري</p>
+                  <p style={{ fontWeight: 700, fontSize: "16px", margin: "2px 0 0" }}>صندوق التكافل الاجتماعي</p>
+                </div>
+                <h3 style={{ textAlign: "center", fontWeight: 800, fontSize: "18px", margin: "8px 0 12px" }}>تقرير العائد الشهري عن سنة {report.year}</h3>
+                <table>
+                  <tbody>
+                    <tr><th>رقم الحساب</th><td>{deposit?.account_number || "—"}</td><th>رقم الوديعة</th><td>{deposit?.deposit_number || "—"}</td></tr>
+                    <tr><th>مبلغ الوديعة</th><td>{formatCurrency(deposit?.amount)}</td><th>نسبة الفائدة السنوية</th><td>{formatNumber(annualRate)}%</td></tr>
+                    <tr><th>الفائدة اليومية</th><td>{formatCurrency(dailyInterestAmount)}</td><th>السنة</th><td>{report.year}</td></tr>
+                    <tr><th>تاريخ إنشاء الوديعة</th><td>{formatDate(deposit?.creation_datetime)}</td><th>تاريخ الاستحقاق</th><td>{formatDate(deposit?.maturity_datetime)}</td></tr>
+                  </tbody>
+                </table>
+                <table>
+                  <thead>
+                    <tr><th>الشهر</th><th>عدد الأيام</th><th>العائد الشهري</th></tr>
+                  </thead>
+                  <tbody>
+                    {report.rows.map((row) => (
+                      <tr key={row.serial}>
+                        <td>{row.month}</td>
+                        <td>{formatNumber(row.active_days)}</td>
+                        <td>{formatCurrency(row.interest_amount)}</td>
+                      </tr>
+                    ))}
+                    <tr><th colSpan={2}>الإجمالي</th><th>{formatCurrency(report.total_interest)}</th></tr>
+                  </tbody>
+                </table>
+              </section>
             </section>
           </>
         ) : (

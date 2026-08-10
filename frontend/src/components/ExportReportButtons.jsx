@@ -53,7 +53,7 @@ const cloneReportContent = (selectors) => {
   return container.innerHTML;
 };
 
-const buildOfficeHtml = ({ title, selectors, excel = false, orientation = "portrait" }) => {
+export const buildOfficeHtml = ({ title, selectors, excel = false, orientation = "portrait" }) => {
   const bodyHtml = cloneReportContent(selectors);
   const isReconciliationMemo = (selectors || []).some((selector) => String(selector).includes("reconciliation-print-report"));
   const excelOrientation = orientation === "landscape" ? "Landscape" : "Portrait";
