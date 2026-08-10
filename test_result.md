@@ -101,3 +101,97 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Deposit interest calculation in the Social Solidarity project (بنك التنمية الصناعية) did not match the
+  real bank statement. Example deposit: amount 1,000,000, annual rate 20%, accounting start 2026-01-01,
+  365-day basis. Bank statement January 2026 interest = 16,986.30, but the app showed 16,986.14.
+  Root cause: the app truncated (math.floor) the DAILY interest to 2 decimals BEFORE multiplying by days,
+  losing fractions. Fix: compute daily interest at FULL precision (annual/365, no floor) and round only the
+  final monthly/period/accrued amount to 2 decimals — exactly like the bank.
+
+backend:
+  - task: "Deposit interest calculation matches bank statement (no daily truncation)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          Removed math.floor truncation of daily interest in 3 functions:
+          calculate_interest_rows (monthly report), calculate_deposit_interest_for_period (period),
+          and calculate_daily_interest_amount (used by accrued report). Daily interest is now
+          annual_interest / 365 at full precision; only final amounts are rounded to 2 decimals.
+          Displayed daily_interest_amount in accrued report is rounded to 2 decimals for display only.
+          Manual API check: January 2026 = 16,986.30 (matches bank). Needs testing_agent verification.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ ALL TESTS PASSED - Bug fix verified successfully!
+          
+          Tested deposit: amount=1,000,000, annual_rate=20%, accounting_start=2026-01-01, maturity=2027-09-19, 365-day basis
+          Full-precision daily interest: 200,000 / 365 = 547.9452055...
+          
+          Test Results:
+          1. ✅ Current Year Report (GET /api/banks/industrial-development/reports/current-year):
+             - January 2026: 31 days × 547.9452055 = 16,986.30 (MATCHES BANK STATEMENT EXACTLY!)
+             - February 2026: 28 days × 547.9452055 = 15,342.47 (correct)
+             - HTTP 200, no errors
+          
+          2. ✅ Accrued Interest Report (GET /api/banks/industrial-development/accrued-interest?year=2026):
+             - Daily interest (display): 547.95 (correctly rounded for display)
+             - Accrued interest (9 days): 547.9452055 × 9 = 4,931.51 (correct full-precision calculation)
+             - HTTP 200, no errors
+          
+          3. ✅ Previous Year Report (GET /api/banks/industrial-development/reports/previous-year):
+             - HTTP 200, no errors (regression test passed)
+          
+          The fix successfully removed daily truncation. Daily interest is now computed at FULL precision
+          and only the FINAL monthly/period/accrued amounts are rounded to 2 decimals - exactly like the bank does.
+          This matches the real bank statement perfectly!
+
+metadata:
+  created_by: "main_agent"
+  version: "1.2"
+  test_sequence: 2
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Deposit interest calculation matches bank statement (no daily truncation)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      Please verify deposit interest calc for bank_id=industrial-development, org=social-solidarity,
+      login admin/Admin@123. Endpoints:
+      GET /api/banks/industrial-development/reports/current-year  -> January (month_number 1) interest_amount MUST equal 16986.30 (31 days).
+      GET /api/banks/industrial-development/accrued-interest?year=2026 -> daily_interest_amount should be 547.95,
+      accrued_interest_amount = round(547.9452055 * accrued_days, 2).
+      Confirm the numbers reflect full-precision daily interest (annual 200000 / 365) with only final rounding.
+      Also confirm no regression: reports endpoints return 200 and stay balanced.
+    -agent: "testing"
+    -message: |
+      ✅ TESTING COMPLETE - ALL TESTS PASSED!
+      
+      Bug fix verified successfully. The deposit interest calculation now matches the bank statement exactly.
+      
+      Key Findings:
+      - January 2026 interest: 16,986.30 (MATCHES BANK STATEMENT - this was the core bug!)
+      - February 2026 interest: 15,342.47 (correct)
+      - Daily interest calculation uses full precision (547.9452055) with only final rounding
+      - All 3 endpoints tested: current-year, accrued-interest, previous-year - all return HTTP 200
+      - No regressions detected
+      
+      The fix successfully removed the math.floor truncation that was causing the 0.16 EGP discrepancy.
+      Daily interest is now computed at full precision (200,000 / 365 = 547.9452055) and only the
+      FINAL monthly/period/accrued amounts are rounded to 2 decimals - exactly like the bank does.
+      
+      Ready for production deployment.
