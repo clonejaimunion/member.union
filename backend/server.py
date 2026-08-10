@@ -6333,7 +6333,7 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             interest = daily_interest * active_days
 
         rounded_interest = round(interest, 2)
-        total += rounded_interest
+        total += interest
         rows.append(
             InterestRow(
                 serial=month,

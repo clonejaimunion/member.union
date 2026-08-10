@@ -79,7 +79,7 @@ def login():
 
 def test_current_year_report(token):
     """Test GET /api/banks/{bank_id}/reports/current-year"""
-    print_section("2. Current Year Report Test (January Interest = 16,986.30)")
+    print_section("2. Current Year Report Test (Total Interest = 200,000.00, January = 16,986.30)")
     
     url = f"{BACKEND_URL}/banks/{BANK_ID}/reports/current-year"
     headers = {"Authorization": f"Bearer {token}"}
@@ -96,6 +96,30 @@ def test_current_year_report(token):
             return False
         
         data = response.json()
+        
+        # Check total_interest (إجمالي السنة) - CRITICAL TEST FOR THIS BUG FIX
+        total_interest = data.get("total_interest")
+        expected_total = 200000.0
+        
+        print(f"\n🎯 CRITICAL TEST - Total Interest (إجمالي السنة):")
+        print(f"  Expected: {expected_total} (200,000.00)")
+        print(f"  Actual: {total_interest}")
+        
+        if total_interest is None:
+            print(f"❌ total_interest field not found in response!")
+            print(f"Response keys: {list(data.keys())}")
+            return False
+        
+        if total_interest == expected_total:
+            print(f"✅ Total interest CORRECT: {total_interest} (no rounding accumulation error!)")
+        else:
+            print(f"❌ Total interest MISMATCH!")
+            print(f"   Expected: {expected_total}")
+            print(f"   Got: {total_interest}")
+            print(f"   Difference: {abs(total_interest - expected_total)}")
+            if total_interest == 200000.01:
+                print(f"   ⚠️  This is the OLD BUG - summing rounded monthly values!")
+            return False
         
         # Find January row (month_number == 1)
         january_row = None
@@ -115,7 +139,7 @@ def test_current_year_report(token):
         january_interest = january_row.get("interest_amount")
         january_days = january_row.get("active_days")
         
-        print(f"\nJanuary 2026 Data:")
+        print(f"\nJanuary 2026 Data (Regression Check):")
         print(f"  Month: {january_row.get('month')}")
         print(f"  Active Days: {january_days}")
         print(f"  Interest Amount: {january_interest}")
@@ -136,7 +160,7 @@ def test_current_year_report(token):
             february_interest = february_row.get("interest_amount")
             february_days = february_row.get("active_days")
             
-            print(f"\nFebruary 2026 Data:")
+            print(f"\nFebruary 2026 Data (Regression Check):")
             print(f"  Month: {february_row.get('month')}")
             print(f"  Active Days: {february_days}")
             print(f"  Interest Amount: {february_interest}")
@@ -259,6 +283,7 @@ def main():
     """Main test execution"""
     print("\n" + "="*80)
     print("  DEPOSIT INTEREST CALCULATION BUG FIX VERIFICATION")
+    print("  Testing: Total interest = 200,000.00 (no rounding accumulation)")
     print("  Testing: No daily truncation, full-precision calculation")
     print("="*80)
     
@@ -271,9 +296,9 @@ def main():
     # Run tests
     test_results = []
     
-    # Test 1: Current year report (January interest = 16,986.30)
+    # Test 1: Current year report (Total interest = 200,000.00, January = 16,986.30)
     result1 = test_current_year_report(token)
-    test_results.append(("Current Year Report (January = 16,986.30)", result1))
+    test_results.append(("Current Year Report (Total = 200,000.00, January = 16,986.30)", result1))
     
     # Test 2: Accrued interest report (daily interest = 547.95)
     result2 = test_accrued_interest_report(token)

@@ -153,11 +153,33 @@ backend:
           The fix successfully removed daily truncation. Daily interest is now computed at FULL precision
           and only the FINAL monthly/period/accrued amounts are rounded to 2 decimals - exactly like the bank does.
           This matches the real bank statement perfectly!
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ FOLLOW-UP BUG FIX VERIFIED - Total interest rounding accumulation fixed!
+          
+          BUG: total_interest (إجمالي السنة) was showing 200000.01 instead of 200000.00 because the code
+          summed per-month ROUNDED interest values, accumulating a 0.01 rounding error.
+          
+          FIX: Changed calculate_interest_rows to accumulate RAW (unrounded) monthly interest and round
+          only once at the end.
+          
+          Test Results (all assertions passed):
+          1. ✅ GET /api/banks/industrial-development/reports/current-year returns HTTP 200
+          2. ✅ total_interest = 200000.0 (CRITICAL - was 200000.01 before fix)
+          3. ✅ January (month_number 1) interest_amount = 16986.3 (no regression)
+          4. ✅ February (month_number 2) interest_amount = 15342.47 (no regression)
+          5. ✅ GET /api/banks/industrial-development/accrued-interest?year=2026 returns HTTP 200
+          6. ✅ daily_interest_amount = 547.95 (regression check passed)
+          7. ✅ accrued_interest_amount = 4931.51 for 9 days (regression check passed)
+          
+          The fix successfully prevents rounding accumulation by summing unrounded values and rounding
+          only the final total. Individual month rows remain correctly rounded for display.
 
 metadata:
   created_by: "main_agent"
-  version: "1.2"
-  test_sequence: 2
+  version: "1.3"
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -193,5 +215,35 @@ agent_communication:
       The fix successfully removed the math.floor truncation that was causing the 0.16 EGP discrepancy.
       Daily interest is now computed at full precision (200,000 / 365 = 547.9452055) and only the
       FINAL monthly/period/accrued amounts are rounded to 2 decimals - exactly like the bank does.
+      
+      Ready for production deployment.
+    -agent: "main"
+    -message: |
+      FOLLOW-UP FIX: total_interest (إجمالي السنة) was showing 200000.01 because it summed the
+      per-month ROUNDED values (accumulated rounding). Changed calculate_interest_rows to accumulate
+      the RAW (unrounded) monthly interest and round only once at the end. Now
+      GET /api/banks/industrial-development/reports/current-year returns total_interest == 200000.00
+      while individual month rows stay rounded (Jan 16986.30). Please verify total_interest == 200000.0
+      and January row still == 16986.30, and endpoint returns 200.
+    -agent: "testing"
+    -message: |
+      ✅ FOLLOW-UP BUG FIX VERIFIED - ALL TESTS PASSED!
+      
+      The total_interest rounding accumulation bug has been successfully fixed!
+      
+      Test Results:
+      - ✅ total_interest = 200000.0 (CRITICAL FIX - was 200000.01 before)
+      - ✅ January interest = 16986.3 (no regression)
+      - ✅ February interest = 15342.47 (no regression)
+      - ✅ Daily interest display = 547.95 (regression check passed)
+      - ✅ Accrued interest = 4931.51 for 9 days (regression check passed)
+      - ✅ All endpoints return HTTP 200
+      
+      The fix successfully prevents rounding accumulation by summing RAW (unrounded) monthly interest
+      values and rounding only the final total. Individual month rows remain correctly rounded for display.
+      
+      Both bug fixes are now complete and verified:
+      1. ✅ Daily truncation removed (January = 16,986.30 matches bank statement)
+      2. ✅ Total interest rounding accumulation fixed (total = 200,000.00, not 200,000.01)
       
       Ready for production deployment.
