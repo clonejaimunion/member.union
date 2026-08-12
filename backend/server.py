@@ -5596,10 +5596,11 @@ async def ensure_revenue_unique(payload: RevenueCreate, revenue_id: Optional[str
             raise HTTPException(status_code=400, detail="رقم الشيك موجود بالفعل ولا يمكن تكراره")
     elif payload.collection_method == "payment_order":
         payment_order_number = normalize_digit_text(payload.payment_order_number)
-        if not payment_order_number or not payment_order_number.isdigit():
-            raise HTTPException(status_code=400, detail="يجب إدخال رقم أمر الدفع عند اختيار أمر دفع")
-        if await db.revenues.find_one(with_organization({"payment_order_number": payment_order_number, **base_exclusion}), {"_id": 0, "id": 1}):
-            raise HTTPException(status_code=400, detail="رقم أمر الدفع موجود بالفعل ولا يمكن تكراره")
+        if payment_order_number:
+            if not payment_order_number.isdigit():
+                raise HTTPException(status_code=400, detail="رقم الدفع الإلكتروني يجب أن يكون أرقام فقط")
+            if await db.revenues.find_one(with_organization({"payment_order_number": payment_order_number, **base_exclusion}), {"_id": 0, "id": 1}):
+                raise HTTPException(status_code=400, detail="رقم الدفع الإلكتروني موجود بالفعل ولا يمكن تكراره")
 
 
 async def revenue_document_from_payload(payload: RevenueCreate, revenue_id: Optional[str] = None) -> dict:

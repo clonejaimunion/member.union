@@ -24,6 +24,7 @@ const defaultForm = () => ({
   check_number: "",
   check_clearing_type: "internal",
   payment_order_number: "",
+  electronic_payment_type: "number",
   bank_id: "industrial-development",
   dated: today(),
   value: "",
@@ -35,7 +36,7 @@ const defaultForm = () => ({
 const methodLabels = {
   cash: "نقداً",
   check: "شيك",
-  payment_order: "أمر دفع",
+  payment_order: "دفع الكتروني",
   current_account_interest: "فوائد الحساب الجاري",
   deposit_maturity: "استحقاق وديعة",
 };
@@ -111,7 +112,7 @@ export default function RevenuesPage() {
     receipt_number: sanitizeDigitsInput(form.receipt_number),
     check_number: form.collection_method === "check" ? sanitizeDigitsInput(form.check_number) : null,
     check_clearing_type: form.collection_method === "check" ? form.check_clearing_type : null,
-    payment_order_number: form.collection_method === "payment_order" ? sanitizeDigitsInput(form.payment_order_number) : null,
+    payment_order_number: form.collection_method === "payment_order" && form.electronic_payment_type === "number" ? sanitizeDigitsInput(form.payment_order_number) : null,
     supplier_name: form.collection_method === "cash" ? form.supplier_name.trim() : null,
   });
 
@@ -142,6 +143,7 @@ export default function RevenuesPage() {
       check_number: item.check_number || "",
       check_clearing_type: item.check_clearing_type || "internal",
       payment_order_number: item.payment_order_number || "",
+      electronic_payment_type: item.collection_method === "payment_order" && !item.payment_order_number ? "bank_statement" : "number",
       bank_id: item.bank_id || "industrial-development",
       dated: item.dated || today(),
       value: item.value || "",
@@ -194,7 +196,7 @@ export default function RevenuesPage() {
     if (item.collection_method === "check") return `${item.check_number || "—"} — ${checkClearingLabels[item.check_clearing_type || "internal"]}`;
     if (item.collection_method === "current_account_interest") return "فوائد حساب جاري محصلة فوراً";
     if (item.collection_method === "deposit_maturity") return "فائدة وديعة مستحقة محصلة فوراً";
-    return item.payment_order_number || "—";
+    return item.payment_order_number || "طبقاً لكشف الحساب البنكي";
   };
 
   const renderRevenueStatusActions = (item) => {
@@ -216,7 +218,7 @@ export default function RevenuesPage() {
         ["رقم الإذن", item.receipt_number],
         ["المبلغ", formatCurrency(item.amount)],
         ["طريقة التحصيل", methodLabels[item.collection_method]],
-        [item.collection_method === "cash" ? "اسم المورد" : item.collection_method === "check" ? "رقم الشيك" : "رقم أمر الدفع", detailValue(item)],
+        [item.collection_method === "cash" ? "اسم المورد" : item.collection_method === "check" ? "رقم الشيك" : "الدفع الإلكتروني", detailValue(item)],
         ["البنك", item.bank_name],
         ["بتاريخ", item.dated],
         ["قيمة", item.value],
@@ -264,11 +266,12 @@ export default function RevenuesPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="revenue-form-grid">
               <div className="space-y-2" data-testid="revenue-receipt-wrapper"><Label data-testid="revenue-receipt-label">رقم الإذن</Label><Input required inputMode="numeric" value={form.receipt_number} onChange={(event) => updateForm("receipt_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-receipt-input" /></div>
               <div className="space-y-2" data-testid="revenue-amount-wrapper"><Label data-testid="revenue-amount-label">المبلغ بالجنيه المصري</Label><Input required inputMode="decimal" value={form.amount} onChange={(event) => updateForm("amount", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-amount-input" /></div>
-              <div className="space-y-2" data-testid="revenue-method-wrapper"><Label data-testid="revenue-method-label">طريقة التحصيل</Label><select value={form.collection_method} onChange={(event) => updateForm("collection_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-method-select"><option value="cash" data-testid="revenue-method-cash-option">نقداً</option><option value="check" data-testid="revenue-method-check-option">شيك</option><option value="payment_order" data-testid="revenue-method-payment-order-option">أمر دفع</option><option value="current_account_interest" data-testid="revenue-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenue-method-deposit-maturity-option">استحقاق وديعة</option></select></div>
+              <div className="space-y-2" data-testid="revenue-method-wrapper"><Label data-testid="revenue-method-label">طريقة التحصيل</Label><select value={form.collection_method} onChange={(event) => updateForm("collection_method", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-method-select"><option value="cash" data-testid="revenue-method-cash-option">نقداً</option><option value="check" data-testid="revenue-method-check-option">شيك</option><option value="payment_order" data-testid="revenue-method-payment-order-option">دفع الكتروني</option><option value="current_account_interest" data-testid="revenue-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenue-method-deposit-maturity-option">استحقاق وديعة</option></select></div>
               {form.collection_method === "cash" && <div className="space-y-2" data-testid="revenue-supplier-wrapper"><Label data-testid="revenue-supplier-label">اسم الشخص الذي قام بالتوريد</Label><Input required value={form.supplier_name} onChange={(event) => updateForm("supplier_name", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-supplier-input" /></div>}
               {form.collection_method === "check" && <div className="space-y-2" data-testid="revenue-check-wrapper"><Label data-testid="revenue-check-label">رقم الشيك</Label><Input required inputMode="numeric" value={form.check_number} onChange={(event) => updateForm("check_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-check-input" /></div>}
               {form.collection_method === "check" && <div className="space-y-2" data-testid="revenue-check-clearing-wrapper"><Label data-testid="revenue-check-clearing-label">نوع الشيك</Label><select value={form.check_clearing_type} onChange={(event) => updateForm("check_clearing_type", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-check-clearing-select"><option value="internal" data-testid="revenue-check-clearing-internal-option">داخلي</option><option value="external" data-testid="revenue-check-clearing-external-option">خارجي</option></select></div>}
-              {form.collection_method === "payment_order" && <div className="space-y-2" data-testid="revenue-payment-order-wrapper"><Label data-testid="revenue-payment-order-label">رقم أمر الدفع</Label><Input required inputMode="numeric" value={form.payment_order_number} onChange={(event) => updateForm("payment_order_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-payment-order-input" /></div>}
+              {form.collection_method === "payment_order" && <div className="space-y-2" data-testid="revenue-epay-type-wrapper"><Label data-testid="revenue-epay-type-label">إثبات الدفع الإلكتروني</Label><select value={form.electronic_payment_type} onChange={(event) => updateForm("electronic_payment_type", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-epay-type-select"><option value="number" data-testid="revenue-epay-type-number-option">رقم</option><option value="bank_statement" data-testid="revenue-epay-type-bank-statement-option">طبقاً لكشف الحساب البنكي</option></select></div>}
+              {form.collection_method === "payment_order" && form.electronic_payment_type === "number" && <div className="space-y-2" data-testid="revenue-payment-order-wrapper"><Label data-testid="revenue-payment-order-label">رقم</Label><Input required inputMode="numeric" value={form.payment_order_number} onChange={(event) => updateForm("payment_order_number", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-payment-order-input" /></div>}
               <div className="space-y-2" data-testid="revenue-bank-wrapper"><Label data-testid="revenue-bank-label">اسم البنك</Label><select value={form.bank_id} onChange={(event) => updateForm("bank_id", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="revenue-bank-select">{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`revenue-bank-option-${bank.id}`}>{bank.name}</option>)}</select></div>
               <div className="space-y-2" data-testid="revenue-dated-wrapper"><Label data-testid="revenue-dated-label">بتاريخ</Label><Input required type="date" value={form.dated} onChange={(event) => updateForm("dated", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-dated-input" /></div>
               <div className="space-y-2" data-testid="revenue-issued-wrapper"><Label data-testid="revenue-issued-label">تحريراً في</Label><Input required type="date" value={form.issued_at} onChange={(event) => updateForm("issued_at", event.target.value)} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenue-issued-input" /></div>
@@ -296,7 +299,7 @@ export default function RevenuesPage() {
           </div>
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="revenues-filters-grid">
             <select value={filters.bank_id} onChange={(event) => setFilters((current) => ({ ...current, bank_id: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-bank-select"><option value="all" data-testid="revenues-filter-bank-all-option">كل البنوك</option>{banks.map((bank) => <option key={bank.id} value={bank.id} data-testid={`revenues-filter-bank-${bank.id}`}>{bank.name}</option>)}</select>
-            <select value={filters.collection_method} onChange={(event) => setFilters((current) => ({ ...current, collection_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-method-select"><option value="all" data-testid="revenues-filter-method-all-option">كل طرق التحصيل</option><option value="cash" data-testid="revenues-filter-method-cash-option">نقداً</option><option value="check" data-testid="revenues-filter-method-check-option">شيك</option><option value="payment_order" data-testid="revenues-filter-method-payment-option">أمر دفع</option><option value="current_account_interest" data-testid="revenues-filter-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenues-filter-method-deposit-maturity-option">استحقاق وديعة</option></select>
+            <select value={filters.collection_method} onChange={(event) => setFilters((current) => ({ ...current, collection_method: event.target.value }))} className="h-12 rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold" data-testid="revenues-filter-method-select"><option value="all" data-testid="revenues-filter-method-all-option">كل طرق التحصيل</option><option value="cash" data-testid="revenues-filter-method-cash-option">نقداً</option><option value="check" data-testid="revenues-filter-method-check-option">شيك</option><option value="payment_order" data-testid="revenues-filter-method-payment-option">دفع الكتروني</option><option value="current_account_interest" data-testid="revenues-filter-method-current-account-interest-option">فوائد الحساب الجاري</option><option value="deposit_maturity" data-testid="revenues-filter-method-deposit-maturity-option">استحقاق وديعة</option></select>
             <Input type="date" value={filters.from_date} onChange={(event) => setFilters((current) => ({ ...current, from_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenues-filter-from-date-input" />
             <Input type="date" value={filters.to_date} onChange={(event) => setFilters((current) => ({ ...current, to_date: event.target.value }))} className="h-12 rounded-lg bg-slate-50 text-right" data-testid="revenues-filter-to-date-input" />
           </div>

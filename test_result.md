@@ -220,13 +220,13 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.4"
-  test_sequence: 4
+  version: "1.5"
+  test_sequence: 5
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Deposit interest calculation matches bank statement (no daily truncation)"
+    - "Revenues API - Electronic payment (payment_order) with optional payment_order_number"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -327,3 +327,124 @@ agent_communication:
       
       ✅ CODE IS PRODUCTION-READY FOR WINDOWS UPDATE PACKAGING
       This is the same server.py that ships in the update patch - verified and approved.
+
+backend:
+  - task: "Revenues API - Electronic payment (payment_order) with optional payment_order_number"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          NEW FEATURE: collection_method value "payment_order" is UNCHANGED (only UI label renamed to دفع الكتروني).
+          Backend change: payment_order_number is now OPTIONAL (relaxed validation only; accounting/journal logic UNCHANGED).
+          Changes made in server.py lines 5597-5603: payment_order_number validation now allows null values.
+          When null, no validation error is raised (bank-statement mode).
+          When provided, must be numeric and unique (duplicate rejection still enforced).
+          Journal entry logic unchanged: credits "إيرادات أوامر الدفع", debits "شيكات تحت التحصيل" or "البنك".
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ ALL TESTS PASSED - Electronic payment feature verified successfully!
+          
+          Tested against organization: social-solidarity (admin/Admin@123)
+          Backend URL: https://invoke-app.preview.emergentagent.com/api
+          
+          Test Results (12/12 passed, 100% success rate):
+          
+          1. ✅ Authentication: HTTP 200, Bearer token received
+          
+          2. ✅ Payment order with NULL payment_order_number (bank-statement mode):
+             - POST /api/revenues with payment_order_number=null
+             - HTTP 200, revenue created successfully
+             - Response: payment_order_number = null (verified)
+             - Revenue ID: 158f0cd8-f80f-41b8-a025-3514e15b2203
+          
+          3. ✅ Payment order with numeric payment_order_number:
+             - POST /api/revenues with payment_order_number="778001"
+             - HTTP 200, revenue created successfully
+             - Response: payment_order_number = "778001" (verified)
+             - Revenue ID: 623c7d2b-2213-4758-89da-4f8ab852ecc9
+          
+          4. ✅ Duplicate payment_order_number rejection:
+             - Attempted to create revenue with duplicate payment_order_number="778001"
+             - HTTP 400 (expected): "رقم الدفع الإلكتروني موجود بالفعل ولا يمكن تكراره"
+             - Duplicate validation working correctly
+          
+          5. ✅ Journal entries verification (accounting logic unchanged):
+             a) Revenue with null payment_order_number:
+                - Credit account: "إيرادات أوامر الدفع" ✅
+                - Debit account: "شيكات تحت التحصيل" (under_collection status) ✅
+             b) Revenue with numeric payment_order_number:
+                - Credit account: "إيرادات أوامر الدفع" ✅
+                - Debit account: "شيكات تحت التحصيل" (under_collection status) ✅
+          
+          6. ✅ Regression tests (all collection methods working):
+             - Cash revenue (with supplier_name): HTTP 200 ✅
+             - Check revenue (with check_number + check_clearing_type): HTTP 200 ✅
+             - Current account interest: HTTP 200 ✅
+             - Deposit maturity: HTTP 200 ✅
+          
+          7. ✅ Database cleanup: All 6 test revenues deleted successfully
+             - Deleted revenues: 158f0cd8-f80f-41b8-a025-3514e15b2203, 623c7d2b-2213-4758-89da-4f8ab852ecc9,
+               cb2da660-b9a3-404e-8ba1-f9419fe3fe5c, 9ac29c57-cf8b-4144-aa0b-ad0a124e25e4,
+               f970c8d3-8947-4867-a844-8bb1124adf06, 1b50894f-afaa-4f5e-8e72-1a4b9c78440e
+             - Journal entries automatically deleted via cascade
+          
+          CRITICAL VALIDATION:
+          - payment_order_number is now OPTIONAL (can be null for bank-statement mode) ✅
+          - Numeric payment_order_number validation unchanged (must be digits only) ✅
+          - Duplicate payment_order_number rejection working (HTTP 400) ✅
+          - Accounting/journal logic UNCHANGED (credits "إيرادات أوامر الدفع", debits "شيكات تحت التحصيل") ✅
+          - All regression tests passed (no breaking changes to other collection methods) ✅
+          - Database cleanup successful (no test data left behind) ✅
+          
+          ✅ FEATURE READY FOR PRODUCTION - All requirements verified and working correctly.
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      NEW FEATURE (revenues - electronic payment). collection_method value "payment_order" is UNCHANGED
+      (only UI label renamed to دفع الكتروني). Backend change: payment_order_number is now OPTIONAL
+      (relaxed validation only; accounting/journal logic UNCHANGED). Please verify against org social-solidarity
+      (login admin/Admin@123):
+      1. POST /api/revenues with collection_method="payment_order" and payment_order_number=null (bank-statement mode)
+         -> HTTP 200, revenue created, payment_order_number is null.
+      2. POST /api/revenues with collection_method="payment_order" and a numeric payment_order_number -> HTTP 200.
+      3. Duplicate numeric payment_order_number should still be rejected (400).
+      4. Confirm the auto journal entry for payment_order still credits "إيرادات أوامر الدفع" and debits
+         "شيكات تحت التحصيل" (or البنك if collected) - accounting must be unchanged.
+      5. Regression: cash/check/current_account_interest/deposit_maturity revenue creation still works.
+      IMPORTANT: clean up any test revenues you create (delete them + their journal entries) so DB stays clean.
+    -agent: "testing"
+    -message: |
+      ✅ TESTING COMPLETE - ALL TESTS PASSED (12/12, 100% SUCCESS RATE)!
+      
+      Electronic payment (payment_order) feature verified successfully. All requirements met:
+      
+      Key Findings:
+      1. ✅ payment_order_number is now OPTIONAL - null values accepted (bank-statement mode)
+      2. ✅ Numeric payment_order_number works correctly (must be digits only)
+      3. ✅ Duplicate payment_order_number rejected with HTTP 400 (validation unchanged)
+      4. ✅ Journal entries UNCHANGED:
+         - Credit account: "إيرادات أوامر الدفع" (payment_order_revenue)
+         - Debit account: "شيكات تحت التحصيل" (under_collection) or "البنك" (collected)
+      5. ✅ All regression tests passed (cash, check, current_account_interest, deposit_maturity)
+      6. ✅ Database cleanup successful (6 test revenues + journal entries deleted)
+      
+      Exact HTTP statuses observed:
+      - POST /api/revenues with null payment_order_number: HTTP 200 ✅
+      - POST /api/revenues with numeric payment_order_number: HTTP 200 ✅
+      - POST /api/revenues with duplicate payment_order_number: HTTP 400 ✅
+      - GET /api/journal-entries: HTTP 200 ✅
+      - DELETE /api/revenues/{id}: HTTP 200 ✅
+      
+      Journal entry account names verified:
+      - Credit: "إيرادات أوامر الدفع" (exact match) ✅
+      - Debit: "شيكات تحت التحصيل" (for under_collection status) ✅
+      
+      No regressions detected. Accounting logic unchanged. Feature ready for production.
