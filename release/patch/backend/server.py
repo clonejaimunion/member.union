@@ -3484,9 +3484,9 @@ async def create_reverse_journal_entry(original: dict, reason: str = "إلغاء
 
 
 async def reverse_journal_for_source(source_type: str, source_id: str, reason: str = "إلغاء/حذف عملية مرحلة", current_user: Optional[dict] = None):
-    documents = await db.journal_entries.find(with_organization({"source_type": source_type, "source_id": source_id, "is_reversal": {"$ne": True}, "reversal_entry_id": {"$exists": False}}), {"_id": 0}).to_list(1000)
-    for document in documents:
-        await create_reverse_journal_entry(document, reason, current_user)
+    # الحذف النهائي (Option C): يُزال القيد الأصلي وأي قيد عكسي سابق لنفس المصدر نهائياً،
+    # بدلاً من إنشاء قيد عكسي، لضمان اختفاء العملية المحذوفة من جميع التقارير بشكل صحيح.
+    await db.journal_entries.delete_many(with_organization({"source_type": source_type, "source_id": source_id}))
 
 
 async def delete_journal_for_source(source_type: str, source_id: str):

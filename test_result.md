@@ -297,13 +297,13 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.6"
-  test_sequence: 6
+  version: "1.7"
+  test_sequence: 7
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Frontend UI testing complete - all tests passed"
+    - "All backend tests complete - bug fix verified"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -406,6 +406,48 @@ agent_communication:
       This is the same server.py that ships in the update patch - verified and approved.
 
 backend:
+  - task: "Hard-delete journal entries on transaction deletion (bug fix)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: |
+          BUG FIX: Deleting a posted transaction used to leave the original journal entry counted in reports
+          (reversal excluded but original kept), so deleted items (e.g. شيكات تحت التحصيل) kept showing in
+          the balance sheet / closing accounts. Fixed delete_journal_for_source / reverse_journal_for_source
+          to HARD DELETE all journal entries for the source instead of creating a reversal (Option C).
+          Changes in server.py lines 3486-3493: reverse_journal_for_source now calls delete_many to remove
+          all journal entries for the source_type and source_id, and delete_journal_for_source calls
+          reverse_journal_for_source. This ensures deleted transactions completely disappear from all reports.
+        -working: true
+        -agent: "testing"
+        -comment: |
+          ✅ ALL TESTS PASSED (25/25, 100% SUCCESS RATE) - BUG FIX VERIFIED!
+          
+          CORE BUG FIX VERIFICATION:
+          1. ✅ Created check revenue (receipt_number=92001, amount=3000.0, check_number=777021) - HTTP 200
+          2. ✅ Verified "شيكات تحت التحصيل" line appeared in balance sheet with amount 3000.0
+          3. ✅ Deleted the revenue - HTTP 200
+          4. ✅ CRITICAL: "شيكات تحت التحصيل" line COMPLETELY DISAPPEARED from financial statements
+             - BEFORE deletion: 3000.0
+             - AFTER deletion: 0 (line disappeared completely)
+          5. ✅ CRITICAL: NO journal entries remain for the deleted revenue (hard delete confirmed)
+          
+          The bug is FIXED! Journal entries are now HARD-DELETED instead of creating reversals.
+          
+          REGRESSION TESTS - ALL PASSED:
+          - ✅ Expense with unpaid check (شيكات صادرة): Created, verified in liabilities (2000.0), deleted, disappeared
+          - ✅ Trial balance still balances: Debit=200000.0, Credit=200000.0, is_balanced=true
+          - ✅ Normal accounting logic unchanged: Cash revenue and expense journal entries created correctly and balanced
+          - ✅ Final cleanup: All test records deleted, database is clean
+          
+          All 5 test requirements verified successfully. Bug fix is production-ready.
+
   - task: "Revenues API - Electronic payment (payment_order) with optional payment_order_number"
     implemented: true
     working: true
@@ -591,3 +633,82 @@ agent_communication:
       - No breaking changes to existing functionality ✅
       
       ✅ FRONTEND FEATURE READY FOR PRODUCTION - All UI requirements verified and working correctly.
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      BUG FIX (Option C - hard delete). Deleting a posted transaction used to leave the original journal
+      entry counted in reports (reversal excluded but original kept), so deleted items (e.g. شيكات تحت التحصيل)
+      kept showing in the balance sheet / closing accounts. Fixed delete_journal_for_source /
+      reverse_journal_for_source to HARD DELETE all journal entries for the source (org: social-solidarity,
+      login admin/Admin@123). Please verify:
+      1. Create a check revenue (collection_method=check, numeric check_number, check_clearing_type=internal,
+         bank_id=industrial-development). GET /api/financial-statements?from_date=2026-01-01&to_date=2026-12-31
+         should show asset line "شيكات تحت التحصيل" with the amount.
+      2. DELETE /api/revenues/{id} -> then GET financial-statements again: the "شيكات تحت التحصيل" line MUST be
+         GONE (amount not lingering). And no journal entries should remain for that source_id.
+      3. Regression: create + delete an EXPENSE (check/unpaid) and confirm its journal disappears from reports too.
+      4. Regression: trial balance and financial statements still balance for the remaining data (1 deposit only).
+      5. Confirm normal (non-deleted) revenue/expense still post journals correctly (accounting logic unchanged).
+      IMPORTANT: delete every test record you create (and confirm 0 leftover) so DB stays clean.
+    -agent: "testing"
+    -message: |
+      ✅ ALL TESTS PASSED (25/25, 100% SUCCESS RATE) - BUG FIX VERIFIED!
+      
+      Comprehensive testing completed for the hard-delete journal entry bug fix.
+      
+      CORE BUG FIX VERIFICATION:
+      ✅ Created check revenue (receipt_number=92001, amount=3000.0, check_number=777021)
+      ✅ Verified "شيكات تحت التحصيل" line appeared in balance sheet with amount 3000.0
+      ✅ Deleted the revenue (HTTP 200)
+      ✅ CRITICAL: "شيكات تحت التحصيل" line COMPLETELY DISAPPEARED from financial statements
+      ✅ CRITICAL: NO journal entries remain for the deleted revenue (hard delete confirmed)
+      
+      BEFORE deletion: شيكات تحت التحصيل = 3000.0
+      AFTER deletion: شيكات تحت التحصيل = 0 (line disappeared completely)
+      
+      The bug is FIXED! Journal entries are now HARD-DELETED instead of creating reversals.
+      
+      REGRESSION TESTS - ALL PASSED:
+      
+      1. ✅ Expense with Unpaid Check (شيكات صادرة):
+         - Created expense (expense_number=88001, amount=2000.0, check_number=555001, status=not_presented)
+         - Verified "شيكات صادرة" line appeared in liabilities with amount 2000.0
+         - Deleted expense (HTTP 200)
+         - "شيكات صادرة" line completely disappeared from financial statements
+         - No journal entries remain for deleted expense
+      
+      2. ✅ Trial Balance Still Balances:
+         - Total Debit: 200000.0
+         - Total Credit: 200000.0
+         - is_balanced: true
+         - Trial balance remains balanced after all deletions
+      
+      3. ✅ Normal Accounting Logic Unchanged:
+         - Created cash revenue (receipt_number=93001, amount=1500.0) - HTTP 200
+         - Journal entry created correctly (Debit=1500.0, Credit=1500.0, balanced)
+         - Created cash expense (expense_number=89001, amount=800.0) - HTTP 200
+         - Journal entry created correctly (Debit=800.0, Credit=800.0, balanced)
+         - Deleted both for cleanup - HTTP 200
+         - Normal accounting logic working correctly
+      
+      4. ✅ Final Cleanup Verification:
+         - All test records deleted successfully
+         - No leftover revenues or expenses
+         - Database is clean (only pre-existing deposit remains)
+      
+      TEST EXECUTION DETAILS:
+      - Organization: social-solidarity
+      - Bank: industrial-development
+      - Auth: admin/Admin@123 (HTTP 200)
+      - Date range: 2026-01-01 to 2026-12-31
+      - All numeric fields validated (receipt_number, check_number, expense_number)
+      
+      EXACT VALUES OBSERVED:
+      - Check revenue amount: 3000.0 (appeared and disappeared correctly)
+      - Expense amount: 2000.0 (appeared and disappeared correctly)
+      - Trial balance: Debit=200000.0, Credit=200000.0 (balanced)
+      - Cash revenue: 1500.0 (journal entry balanced)
+      - Cash expense: 800.0 (journal entry balanced)
+      
+      ✅ BUG FIX COMPLETE AND VERIFIED - Ready for production deployment!
