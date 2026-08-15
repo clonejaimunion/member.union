@@ -9023,13 +9023,11 @@ async def reverse_manual_journal_entry(entry_id: str, current_user: dict = Depen
     if not existing:
         raise HTTPException(status_code=404, detail="القيد غير موجود")
     if existing.get("is_reversal"):
-        raise HTTPException(status_code=400, detail="لا يمكن عكس قيد عكسي")
-    if existing.get("reversal_entry_id"):
-        reversal = await db.journal_entries.find_one(with_organization({"id": existing.get("reversal_entry_id")}), {"_id": 0})
-        if reversal:
-            return JournalEntryResponse(**hydrate_journal_entry(reversal))
-    reversal = await create_reverse_journal_entry(existing, "إلغاء القيد من المستخدم", current_user)
-    return JournalEntryResponse(**hydrate_journal_entry(reversal))
+        raise HTTPException(status_code=400, detail="لا يمكن حذف قيد عكسي")
+    # إلغاء القيود العكسية بالكامل: حذف نهائي للقيد بدل إنشاء قيد عكسي،
+    # ليظهر أثر الإلغاء فوراً وبشكل صحيح في جميع التقارير.
+    await db.journal_entries.delete_many(with_organization({"id": entry_id}))
+    return JournalEntryResponse(**hydrate_journal_entry(existing))
 
 
 @api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])
