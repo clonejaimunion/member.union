@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 91 - Verified NEW feature: YEAR is now shown together with the check date on ALL bank reconciliation checks (auto-synced outstanding + collection + prior-year) in the editor, saved payload, preview print, edit round-trip. Backend pytest (3/3) + Playwright UI (7/7 key assertions) PASS. Month filter regression re-verified: يناير 2026 shows 1 outstanding row; فبراير 2026 shows 2 (Jan+Feb). Excel export button present. All test data cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Bank reconciliation print/preview", "issues": ["outstanding-print table header still reads 'التاريخ يوم/شهر' but the cell now renders day/month/YEAR (e.g. 20/01/2026). Consider updating the header to 'التاريخ يوم/شهر/سنة' or 'التاريخ'. Not blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration91_reconciliation_year_all_lists.py",
+    "/app/test_reports/pytest/iteration91.xml"
+  ],
+  "action_items": [
+    "(Optional) Update outstanding/collection print table header text to reflect the new day/month/year format (currently says 'التاريخ يوم/شهر')."
+  ],
+  "critical_code_review_comments": [
+    "BankReconciliationPage.jsx (871 lines) is growing; consider extracting ChecksTable/CheckEditor and date helpers into shared utils.",
+    "formatCheckDateDisplay depends on row.year OR extractYearFromCheckDate(check_date); works well because backend returns ISO dates. For memos saved by an older client that omitted year, extractYearFromCheckDate() correctly recovers the year from the stored datetime.",
+    "ChecksTable header label ('التاريخ يوم/شهر') is now inconsistent with the day/month/year value shown - minor UX polish."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration91_reconciliation_year_all_lists.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin / Admin@123 / general-union",
+  "seed_data_creation": "Created 2 expense-check records (Jan/Feb 2026), 1 revenue-check record (Jan 2026), 1 reconciliation memo. All cleaned up via DELETE at the end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Key evidence from this run: (a) editor input outstanding-check-0-date-input shows '20/01/2026' for a Jan-2026 expense-check; collection input shows '22/01/2026'. (b) Backend memo persists outstanding_checks[0].year=2026 and prior_year_outstanding_checks[0].year=2024; PUT preserves year. (c) Preview outstanding-print-row-0-date renders Arabic-Indic '٢٠/٠١/٢٠٢٦'. (d) Note: prior-year rows are appended to the outstanding-print table (see line 831 BankReconciliationPage.jsx) - so prior-year row appears at index 1, NOT under a separate 'prior-year-outstanding-print-row-*' testId. (e) Month filter works: يناير→1 row, فبراير→2 rows. (f) Delete modal + Excel export already verified in iteration_90 and remain intact.",
+  "rca of the issue": "Feature works end-to-end. Frontend rowsFromExpenseChecks/rowsFromRevenueChecks now stamp year = yearFromSourceDate(issued_at/dated) on each auto-synced row; formatCheckDateDisplay concatenates dd/mm with /year. cleanChecks includes year in POST/PUT payloads; ReconciliationCheck.year Optional[int] round-trips. fillFormFromReconciliation restores year on edit, so re-saving does not overwrite the historical year."
+}

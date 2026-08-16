@@ -570,3 +570,10 @@
 - نافذة تأكيد الحذف "هل أنت متأكد؟": استبدال window.confirm بنافذة modal حقيقية (delete-reconciliation-modal) مع أزرار تأكيد/تراجع؛ التراجع يُبقي المذكرة والتأكيد يحذفها.
 - تصدير Excel: دالة exportReconciliationExcel تبني ملف .xls من بيانات المذكرة (رأس + جدولي الشيكات مع الإجماليات + الحالة) وزر على كل مذكرة محفوظة (export-excel-reconciliation-button-{id}) وفي شريط المعاينة (reconciliation-preview-excel-button).
 - التحقق: Testing Agent iteration_90 — باك إند 6/6 وفرونت إند كل التدفقات 100%، وميزان المراجعة متوازن بعد التنظيف.
+
+
+## إظهار السنة مع تاريخ كل الشيكات + إعادة بناء حزمة التحديث بتاريخ 2026-08-16
+- السبب وراء "المشكلة زي ما هي على جهاز المستخدم": حزمة التحديث BankDepositSystemUpdate.zip + مجلد frontend/build كانت قديمة (متبنية قبل الإصلاح)، فبيئة الـPreview كانت تشغّل الكود المصدري (hot-reload) بينما جهاز المستخدم يشغّل نسخة مبنية قديمة. الحل: yarn build + إعادة توليد الحزمة.
+- ميزة جديدة: السنة تظهر الآن مع تاريخ كل الشيكات (شيكات لم تقدم للصرف + تحت التحصيل + السنوات السابقة) بصيغة يوم/شهر/سنة. rowsFromExpenseChecks/rowsFromRevenueChecks تختم year=yearFromSourceDate(issued_at)؛ formatCheckDateDisplay يعرض dd/mm/yyyy عبر row.year أو extractYearFromCheckDate؛ cleanChecks يخزّن year في POST/PUT؛ fillFormFromReconciliation يعيد السنة عند التعديل فلا تُستبدل. ReconciliationCheck.year يعمل round-trip لكل القوائم الثلاث. تحديث عناوين جدول الطباعة/المعاينة إلى "التاريخ يوم/شهر/سنة".
+- الفلترة تعتمد على السنة الفعلية للشيك (issued_at كامل)، فشيك فبراير 2026 لا يظهر في مذكرة يناير 2026، بينما شيك فبراير 2025 المعلّق يظهر (ترحيل).
+- التحقق: Testing Agent iteration_91 — باك إند 3/3 وفرونت إند 7/7 (السنة تظهر في المحرر والمعاينة، تُحفظ وتدور round-trip، فلترة الشهر سليمة). حزمة التحديث أُعيد بناؤها (main.edce874d.js، 3.14MB) وتحتوي كل التعديلات + server.py بحقل year.

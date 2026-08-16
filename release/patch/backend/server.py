@@ -1299,6 +1299,7 @@ class ReconciliationCheck(BaseModel):
     check_number: str = Field(..., min_length=1)
     amount: float = Field(..., ge=0)
     check_date: datetime
+    year: Optional[int] = None
 
 
 class BankReconciliationCreate(BaseModel):

@@ -164,6 +164,13 @@ export default function BankReconciliationPage() {
     return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   }, []);
 
+  const yearFromSourceDate = useCallback((value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return String(date.getFullYear());
+  }, []);
+
   const periodEnd = useMemo(() => resolvePeriodEndDate(periodLabel), [periodLabel]);
 
   // A pending check belongs to a reconciliation month only if it was issued on or before that month's end.
@@ -184,9 +191,10 @@ export default function BankReconciliationPage() {
         check_number: item.check_number || "",
         amount: String(item.net_amount ?? item.gross_amount ?? ""),
         check_date: formatSourceCheckDate(item.issued_at),
+        year: yearFromSourceDate(item.issued_at),
       }));
     return rows;
-  }, [formatSourceCheckDate, isWithinPeriod]);
+  }, [formatSourceCheckDate, yearFromSourceDate, isWithinPeriod]);
 
   const rowsFromRevenueChecks = useCallback((items) => {
     const rows = items
@@ -197,9 +205,10 @@ export default function BankReconciliationPage() {
         check_number: item.check_number || "",
         amount: String(item.amount ?? ""),
         check_date: formatSourceCheckDate(item.dated || item.issued_at),
+        year: yearFromSourceDate(item.dated || item.issued_at),
       }));
     return rows;
-  }, [formatSourceCheckDate, isWithinPeriod]);
+  }, [formatSourceCheckDate, yearFromSourceDate, isWithinPeriod]);
 
   const syncChecksFromRecords = useCallback(async (type = "both", silent = false) => {
     setSyncingChecks(true);
@@ -320,11 +329,13 @@ export default function BankReconciliationPage() {
       check_number: check.check_number || "",
       amount: String(check.amount ?? ""),
       check_date: formatCheckDate(check.check_date),
+      year: check.year ? String(check.year) : (extractYearFromCheckDate(check.check_date) ? String(extractYearFromCheckDate(check.check_date)) : ""),
     }));
     const nextCollectionChecks = (item.collection_checks?.length ? item.collection_checks : [emptyCheck()]).map((check) => ({
       check_number: check.check_number || "",
       amount: String(check.amount ?? ""),
       check_date: formatCheckDate(check.check_date),
+      year: check.year ? String(check.year) : (extractYearFromCheckDate(check.check_date) ? String(extractYearFromCheckDate(check.check_date)) : ""),
     }));
     const nextPriorYearChecks = (item.prior_year_outstanding_checks || []).map((check) => ({
       check_number: check.check_number || "",
@@ -416,9 +427,17 @@ export default function BankReconciliationPage() {
     return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   };
 
+  const extractYearFromCheckDate = (value) => {
+    if (!value) return null;
+    if (/^\d{1,2}\/\d{1,2}$/.test(String(value))) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.getFullYear();
+  };
+
   const formatCheckDateDisplay = (row) => {
     const base = formatCheckDate(row?.check_date);
-    return row?.year ? `${base}/${row.year}` : base;
+    const year = row?.year || extractYearFromCheckDate(row?.check_date);
+    return year ? `${base}/${year}` : base;
   };
 
   const escapePrintHtml = (value) => String(value ?? "")
@@ -501,7 +520,7 @@ export default function BankReconciliationPage() {
       const logoSource = absoluteAssetUrl(bank.logo_url || bankPalette[bank.id]?.logo);
       const logo = logoSource ? `<div class="memo-logo-box"><img class="memo-logo" src="${escapePrintHtml(logoSource)}" alt="${escapePrintHtml(bank.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="memo-logo-fallback">${escapePrintHtml(bank.name)}</div></div>` : `<div class="memo-logo-box"><div class="memo-logo-fallback" style="display:flex">${escapePrintHtml(bank.name)}</div></div>`;
       const rowsHtml = (rows) => (rows || []).length ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDateDisplay(row))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${escapePrintHtml(formatEgpText(row.amount))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">—</td></tr>`;
-      const checksSection = (title, rows, total) => `<section class="checks-section"><h3>${escapePrintHtml(title)}</h3><table><thead><tr><th>التاريخ يوم/شهر</th><th>رقم الشيك</th><th>المبلغ</th></tr></thead><tbody>${rowsHtml(rows)}<tr class="total-row"><td colspan="2">الإجمالي</td><td>${escapePrintHtml(formatEgpText(total))}</td></tr></tbody></table></section>`;
+      const checksSection = (title, rows, total) => `<section class="checks-section"><h3>${escapePrintHtml(title)}</h3><table><thead><tr><th>التاريخ يوم/شهر/سنة</th><th>رقم الشيك</th><th>المبلغ</th></tr></thead><tbody>${rowsHtml(rows)}<tr class="total-row"><td colspan="2">الإجمالي</td><td>${escapePrintHtml(formatEgpText(total))}</td></tr></tbody></table></section>`;
       printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مذكرة التسوية</title><style>@page{size:A4 portrait;margin:5mm}html,body{margin:0;padding:0;background:#fff;direction:rtl;font-family:Tahoma,Arial,sans-serif;color:#111827}body{width:200mm;height:287mm;overflow:hidden}.memo-page{position:relative;box-sizing:border-box;width:190mm;height:277mm;max-height:277mm;overflow:hidden;padding:10mm 12mm 8mm;margin:0 auto;background:#fff}.memo-header{position:relative;min-height:38mm;text-align:center}.memo-logo-box{position:absolute;left:0;top:0;width:42mm;height:24mm;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;background:#fff}.memo-logo{width:40mm;height:22mm;object-fit:contain;display:block}.memo-logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;text-align:center;font-weight:900;font-size:13px;line-height:1.35;color:#111827;padding:2mm}.memo-logo-text{position:absolute;left:0;top:0;width:38mm;border:1px solid #ddd;padding:3mm;font-weight:700;text-align:center}.org-title{font-size:15px;line-height:1.5;font-weight:900;margin:0;padding:0 42mm 0 20mm}.bank-line{font-size:10px;font-weight:700;color:#4b5563;margin:2mm 0 0}.period-line{font-size:13px;font-weight:900;margin:2mm 0 0}.balance{margin:15mm 0 7mm;text-align:right;padding-right:8mm}.balance .label{font-size:13px;font-weight:900}.balance .value{font-size:16px;font-weight:900;margin-top:2mm}.checks-section{padding:0 8mm;margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.checks-section h3{font-size:12px;font-weight:900;margin:0 0 2mm;text-align:right}table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #d7d7d7;padding:1.3mm 2mm;font-size:9px;line-height:1.15;text-align:right;vertical-align:middle}th{font-weight:900;background:#fff}.total-row td{border-top:1.6px solid #111827;font-weight:900}.empty-cell{text-align:center;color:#9ca3af}.footer{position:absolute;left:20mm;bottom:15mm;text-align:left;direction:rtl}.footer .status{font-size:13px;font-weight:900}.footer .amount{font-size:10px;font-weight:700;color:#374151;margin-top:1mm}@media print{html,body{width:200mm;height:287mm;overflow:hidden}.memo-page{page-break-after:avoid;break-after:avoid}.memo-logo-box{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><main class="memo-page"><header class="memo-header">${logo}<h1 class="org-title">${escapePrintHtml(item.administration || administration || currentAdministrationName)}</h1><p class="bank-line">${escapePrintHtml(bank.name)}</p><p class="period-line">${escapePrintHtml(`${meta.month} ${meta.year}`)}</p></header><section class="balance"><p class="label">الرصيد</p><p class="value">${escapePrintHtml(formatEgpText(item.book_balance))}</p></section>${checksSection("يضاف: شيكات لم تقدم للصرف", [...(item.outstanding_checks || []), ...(item.prior_year_outstanding_checks || [])], item.total_outstanding_checks)}${checksSection("يخصم: شيكات تحت التحصيل", item.collection_checks, item.total_collection_checks)}<footer class="footer"><p class="status">${escapePrintHtml(item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق")}</p><p class="amount">${escapePrintHtml(formatEgpText(item.calculated_balance))}</p></footer></main></body></html>`);
       printWindow.document.close();
       printWindow.focus();
@@ -558,7 +577,7 @@ export default function BankReconciliationPage() {
             </div>
             <div className="space-y-2" data-testid={`${type}-check-${index}-date-wrapper`}>
               <Label data-testid={`${type}-check-${index}-date-label`}>تاريخ الشيك</Label>
-              <Input readOnly aria-readonly="true" inputMode="numeric" dir="ltr" value={item.check_date} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-slate-100 text-center font-extrabold tracking-wider text-slate-700" data-testid={`${type}-check-${index}-date-input`} />
+              <Input readOnly aria-readonly="true" inputMode="numeric" dir="ltr" value={formatCheckDateDisplay(item)} placeholder="يوم/شهر/سنة" maxLength={10} className="h-11 rounded-lg bg-slate-100 text-center font-extrabold tracking-wider text-slate-700" data-testid={`${type}-check-${index}-date-input`} />
             </div>
             <div className="mt-7 hidden h-11 md:block" data-testid={`${type}-check-${index}-protected-spacer`} />
           </div>
@@ -617,7 +636,7 @@ export default function BankReconciliationPage() {
         <Table className="reconciliation-memo-check-table" data-testid={`${testId}-table`}>
           <TableHeader>
             <TableRow className="hover:bg-transparent" data-testid={`${testId}-header-row`}>
-              <TableHead className="text-right font-extrabold text-slate-950">التاريخ يوم/شهر</TableHead>
+              <TableHead className="text-right font-extrabold text-slate-950">التاريخ يوم/شهر/سنة</TableHead>
               <TableHead className="text-right font-extrabold text-slate-950">رقم الشيك</TableHead>
               <TableHead className="text-right font-extrabold text-slate-950">المبلغ</TableHead>
             </TableRow>
