@@ -1344,3 +1344,11 @@
 ## إصلاح تعطّل السيرفر أثناء إعادة بناء الواجهة بتاريخ 2026-08-16
 - كان mount لـ /app/frontend/build/static يُسقط السيرفر (502) إذا أُعيد بناء الواجهة (المجلد يُفرَّغ لحظيًا) → "تعذر تحميل الجهات".
 - الحل: شرط إضافي (FRONTEND_BUILD_DIR / "static").exists() قبل الـ mount.
+
+
+## تصحيح: نقل ميزة "شيكات سنوات سابقة" من تحت التحصيل إلى لم تقدم للصرف بتاريخ 2026-08-16
+- المستخدم صحّح: الميزة المفروض تكون في قسم "شيكات لم تقدم للصرف" (outstanding) مش "شيكات تحت التحصيل" (collection).
+- Backend: أُعيدت التسمية prior_year_collection_checks → prior_year_outstanding_checks؛ calculate_reconciliation يضمّها الآن داخل total_outstanding_checks (تُضاف للرصيد) بدل total_collection؛ total_prior_year_outstanding_checks. hydrate/create/update محدّثة.
+- Frontend: البلوك يظهر تحت قسم "شيكات لم تقدم للصرف" (type==='outstanding')، totals تضمّها في outstanding، الحفظ/التعديل/الطباعة تدمجها مع شيكات لم تقدم للصرف.
+- إصلاح إضافي: زر حذف المذكرة كان مربوطًا بـ role==='admin' فقط فلم يظهر لحساب super_admin؛ أصبح مربوطًا بـ canEditReconciliation ويظهر أسفل زر التعديل (الترتيب: معاينة، طباعة، تعديل، حذف).
+- تحقق: create يعطي outstanding=5000 (2000+3000) و collection=0؛ الواجهة تعرض البلوك تحت القسم الصحيح (screenshot). الحزمة + release/patch محدّثة.
