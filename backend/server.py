@@ -6324,36 +6324,49 @@ def days_in_year(year: int) -> int:
 
 
 def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestRow], float, float]:
-    start = normalize_datetime(deposit.accounting_start_datetime or deposit.creation_datetime)
-    end = normalize_datetime(deposit.maturity_datetime)
+    # طريقة البنك: دورات شهرية من يوم إنشاء الوديعة لنفس اليوم الشهر التالي (٢١←٢١)،
+    # الفائدة اليومية مقرّبة لقرشين، مع إضافة فرق التقريب على قيد إتمام السنة (شهر الإنشاء)
+    # حتى يساوي إجمالي كل سنة كاملة العائد السنوي المظبوط.
+    creation = normalize_datetime(deposit.creation_datetime).date()
+    maturity = normalize_datetime(deposit.maturity_datetime).date()
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
     daily_interest = round(annual_interest / days_in_year(year), 2)
+    anniversary_day = creation.day
+
+    def anniversary_on(y: int, m: int) -> date:
+        last_day = calendar.monthrange(y, m)[1]
+        return date(y, m, min(anniversary_day, last_day))
+
     rows = []
     total = 0.0
-
     for month in range(1, 13):
-        month_start = datetime(year, month, 1, tzinfo=timezone.utc)
-        next_month = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc)
+        credit_date = anniversary_on(year, month)
+        prev_credit_date = anniversary_on(year - 1, 12) if month == 1 else anniversary_on(year, month - 1)
+        period_start = max(prev_credit_date, creation)
+        period_end = min(credit_date, maturity)
 
-        overlap_start = max(start, month_start)
-        overlap_end = min(end, next_month)
-
-        if overlap_end <= overlap_start:
-            active_days = 0.0
+        if period_end <= period_start:
+            active_days = 0
             interest = 0.0
         else:
-            active_days = (overlap_end - overlap_start).total_seconds() / 86400
-            interest = daily_interest * active_days
+            active_days = (period_end - period_start).days
+            interest = round(daily_interest * active_days, 2)
+            # قيد إتمام السنة (شهر إنشاء الوديعة): يأخذ فرق التقريب ليساوي إجمالي السنة العائد السنوي
+            if month == creation.month:
+                year_start = anniversary_on(year - 1, creation.month)
+                if year_start >= creation and credit_date <= maturity:
+                    full_year_days = (credit_date - year_start).days
+                    adjustment = round(annual_interest - daily_interest * full_year_days, 2)
+                    interest = round(interest + adjustment, 2)
 
-        rounded_interest = round(interest, 2)
         total += interest
         rows.append(
             InterestRow(
                 serial=month,
                 month=ARABIC_MONTHS[month - 1],
                 month_number=month,
-                interest_amount=rounded_interest,
-                active_days=round(active_days, 2),
+                interest_amount=round(interest, 2),
+                active_days=float(active_days),
             )
         )
 
