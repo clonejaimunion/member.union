@@ -24,6 +24,31 @@ const currentDayMonth = () => {
 
 const emptyCheck = () => ({ check_number: "", amount: "", check_date: currentDayMonth() });
 
+const ARABIC_MONTH_TO_NUMBER = {
+  "يناير": 1, "فبراير": 2, "مارس": 3, "أبريل": 4, "ابريل": 4, "مايو": 5,
+  "يونيو": 6, "يوليو": 7, "أغسطس": 8, "اغسطس": 8, "سبتمبر": 9,
+  "أكتوبر": 10, "اكتوبر": 10, "نوفمبر": 11, "ديسمبر": 12,
+};
+
+// Returns the last day of the month described by the Arabic period label (e.g. "يناير 2026").
+// Returns null when the month/year can't be resolved, meaning "don't filter by period".
+const resolvePeriodEndDate = (label) => {
+  const text = String(label || "").trim();
+  if (!text) return null;
+  const yearMatch = text.match(/(19\d{2}|20\d{2}|21\d{2})/);
+  const year = yearMatch ? Number(yearMatch[1]) : null;
+  let month = null;
+  for (const [name, value] of Object.entries(ARABIC_MONTH_TO_NUMBER)) {
+    if (text.includes(name)) { month = value; break; }
+  }
+  if (month === null) {
+    const numericMatch = text.match(/(?:^|\D)(1[0-2]|0?[1-9])(?:\D|$)/);
+    if (numericMatch) month = Number(numericMatch[1]);
+  }
+  if (!year || !month) return null;
+  return new Date(year, month, 0, 23, 59, 59, 999);
+};
+
 export default function BankReconciliationPage() {
   const { bankId } = useParams();
   const navigate = useNavigate();
@@ -137,9 +162,21 @@ export default function BankReconciliationPage() {
     return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   }, []);
 
+  const periodEnd = useMemo(() => resolvePeriodEndDate(periodLabel), [periodLabel]);
+
+  // A pending check belongs to a reconciliation month only if it was issued on or before that month's end.
+  const isWithinPeriod = useCallback((value) => {
+    if (!periodEnd) return true;
+    if (!value) return true;
+    const issued = new Date(value);
+    if (Number.isNaN(issued.getTime())) return true;
+    return issued.getTime() <= periodEnd.getTime();
+  }, [periodEnd]);
+
   const rowsFromExpenseChecks = useCallback((items) => {
     const rows = items
       .filter((item) => item.payment_method === "check" && (item.bank_payment_status || "not_presented") === "not_presented")
+      .filter((item) => isWithinPeriod(item.issued_at))
       .filter((item) => item.check_number || Number(item.net_amount || item.gross_amount || 0) > 0)
       .map((item) => ({
         check_number: item.check_number || "",
@@ -147,11 +184,12 @@ export default function BankReconciliationPage() {
         check_date: formatSourceCheckDate(item.issued_at),
       }));
     return rows;
-  }, [formatSourceCheckDate]);
+  }, [formatSourceCheckDate, isWithinPeriod]);
 
   const rowsFromRevenueChecks = useCallback((items) => {
     const rows = items
       .filter((item) => item.collection_method === "check" && (item.bank_collection_status || "under_collection") === "under_collection")
+      .filter((item) => isWithinPeriod(item.dated || item.issued_at))
       .filter((item) => item.check_number || Number(item.amount || 0) > 0)
       .map((item) => ({
         check_number: item.check_number || "",
@@ -159,7 +197,7 @@ export default function BankReconciliationPage() {
         check_date: formatSourceCheckDate(item.dated || item.issued_at),
       }));
     return rows;
-  }, [formatSourceCheckDate]);
+  }, [formatSourceCheckDate, isWithinPeriod]);
 
   const syncChecksFromRecords = useCallback(async (type = "both", silent = false) => {
     setSyncingChecks(true);
@@ -195,7 +233,9 @@ export default function BankReconciliationPage() {
   }, [currentAdministrationName, editingReconciliationId]);
 
   useEffect(() => {
-    if (canEditReconciliation && !editingReconciliationId) syncChecksFromRecords("both", true);
+    if (!canEditReconciliation || editingReconciliationId) return undefined;
+    const timer = setTimeout(() => syncChecksFromRecords("both", true), 300);
+    return () => clearTimeout(timer);
   }, [canEditReconciliation, editingReconciliationId, syncChecksFromRecords]);
 
   useEffect(() => {
