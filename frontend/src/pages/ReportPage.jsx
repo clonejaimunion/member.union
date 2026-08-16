@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CalendarDays, Check, ChevronDown, ClipboardPenLine, FileDown, FileSpreadsheet, Printer, Sigma } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, ClipboardPenLine, DatabaseBackup, FileDown, FileSpreadsheet, Printer, Sigma } from "lucide-react";
+import { toast } from "sonner";
 import { BankShell } from "@/components/BankShell";
 import { DepositSummary } from "@/components/DepositSummary";
 import { ExportReportButtons, exportReportToOffice, buildOfficeHtml } from "@/components/ExportReportButtons";
@@ -62,6 +63,27 @@ export default function ReportPage({ type }) {
 
   const exportInterestExcel = () => exportReportToOffice({ title: a4Title, fileName: a4Title, selectors: [A4_SELECTOR], type: "excel", orientation: "portrait" });
 
+  const [exporting, setExporting] = useState(false);
+  const exportAllData = async () => {
+    setExporting(true);
+    try {
+      const response = await api.get("/maintenance/export-data", { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([response.data], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `erp-data-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success("تم تصدير نسخة من البيانات بنجاح");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تصدير البيانات (تأكد من صلاحية الأدمن)");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const changeDeposit = (value) => {
     if (value) {
       setSearchParams({ deposit_id: value });
@@ -89,6 +111,17 @@ export default function ReportPage({ type }) {
                 excelTestId={type === "current-year" ? "export-current-year-excel-button" : "export-previous-year-excel-button"}
                 wordTestId={type === "current-year" ? "export-current-year-word-button" : "export-previous-year-word-button"}
               />
+              <Button
+                type="button"
+                onClick={exportAllData}
+                disabled={exporting}
+                variant="outline"
+                className="mt-3 h-11 rounded-lg border-emerald-300 bg-emerald-50 px-5 font-bold text-emerald-800 hover:bg-emerald-100"
+                data-testid="export-all-data-button"
+              >
+                <DatabaseBackup className="ml-2 h-5 w-5" />
+                {exporting ? "جارٍ التصدير..." : "تصدير نسخة من البيانات"}
+              </Button>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="report-kpis">
               <div className="rounded-xl bg-slate-950 p-5 text-white" data-testid="report-monthly-interest-card">

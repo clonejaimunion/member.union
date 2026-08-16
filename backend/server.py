@@ -2125,9 +2125,9 @@ async def list_organization_documents() -> List[dict]:
 
 
 def app_icon_url(updated_at: Optional[str] = None) -> Optional[str]:
-    if not APP_ICON_PATH.exists():
+    if not updated_at:
         return None
-    version = re.sub(r"[^0-9A-Za-z]", "", updated_at or str(int(APP_ICON_PATH.stat().st_mtime)))
+    version = re.sub(r"[^0-9A-Za-z]", "", updated_at)
     return f"/api/app-settings/icon?v={version}"
 
 
@@ -2282,6 +2282,16 @@ def update_windows_shortcut_icon(icon_path: Path) -> str:
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], check=False, capture_output=True, text=True, timeout=20)
         updated += 1
     return f"تم حفظ الأيقونة وتحديث {updated} اختصار على Windows" if updated else "تم حفظ الأيقونة، ولم يتم العثور على اختصارات لتحديثها"
+
+
+async def sync_local_app_icon_cache() -> bool:
+    document = await db.app_settings.find_one({"id": "global"}, {"_id": 0, "icon_base64": 1})
+    icon_b64 = (document or {}).get("icon_base64")
+    if not icon_b64:
+        return False
+    APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    APP_ICON_PATH.write_bytes(base64.b64decode(icon_b64))
+    return True
 
 
 def serialize_date(value: date) -> str:
@@ -6009,9 +6019,11 @@ async def list_public_organizations():
 
 @api_router.get("/app-settings/icon")
 async def get_app_icon():
-    if not APP_ICON_PATH.exists():
+    document = await db.app_settings.find_one({"id": "global"}, {"_id": 0, "icon_base64": 1})
+    icon_b64 = (document or {}).get("icon_base64")
+    if not icon_b64:
         raise HTTPException(status_code=404, detail="لا توجد أيقونة مخصصة")
-    return FileResponse(str(APP_ICON_PATH), media_type="image/x-icon", filename="accounting_app_custom.ico")
+    return Response(content=base64.b64decode(icon_b64), media_type="image/x-icon")
 
 
 @api_router.get("/admin/app-settings", response_model=AppSettingsResponse)
@@ -6235,22 +6247,22 @@ async def admin_update_fixed_asset_category_rate(category_code: str, payload: Fi
 async def update_admin_app_icon(icon_file: UploadFile = File(...), _: dict = Depends(require_admin)):
     content = await icon_file.read()
     icon_bytes = convert_uploaded_icon_to_ico(content, icon_file.filename or "icon", icon_file.content_type)
-    APP_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-    APP_ICON_PATH.write_bytes(icon_bytes)
     now_iso = serialize_datetime(datetime.now(timezone.utc))
-    shortcut_status = update_windows_shortcut_icon(APP_ICON_PATH)
     await db.app_settings.update_one(
         {"id": "global"},
         {
             "$set": {
+                "icon_base64": base64.b64encode(icon_bytes).decode("ascii"),
                 "shortcut_icon_updated_at": now_iso,
-                "shortcut_update_status": shortcut_status,
                 "updated_at": now_iso,
             },
             "$setOnInsert": {"id": "global", "system_name": DEFAULT_SYSTEM_NAME, "created_at": now_iso},
         },
         upsert=True,
     )
+    await sync_local_app_icon_cache()
+    shortcut_status = update_windows_shortcut_icon(APP_ICON_PATH)
+    await db.app_settings.update_one({"id": "global"}, {"$set": {"shortcut_update_status": shortcut_status, "updated_at": now_iso}})
     document = await get_app_settings_document()
     return await build_app_settings_response(document)
 
@@ -9041,6 +9053,67 @@ async def purge_reversal_entries(current_user: dict = Depends(require_admin)):
         "deleted_reversed_originals": originals.deleted_count,
         "message": "تم تنظيف القيود العكسية القديمة بنجاح",
     }
+
+
+DATA_EXPORT_COLLECTIONS = [
+    "banks", "bank_settings", "banking_tariffs", "banking_manual_charges", "deleted_banks",
+    "deposits", "journal_entries", "journal_counters", "accounting_rules", "chart_accounts",
+    "revenues", "expenses", "reconciliations", "financial_periods",
+    "memberships", "membership_batch_payments",
+    "fixed_assets", "fixed_asset_depreciations", "fixed_asset_category_settings",
+    "custody_advances", "misc_creditors", "misc_creditor_movements",
+    "inventory_items", "inventory_movements",
+    "electronic_invoices", "einvoice_customers",
+]
+
+
+@api_router.get("/maintenance/export-data")
+async def export_organization_data(current_user: dict = Depends(require_admin)):
+    organization_id = organization_id_or_default()
+    payload = {
+        "type": "bank-deposit-erp-export",
+        "version": 1,
+        "organization_id": organization_id,
+        "exported_at": serialize_datetime(datetime.now(timezone.utc)),
+        "collections": {},
+    }
+    for collection_name in DATA_EXPORT_COLLECTIONS:
+        collection = getattr(db, collection_name)
+        documents = await collection.find(with_organization({}, organization_id), {"_id": 0}).to_list(200000)
+        payload["collections"][collection_name] = documents
+    organization = await db.organizations.find_one({"id": organization_id}, {"_id": 0})
+    payload["organization"] = organization
+    body = json.dumps(payload, ensure_ascii=False, default=str)
+    filename = f"erp-data-{organization_id}-{date.today().isoformat()}.json"
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api_router.post("/maintenance/import-data")
+async def import_organization_data(payload: dict, current_user: dict = Depends(require_admin)):
+    if payload.get("type") != "bank-deposit-erp-export":
+        raise HTTPException(status_code=400, detail="ملف غير صالح: هذا ليس ملف تصدير بيانات صحيح")
+    organization_id = organization_id_or_default()
+    collections = payload.get("collections") or {}
+    summary = {}
+    for collection_name in DATA_EXPORT_COLLECTIONS:
+        documents = collections.get(collection_name)
+        if documents is None:
+            continue
+        collection = getattr(db, collection_name)
+        await collection.delete_many(with_organization({}, organization_id))
+        cleaned = []
+        for document in documents:
+            document.pop("_id", None)
+            document["organization_id"] = organization_id
+            cleaned.append(document)
+        if cleaned:
+            await collection.insert_many(cleaned)
+        summary[collection_name] = len(cleaned)
+    return {"message": "تم استيراد البيانات بنجاح", "organization_id": organization_id, "imported": summary}
 
 
 @api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])

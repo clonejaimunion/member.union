@@ -1284,3 +1284,18 @@
 - إصلاح endpoint `/api/admin/profile` للسوبر أدمن حتى يرجع الجهة المختارة في الجلسة ولا يعتمد على الجهة الأصلية المخزنة بالحساب.
 - الاختبارات: lint backend، GET organizations/public=200، login admin=200، auth/me role=super_admin، profile update=200 مع organization_id الصحيح.
 - إعادة بناء ملف التثبيت NSIS. ملف setup.exe صالح ويبدأ بـ MZ، الحجم 1207820 بايت، و SHA256: 88e1f0c188615c81c8fdddf08732ac9a7f1ced3c2e33006481919fc21903083a.
+
+
+## زر "تصدير نسخة من البيانات" + استيراد بيانات المؤسسة بتاريخ 2026-08-16
+- الهدف: تمكين المستخدم من تصدير نسخة كاملة من بيانات مؤسسته من جهازه المحلي وإرسالها للمطوّر لتحميلها في بيئة الاختبار وحل مشكلة حساب فوائد الودائع على بياناته الحقيقية.
+- Backend (server.py):
+  - GET /api/maintenance/export-data (require_admin): يصدّر ملف JSON يحوي كل المجموعات المرتبطة بالمؤسسة (banks, deposits, journal_entries, chart_accounts, revenues, expenses, memberships, fixed_assets... إلخ) + مستند organization. تنزيل كملف مرفق.
+  - POST /api/maintenance/import-data (require_admin): يستورد ملف التصدير ويستبدل بيانات المؤسسة الحالية (delete_many ثم insert_many مع فرض organization_id الحالي).
+  - القائمة DATA_EXPORT_COLLECTIONS تحدّد المجموعات المصدَّرة (استُبعدت users/app_settings/login_attempts/audit_logs لأسباب أمنية).
+- Frontend (ReportPage.jsx): زر "تصدير نسخة من البيانات" (data-testid=export-all-data-button) في رأس صفحة العائد الشهري، ينزّل ملف JSON عبر responseType=blob.
+- التحقق: export + import عبر curl على preview (HTTP 200، 43 حساب + وديعة + قيد)، والزر يظهر ويعمل (screenshot).
+- ملاحظة مهمة: النقطتان جديدتان في السيرفر؛ لن تظهرا/تعملا على جهاز المستخدم قبل تشغيل update.ps1 لتحديث النسخة المحلية.
+
+## إصلاح فحص النشر لأيقونة التطبيق (تخزين دائم في MongoDB) بتاريخ 2026-08-16
+- كانت أيقونة التطبيق المرفوعة تُحفظ في مسار محلي على الـ pod (app_assets/accounting_app_custom.ico) مما أطلق فحص ephemeral-upload-storage الحاجب.
+- الحل: تخزين الأيقونة كـ base64 دائم في db.app_settings؛ get /api/app-settings/icon يقدّمها من القاعدة؛ والملف المحلي أصبح مجرد نسخة كاش تُكتب من القاعدة (sync_local_app_icon_cache) لتحديث اختصار Windows فقط. لا تغيير في سلوك المستخدم النهائي.
