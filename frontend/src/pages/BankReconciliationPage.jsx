@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
+import { Eye, FileSpreadsheet, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
@@ -76,6 +76,8 @@ export default function BankReconciliationPage() {
   const [committedFormSnapshot, setCommittedFormSnapshot] = useState("");
   const [leavePromptOpen, setLeavePromptOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
+  const [reconciliationToDelete, setReconciliationToDelete] = useState(null);
+  const [deletingReconciliation, setDeletingReconciliation] = useState(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
@@ -304,9 +306,12 @@ export default function BankReconciliationPage() {
       check_number: sanitizeDigitsInput(item.check_number),
       amount: Number(sanitizeDecimalInput(item.amount) || 0),
       check_date: normalizeDayMonthToDateTime(item.check_date),
+      ...(item.year ? { year: Number(item.year) } : {}),
     }));
 
-  const addPriorYearCheck = () => setPriorYearChecks((previous) => [...previous, emptyCheck()]);
+  const emptyPriorYearCheck = () => ({ check_number: "", amount: "", check_date: currentDayMonth(), year: String(new Date().getFullYear() - 1) });
+
+  const addPriorYearCheck = () => setPriorYearChecks((previous) => [...previous, emptyPriorYearCheck()]);
   const updatePriorYearCheck = (index, field, value) => setPriorYearChecks((previous) => previous.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)));
   const removePriorYearCheck = (index) => setPriorYearChecks((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
 
@@ -325,6 +330,7 @@ export default function BankReconciliationPage() {
       check_number: check.check_number || "",
       amount: String(check.amount ?? ""),
       check_date: formatCheckDate(check.check_date),
+      year: check.year ? String(check.year) : "",
     }));
     setEditingReconciliationId(item.id);
     setActiveReconciliation(item);
@@ -410,6 +416,11 @@ export default function BankReconciliationPage() {
     return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
   };
 
+  const formatCheckDateDisplay = (row) => {
+    const base = formatCheckDate(row?.check_date);
+    return row?.year ? `${base}/${row.year}` : base;
+  };
+
   const escapePrintHtml = (value) => String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -434,20 +445,47 @@ export default function BankReconciliationPage() {
     return { month: foundMonth || text || "—", year: yearMatch?.[0] || "—" };
   };
 
-  const deleteReconciliation = async (item) => {
-    const confirmed = window.confirm(`هل أنت متأكد من حذف مذكرة التسوية ${item.period_label || "المحددة"}؟`);
-    if (!confirmed) return;
+  const deleteReconciliation = (item) => setReconciliationToDelete(item);
+
+  const confirmDeleteReconciliation = async () => {
+    if (!reconciliationToDelete) return;
+    setDeletingReconciliation(true);
     try {
-      await api.delete(`/banks/${bankId}/reconciliations/${item.id}`);
+      await api.delete(`/banks/${bankId}/reconciliations/${reconciliationToDelete.id}`);
       toast.success("تم حذف مذكرة التسوية");
+      if (activeReconciliation?.id === reconciliationToDelete.id) setActiveReconciliation(null);
+      setReconciliationToDelete(null);
       loadReconciliations();
     } catch (error) {
       toast.error(error?.response?.data?.detail || "تعذر حذف مذكرة التسوية");
+    } finally {
+      setDeletingReconciliation(false);
     }
   };
 
-  const previewReconciliation = (item) => {
-    setActiveReconciliation(item);
+  const exportReconciliationExcel = (item) => {
+    const meta = periodMeta(item.period_label);
+    const numFmt = (value) => Number(value || 0).toFixed(2);
+    const outstandingRows = [...(item.outstanding_checks || []), ...(item.prior_year_outstanding_checks || [])];
+    const collectionRows = item.collection_checks || [];
+    const checkRows = (rows) => (rows || []).length
+      ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDateDisplay(row))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${numFmt(row.amount)}</td></tr>`).join("")
+      : `<tr><td colspan="3">—</td></tr>`;
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8" /><style>table{border-collapse:collapse;margin-bottom:12px}td,th{border:1px solid #000;padding:4px 8px;text-align:right;font-family:Tahoma,Arial}</style></head><body dir="rtl"><table><tr><td>الإدارة</td><td>${escapePrintHtml(item.administration || administration || currentAdministrationName)}</td></tr><tr><td>البنك</td><td>${escapePrintHtml(bank.name)}</td></tr><tr><td>الفترة</td><td>${escapePrintHtml(`${meta.month} ${meta.year}`)}</td></tr><tr><td>الرصيد</td><td>${numFmt(item.book_balance)}</td></tr></table><table><tr><th colspan="3">يضاف: شيكات لم تقدم للصرف</th></tr><tr><th>التاريخ</th><th>رقم الشيك</th><th>المبلغ</th></tr>${checkRows(outstandingRows)}<tr><td colspan="2">الإجمالي</td><td>${numFmt(item.total_outstanding_checks)}</td></tr></table><table><tr><th colspan="3">يخصم: شيكات تحت التحصيل</th></tr><tr><th>التاريخ</th><th>رقم الشيك</th><th>المبلغ</th></tr>${checkRows(collectionRows)}<tr><td colspan="2">الإجمالي</td><td>${numFmt(item.total_collection_checks)}</td></tr></table><table><tr><td>رصيد التسوية المحسوب</td><td>${numFmt(item.calculated_balance)}</td></tr><tr><td>رصيد كشف الحساب البنكي</td><td>${numFmt(item.bank_statement_balance)}</td></tr><tr><td>الفرق</td><td>${numFmt(item.difference)}</td></tr><tr><td>الحالة</td><td>${item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</td></tr></table></body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `مذكرة-تسوية-${bank.name}-${item.period_label || ""}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("تم تصدير مذكرة التسوية إلى Excel");
+  };
+
+
+  const previewReconciliation = (item) => {    setActiveReconciliation(item);
     setTimeout(() => document.querySelector('[data-testid="reconciliation-print-report"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
@@ -462,7 +500,7 @@ export default function BankReconciliationPage() {
       const meta = periodMeta(item.period_label);
       const logoSource = absoluteAssetUrl(bank.logo_url || bankPalette[bank.id]?.logo);
       const logo = logoSource ? `<div class="memo-logo-box"><img class="memo-logo" src="${escapePrintHtml(logoSource)}" alt="${escapePrintHtml(bank.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="memo-logo-fallback">${escapePrintHtml(bank.name)}</div></div>` : `<div class="memo-logo-box"><div class="memo-logo-fallback" style="display:flex">${escapePrintHtml(bank.name)}</div></div>`;
-      const rowsHtml = (rows) => (rows || []).length ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDate(row.check_date))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${escapePrintHtml(formatEgpText(row.amount))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">—</td></tr>`;
+      const rowsHtml = (rows) => (rows || []).length ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDateDisplay(row))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${escapePrintHtml(formatEgpText(row.amount))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">—</td></tr>`;
       const checksSection = (title, rows, total) => `<section class="checks-section"><h3>${escapePrintHtml(title)}</h3><table><thead><tr><th>التاريخ يوم/شهر</th><th>رقم الشيك</th><th>المبلغ</th></tr></thead><tbody>${rowsHtml(rows)}<tr class="total-row"><td colspan="2">الإجمالي</td><td>${escapePrintHtml(formatEgpText(total))}</td></tr></tbody></table></section>`;
       printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مذكرة التسوية</title><style>@page{size:A4 portrait;margin:5mm}html,body{margin:0;padding:0;background:#fff;direction:rtl;font-family:Tahoma,Arial,sans-serif;color:#111827}body{width:200mm;height:287mm;overflow:hidden}.memo-page{position:relative;box-sizing:border-box;width:190mm;height:277mm;max-height:277mm;overflow:hidden;padding:10mm 12mm 8mm;margin:0 auto;background:#fff}.memo-header{position:relative;min-height:38mm;text-align:center}.memo-logo-box{position:absolute;left:0;top:0;width:42mm;height:24mm;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;background:#fff}.memo-logo{width:40mm;height:22mm;object-fit:contain;display:block}.memo-logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;text-align:center;font-weight:900;font-size:13px;line-height:1.35;color:#111827;padding:2mm}.memo-logo-text{position:absolute;left:0;top:0;width:38mm;border:1px solid #ddd;padding:3mm;font-weight:700;text-align:center}.org-title{font-size:15px;line-height:1.5;font-weight:900;margin:0;padding:0 42mm 0 20mm}.bank-line{font-size:10px;font-weight:700;color:#4b5563;margin:2mm 0 0}.period-line{font-size:13px;font-weight:900;margin:2mm 0 0}.balance{margin:15mm 0 7mm;text-align:right;padding-right:8mm}.balance .label{font-size:13px;font-weight:900}.balance .value{font-size:16px;font-weight:900;margin-top:2mm}.checks-section{padding:0 8mm;margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.checks-section h3{font-size:12px;font-weight:900;margin:0 0 2mm;text-align:right}table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #d7d7d7;padding:1.3mm 2mm;font-size:9px;line-height:1.15;text-align:right;vertical-align:middle}th{font-weight:900;background:#fff}.total-row td{border-top:1.6px solid #111827;font-weight:900}.empty-cell{text-align:center;color:#9ca3af}.footer{position:absolute;left:20mm;bottom:15mm;text-align:left;direction:rtl}.footer .status{font-size:13px;font-weight:900}.footer .amount{font-size:10px;font-weight:700;color:#374151;margin-top:1mm}@media print{html,body{width:200mm;height:287mm;overflow:hidden}.memo-page{page-break-after:avoid;break-after:avoid}.memo-logo-box{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><main class="memo-page"><header class="memo-header">${logo}<h1 class="org-title">${escapePrintHtml(item.administration || administration || currentAdministrationName)}</h1><p class="bank-line">${escapePrintHtml(bank.name)}</p><p class="period-line">${escapePrintHtml(`${meta.month} ${meta.year}`)}</p></header><section class="balance"><p class="label">الرصيد</p><p class="value">${escapePrintHtml(formatEgpText(item.book_balance))}</p></section>${checksSection("يضاف: شيكات لم تقدم للصرف", [...(item.outstanding_checks || []), ...(item.prior_year_outstanding_checks || [])], item.total_outstanding_checks)}${checksSection("يخصم: شيكات تحت التحصيل", item.collection_checks, item.total_collection_checks)}<footer class="footer"><p class="status">${escapePrintHtml(item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق")}</p><p class="amount">${escapePrintHtml(formatEgpText(item.calculated_balance))}</p></footer></main></body></html>`);
       printWindow.document.close();
@@ -542,7 +580,7 @@ export default function BankReconciliationPage() {
               <div className="rounded-lg border border-dashed border-amber-300 bg-white p-4 text-center text-sm font-bold text-amber-600" data-testid="prior-year-checks-empty-state">لا توجد شيكات قديمة مضافة</div>
             )}
             {priorYearChecks.map((item, index) => (
-              <div key={`prior-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-amber-200 bg-white p-4 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid={`prior-year-check-row-${index}`}>
+              <div key={`prior-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-amber-200 bg-white p-4 md:grid-cols-[1fr_1fr_1fr_1fr_auto]" data-testid={`prior-year-check-row-${index}`}>
                 <div className="space-y-2">
                   <Label data-testid={`prior-year-check-${index}-number-label`}>رقم الشيك</Label>
                   <Input inputMode="numeric" dir="ltr" value={item.check_number} onChange={(event) => updatePriorYearCheck(index, "check_number", sanitizeDigitsInput(event.target.value))} className="h-11 rounded-lg bg-slate-50 text-right font-extrabold" data-testid={`prior-year-check-${index}-number-input`} />
@@ -554,6 +592,10 @@ export default function BankReconciliationPage() {
                 <div className="space-y-2">
                   <Label data-testid={`prior-year-check-${index}-date-label`}>تاريخ الشيك</Label>
                   <Input inputMode="numeric" dir="ltr" value={item.check_date} onChange={(event) => updatePriorYearCheck(index, "check_date", sanitizeDayMonthInput(event.target.value))} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-slate-50 text-center font-extrabold tracking-wider" data-testid={`prior-year-check-${index}-date-input`} />
+                </div>
+                <div className="space-y-2">
+                  <Label data-testid={`prior-year-check-${index}-year-label`}>السنة</Label>
+                  <Input inputMode="numeric" dir="ltr" value={item.year || ""} onChange={(event) => updatePriorYearCheck(index, "year", sanitizeDigitsInput(event.target.value).slice(0, 4))} placeholder="مثال: 2024" maxLength={4} className="h-11 rounded-lg bg-slate-50 text-center font-extrabold tracking-wider" data-testid={`prior-year-check-${index}-year-input`} />
                 </div>
                 <div className="flex items-end" data-testid={`prior-year-check-${index}-actions`}>
                   <Button type="button" variant="outline" onClick={() => removePriorYearCheck(index)} className="h-11 rounded-lg border-rose-300 text-rose-700 hover:bg-rose-50" data-testid={`prior-year-check-${index}-delete-button`}>
@@ -584,7 +626,7 @@ export default function BankReconciliationPage() {
             {(rows || []).length === 0 && <TableRow data-testid={`${testId}-empty-row`}><TableCell colSpan={3} className="text-center text-slate-400">—</TableCell></TableRow>}
             {(rows || []).map((row, index) => (
               <TableRow key={`${testId}-${index}`} data-testid={`${testId}-row-${index}`}>
-                <TableCell data-testid={`${testId}-row-${index}-date`}>{formatCheckDate(row.check_date)}</TableCell>
+                <TableCell data-testid={`${testId}-row-${index}-date`}>{formatCheckDateDisplay(row)}</TableCell>
                 <TableCell className="font-extrabold" data-testid={`${testId}-row-${index}-number`}>{row.check_number}</TableCell>
                 <TableCell data-testid={`${testId}-row-${index}-amount`}>{formatEgpText(row.amount)}</TableCell>
               </TableRow>
@@ -721,6 +763,9 @@ export default function BankReconciliationPage() {
                   <button type="button" onClick={() => printReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-extrabold text-emerald-700 hover:bg-emerald-100" data-testid={`print-saved-reconciliation-button-${item.id}`}>
                     <Printer className="h-4 w-4" /> طباعة
                   </button>
+                  <button type="button" onClick={() => exportReconciliationExcel(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 text-sm font-extrabold text-teal-700 hover:bg-teal-100" data-testid={`export-excel-reconciliation-button-${item.id}`}>
+                    <FileSpreadsheet className="h-4 w-4" /> تصدير Excel
+                  </button>
                   {canEditReconciliation && (
                     <button type="button" onClick={() => fillFormFromReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-extrabold text-amber-700 hover:bg-amber-100" data-testid={`edit-reconciliation-button-${item.id}`}>
                       <Pencil className="h-4 w-4" /> تعديل
@@ -742,7 +787,10 @@ export default function BankReconciliationPage() {
           <section className="reconciliation-memo-page space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm print:flex print:min-h-[95vh] print:flex-col print:border-0 print:shadow-none sm:p-8" data-testid="reconciliation-print-report">
             <div className="flex flex-col gap-3 print:hidden lg:flex-row lg:items-center lg:justify-between" data-testid="reconciliation-preview-actions">
               <Badge className="w-fit bg-sky-50 px-3 py-1 text-sky-800 hover:bg-sky-50" data-testid="reconciliation-preview-badge">معاينة قبل الطباعة والاعتماد</Badge>
-              <Button type="button" onClick={() => printReconciliation(activeReconciliation)} className="h-10 rounded-lg bg-slate-950 text-white" data-testid="reconciliation-preview-print-button"><Printer className="h-4 w-4" /> طباعة هذه المعاينة</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={() => exportReconciliationExcel(activeReconciliation)} variant="outline" className="h-10 rounded-lg border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" data-testid="reconciliation-preview-excel-button"><FileSpreadsheet className="h-4 w-4" /> تصدير Excel</Button>
+                <Button type="button" onClick={() => printReconciliation(activeReconciliation)} className="h-10 rounded-lg bg-slate-950 text-white" data-testid="reconciliation-preview-print-button"><Printer className="h-4 w-4" /> طباعة هذه المعاينة</Button>
+              </div>
             </div>
             <div className="reconciliation-memo-sheet bg-white" data-testid="reconciliation-print-sheet-frame">
               <div className="reconciliation-memo-header relative text-center" data-testid="reconciliation-print-header">
@@ -768,6 +816,21 @@ export default function BankReconciliationPage() {
               <div className="text-left" data-testid="print-status"><p className="reconciliation-memo-status font-extrabold text-slate-950" data-testid="print-status-text">{activeReconciliation.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p><p className="reconciliation-memo-final-balance mt-1 font-bold text-slate-700" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>
             </div>
           </section>
+        )}
+
+        {reconciliationToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4 print:hidden" data-testid="delete-reconciliation-modal-overlay">
+            <section className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-right shadow-2xl" role="dialog" aria-modal="true" data-testid="delete-reconciliation-modal">
+              <h3 className="text-2xl font-extrabold text-slate-950" data-testid="delete-reconciliation-modal-title">هل أنت متأكد؟</h3>
+              <p className="mt-3 text-sm font-semibold leading-7 text-slate-600" data-testid="delete-reconciliation-modal-description">سيتم حذف مذكرة التسوية «{reconciliationToDelete.period_label || "المحددة"}» نهائياً ولا يمكن التراجع.</p>
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="delete-reconciliation-modal-actions">
+                <Button type="button" onClick={confirmDeleteReconciliation} disabled={deletingReconciliation} className="h-12 rounded-lg bg-red-700 text-white hover:bg-red-800" data-testid="confirm-delete-reconciliation-button">
+                  <Trash2 className="h-4 w-4" /> {deletingReconciliation ? "جاري الحذف..." : "نعم، احذف المذكرة"}
+                </Button>
+                <Button type="button" onClick={() => setReconciliationToDelete(null)} disabled={deletingReconciliation} variant="outline" className="h-12 rounded-lg bg-white" data-testid="cancel-delete-reconciliation-button">تراجع</Button>
+              </div>
+            </section>
+          </div>
         )}
 
         {leavePromptOpen && (
