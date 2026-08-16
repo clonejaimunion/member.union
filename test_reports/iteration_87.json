@@ -1,0 +1,23 @@
+{
+  "summary": "Verified anniversary-cycle interest calculation for the industrial-development bank monthly-yield report. All 8 focused backend tests pass. Deposit 772500025 (1.3M @16%, created 2025-07-21) returns exactly total_interest=120811.42 for 2026 with monthly rows matching bank statement (يناير=17665.66/31d, فبراير=17665.66/31d, مارس=15956.08/28d, أبريل=17665.66/31d, مايو=17095.80/30d, يونيو=17665.66/31d, يوليو=17096.90/30d incl. +1.10 rounding adjustment). Derived daily interest = 569.86 (=round(0.16*1_300_000/365,2)). Deposit 77240000102 (1.0M @20%, created 2024-09-18 on 18th-cycle, active all of 2026) returns exactly 200000.0. previous-year endpoint 200 OK for both deposits. Trial balance 2026 is_balanced=true (debit==credit). Financial statements 2026 balance_sheet.check.total=0.0 and no critical accounting_errors. Detailed statement /statements/detailed?period_type=yearly&year=2026 returns rows containing current_year_interest.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration87_anniversary_interest_report.py",
+    "/app/test_reports/pytest/pytest_results_iter87_backend.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Note (informational, not a defect): response field `monthly_interest_amount` at the top level of the current-year report is derived from annual (amount*rate = 208000 for 772500025) and does NOT reflect the actual current-year total. The correct year total is exposed as `total_interest` (120811.42), which is what the UI should be displaying for partial-year deposits. Consider renaming or documenting to avoid consumer confusion."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration87_anniversary_interest_report.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "test_credentials": "admin / Admin@123 / social-solidarity",
+  "seed_data_creation": "None. Used pre-existing imported deposits under org social-solidarity.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter87 focused solely on anniversary-cycle interest report accuracy for bank industrial-development. The rewritten calculate_interest_rows (server.py ~6326) with daily rate rounded to 2 decimals and creation-day anniversary cycle produces exact bank-statement match. Rows returned via GET /api/banks/{bank_id}/reports/current-year use fields: month, month_number, interest_amount, active_days; top-level total_interest is the true partial-year total (monthly_interest_amount is annual and can mislead). Financial integrity for 2026 preserved.",
+  "rca of the issue": "N/A - verification pass; no defects found."
+}
