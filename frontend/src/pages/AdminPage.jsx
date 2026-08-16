@@ -96,6 +96,7 @@ const adminSections = [
   { id: "eta-integration", title: "منظومة الضرائب المصرية", subtitle: "ERP API و SDK التوقيع الرقمي", icon: PlugZap },
   { id: "rules-engine", title: "محرك قواعد القيود", subtitle: "Preview / Simulation / Conflict detection", icon: GitCompareArrows },
   { id: "fixed-asset-rates", title: "نسب إهلاك الأصول", subtitle: "تعديل نسب التصنيفات الثابتة", icon: SlidersHorizontal },
+  { id: "deposit-rounding", title: "تقريب فوائد الودائع والشهادات", subtitle: "تفعيل/إلغاء تقريب الفائدة اليومية لكل وديعة", icon: SlidersHorizontal },
   { id: "add-user", title: "إضافة مستخدم", subtitle: "إضافة مستخدم لإدخال البيانات", icon: Plus },
   { id: "users", title: "المستخدمون", subtitle: "المستخدمون المسجلون", icon: UsersRound },
   { id: "admin-password", title: "تغيير كلمة مرور الأدمن", subtitle: "إدارة كلمة المرور فقط", icon: LockKeyhole },
@@ -108,7 +109,7 @@ const adminSections = [
   { id: "audit-log", title: "سجل التدقيق", subtitle: "عرض بالشهر والسنة والساعة", icon: KeyRound },
 ];
 
-const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration", "data-flow-rules-manager", "data-purge"]);
+const superAdminOnlySectionIds = new Set(["general-settings", "program-security", "add-user", "users", "eta-integration", "data-flow-rules-manager", "data-purge", "deposit-rounding"]);
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -164,6 +165,10 @@ export default function AdminPage() {
   const [moduleOrganizationId, setModuleOrganizationId] = useState(user?.organization_id || "social-solidarity");
   const [fixedAssetRates, setFixedAssetRates] = useState([]);
   const [fixedAssetRateEdits, setFixedAssetRateEdits] = useState({});
+  const [roundingDeposits, setRoundingDeposits] = useState([]);
+  const [selectedRoundingDepositId, setSelectedRoundingDepositId] = useState("");
+  const [roundingPassword, setRoundingPassword] = useState("");
+  const [roundingSaving, setRoundingSaving] = useState(false);
   const [etaIntegration, setEtaIntegration] = useState(defaultEtaIntegration);
   const [etaConnection, setEtaConnection] = useState(null);
   const [dataFlowReport, setDataFlowReport] = useState(null);
@@ -278,6 +283,32 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadRoundingDeposits = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    try {
+      const response = await api.get("/admin/deposits-rounding");
+      setRoundingDeposits(response.data.deposits || []);
+    } catch (error) {
+      toast.error("تعذر تحميل قائمة الودائع");
+    }
+  }, [isSuperAdmin]);
+
+  const saveDepositRounding = async (useRounding) => {
+    if (!selectedRoundingDepositId) return toast.error("اختر وديعة أولاً");
+    if (!roundingPassword) return toast.error("أدخل كلمة مرور السوبر أدمن");
+    setRoundingSaving(true);
+    try {
+      const response = await api.patch(`/admin/deposits/${selectedRoundingDepositId}/rounding`, { use_daily_rounding: useRounding, password: roundingPassword });
+      toast.success(response.data.message);
+      setRoundingPassword("");
+      await loadRoundingDeposits();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "تعذر تحديث حالة التقريب");
+    } finally {
+      setRoundingSaving(false);
+    }
+  };
+
   const loadEtaIntegration = useCallback(async () => {
     if (!isSuperAdmin) return;
     try {
@@ -313,7 +344,8 @@ export default function AdminPage() {
     loadFixedAssetRates();
     loadOrganizations();
     loadEtaIntegration();
-  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations, loadEtaIntegration]);
+    loadRoundingDeposits();
+  }, [loadBanks, loadSecurityReview, loadUsers, loadAppSettings, loadModuleSettings, loadFixedAssetRates, loadOrganizations, loadEtaIntegration, loadRoundingDeposits]);
 
   useEffect(() => {
     if (!isSuperAdmin && superAdminOnlySectionIds.has(activeAdminSection)) {
@@ -1323,6 +1355,52 @@ export default function AdminPage() {
                   <Button type="button" onClick={() => saveFixedAssetRate(category)} className="h-11 bg-slate-950 text-white" data-testid={`save-fixed-asset-rate-${category.code}-button`}><Save className="h-4 w-4" /> حفظ</Button>
                 </div>
               ))}
+            </div>
+          </section>}
+
+          {isSuperAdmin && activeAdminSection === "deposit-rounding" && <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="deposit-rounding-section">
+            <div className="mb-5 flex items-center gap-3" data-testid="deposit-rounding-heading">
+              <SlidersHorizontal className="h-6 w-6 text-emerald-700" />
+              <div>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="deposit-rounding-eyebrow">تحكم متقدم</p>
+                <h2 className="text-2xl font-extrabold" data-testid="deposit-rounding-title">تقريب فوائد الودائع والشهادات</h2>
+              </div>
+            </div>
+            <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm font-bold text-amber-800" data-testid="deposit-rounding-hint">اختر الوديعة/الشهادة ثم فعّل أو ألغِ تقريب الفائدة اليومية لها فقط. عند الإلغاء يُحسب العائد بالرقم الكامل بدون تقريب (مطابق للبنك في الشهادات). العملية تتطلب كلمة مرور السوبر أدمن.</p>
+            <div className="space-y-4" data-testid="deposit-rounding-form">
+              <div className="space-y-2" data-testid="deposit-rounding-select-wrapper">
+                <Label htmlFor="rounding_deposit" data-testid="deposit-rounding-select-label">اختر الوديعة / الشهادة</Label>
+                <select id="rounding_deposit" value={selectedRoundingDepositId} onChange={(event) => setSelectedRoundingDepositId(event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 text-right font-bold" data-testid="deposit-rounding-select">
+                  <option value="">— اختر —</option>
+                  {roundingDeposits.map((deposit) => (
+                    <option key={deposit.id} value={deposit.id} data-testid={`deposit-rounding-option-${deposit.deposit_number}`}>
+                      {deposit.deposit_number} — {deposit.bank_name} — {Number(deposit.amount).toLocaleString("ar-EG")} ج ({deposit.monthly_interest_rate}%) [{deposit.use_daily_rounding ? "تقريب مفعّل" : "تقريب ملغي"}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedRoundingDepositId && (() => {
+                const selected = roundingDeposits.find((deposit) => deposit.id === selectedRoundingDepositId);
+                if (!selected) return null;
+                return (
+                  <div className="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="deposit-rounding-selected-panel">
+                    <div className="flex flex-wrap items-center gap-3" data-testid="deposit-rounding-status-row">
+                      <span className="font-extrabold" data-testid="deposit-rounding-selected-number">وديعة {selected.deposit_number}</span>
+                      <Badge className={selected.use_daily_rounding ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"} data-testid="deposit-rounding-current-status">
+                        {selected.use_daily_rounding ? "التقريب مفعّل حاليًا" : "التقريب ملغي حاليًا"}
+                      </Badge>
+                    </div>
+                    <div className="space-y-2" data-testid="deposit-rounding-password-wrapper">
+                      <Label htmlFor="rounding_password" data-testid="deposit-rounding-password-label">كلمة مرور السوبر أدمن</Label>
+                      <Input id="rounding_password" type="password" value={roundingPassword} onChange={(event) => setRoundingPassword(event.target.value)} className="h-12 rounded-lg bg-white text-right" data-testid="deposit-rounding-password-input" />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="deposit-rounding-actions">
+                      <Button type="button" disabled={roundingSaving} onClick={() => saveDepositRounding(true)} className="h-12 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800" data-testid="deposit-rounding-enable-button">تفعيل التقريب</Button>
+                      <Button type="button" disabled={roundingSaving} onClick={() => saveDepositRounding(false)} variant="outline" className="h-12 rounded-lg border-rose-300 bg-white font-bold text-rose-700 hover:bg-rose-50" data-testid="deposit-rounding-disable-button">إلغاء التقريب</Button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </section>}
 

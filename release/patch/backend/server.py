@@ -255,6 +255,7 @@ class DepositBase(BaseModel):
     accounting_start_datetime: Optional[datetime] = None
     renewed_from_deposit_id: Optional[str] = None
     renewal_notes: Optional[str] = None
+    use_daily_rounding: bool = True
 
 
 class DepositCreate(DepositBase):
@@ -2303,6 +2304,7 @@ def hydrate_deposit(document: dict) -> dict:
     clean.setdefault("is_opening_balance_deposit", False)
     clean.setdefault("renewed_from_deposit_id", None)
     clean.setdefault("renewal_notes", None)
+    clean.setdefault("use_daily_rounding", True)
     for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -6330,7 +6332,8 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
     creation = normalize_datetime(deposit.creation_datetime).date()
     maturity = normalize_datetime(deposit.maturity_datetime).date()
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = round(annual_interest / days_in_year(year), 2)
+    use_rounding = getattr(deposit, "use_daily_rounding", True)
+    daily_interest = round(annual_interest / days_in_year(year), 2) if use_rounding else annual_interest / days_in_year(year)
     anniversary_day = creation.day
 
     def anniversary_on(y: int, m: int) -> date:
@@ -6352,7 +6355,8 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             active_days = (period_end - period_start).days
             interest = round(daily_interest * active_days, 2)
             # قيد إتمام السنة (شهر إنشاء الوديعة): يأخذ فرق التقريب ليساوي إجمالي السنة العائد السنوي
-            if month == creation.month:
+            # يُطبَّق فقط عند تفعيل التقريب؛ عند إلغاء التقريب نستخدم الرقم الكامل بلا تسوية (زي البنك للشهادات)
+            if use_rounding and month == creation.month:
                 year_start = anniversary_on(year - 1, creation.month)
                 if year_start >= creation and credit_date <= maturity:
                     full_year_days = (credit_date - year_start).days
@@ -6383,7 +6387,8 @@ def calculate_deposit_interest_for_period(deposit: Deposit, period_from: date, p
     if overlap_end <= overlap_start:
         return 0.0
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = round(annual_interest / days_in_year(period_from.year), 2)
+    daily_base = annual_interest / days_in_year(period_from.year)
+    daily_interest = round(daily_base, 2) if getattr(deposit, "use_daily_rounding", True) else daily_base
     active_days = (overlap_end - overlap_start).total_seconds() / 86400
     return round(daily_interest * active_days, 2)
 
@@ -6483,7 +6488,8 @@ async def calculate_total_deposit_interest_for_period(organization_id: str, peri
 
 def calculate_daily_interest_amount(deposit: Deposit, year: int) -> tuple[float, float]:
     annual_interest = deposit.amount * deposit.monthly_interest_rate / 100
-    daily_interest = round(annual_interest / days_in_year(year), 2)
+    daily_base = annual_interest / days_in_year(year)
+    daily_interest = round(daily_base, 2) if getattr(deposit, "use_daily_rounding", True) else daily_base
     return round(annual_interest, 2), daily_interest
 
 
@@ -9127,6 +9133,53 @@ async def import_organization_data(payload: dict, current_user: dict = Depends(r
             await collection.insert_many(cleaned)
         summary[collection_name] = len(cleaned)
     return {"message": "تم استيراد البيانات بنجاح", "organization_id": organization_id, "imported": summary}
+
+
+class DepositRoundingUpdate(BaseModel):
+    use_daily_rounding: bool
+    password: str
+
+
+@api_router.get("/admin/deposits-rounding")
+async def list_deposits_rounding(_: dict = Depends(require_super_admin)):
+    documents = await db.deposits.find(with_organization({}), {"_id": 0}).sort("created_at", -1).to_list(5000)
+    banks_map = {bank["id"]: bank.get("name") for bank in await get_all_banks()}
+    items = []
+    for document in documents:
+        deposit = hydrate_deposit(document)
+        items.append({
+            "id": deposit.get("id"),
+            "bank_id": deposit.get("bank_id"),
+            "bank_name": banks_map.get(deposit.get("bank_id"), deposit.get("bank_id")),
+            "deposit_number": deposit.get("deposit_number"),
+            "account_number": deposit.get("account_number"),
+            "amount": deposit.get("amount"),
+            "monthly_interest_rate": deposit.get("monthly_interest_rate"),
+            "use_daily_rounding": bool(deposit.get("use_daily_rounding", True)),
+        })
+    return {"deposits": items}
+
+
+@api_router.patch("/admin/deposits/{deposit_id}/rounding")
+async def update_deposit_rounding(deposit_id: str, payload: DepositRoundingUpdate, current_user: dict = Depends(require_super_admin)):
+    admin_user = await db.users.find_one({"id": current_user.get("id")}, {"_id": 0})
+    if not admin_user or not verify_password(payload.password, admin_user.get("password_hash", "")):
+        raise HTTPException(status_code=403, detail="كلمة مرور السوبر أدمن غير صحيحة")
+    result = await db.deposits.find_one_and_update(
+        with_organization({"id": deposit_id}),
+        {"$set": {"use_daily_rounding": bool(payload.use_daily_rounding), "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0},
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
+    state = "تفعيل" if payload.use_daily_rounding else "إلغاء"
+    return {
+        "message": f"تم {state} تقريب الفائدة اليومية للوديعة {result.get('deposit_number')}",
+        "deposit_id": deposit_id,
+        "use_daily_rounding": bool(payload.use_daily_rounding),
+    }
+
 
 
 @api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])
