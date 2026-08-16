@@ -686,7 +686,7 @@ export default function BankReconciliationPage() {
                       <Pencil className="h-4 w-4" /> تعديل
                     </button>
                   )}
-                  {user?.role === "admin" && (
+                  {canEditReconciliation && (
                     <button type="button" onClick={() => deleteReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-extrabold text-red-700 hover:bg-red-100" data-testid={`delete-reconciliation-button-${item.id}`}>
                       <Trash2 className="h-4 w-4" /> حذف مذكرة التسوية
                     </button>
