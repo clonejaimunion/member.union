@@ -10597,7 +10597,7 @@ app.include_router(api_router)
 
 
 FRONTEND_BUILD_DIR = ROOT_DIR.parent / "frontend" / "build"
-if FRONTEND_BUILD_DIR.exists():
+if FRONTEND_BUILD_DIR.exists() and (FRONTEND_BUILD_DIR / "static").exists():
     app.mount("/static", StaticFiles(directory=FRONTEND_BUILD_DIR / "static"), name="static")
 
     @app.get("/{full_path:path}", include_in_schema=False)
