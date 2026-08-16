@@ -9030,6 +9030,19 @@ async def reverse_manual_journal_entry(entry_id: str, current_user: dict = Depen
     return JournalEntryResponse(**hydrate_journal_entry(existing))
 
 
+@api_router.post("/maintenance/purge-reversals")
+async def purge_reversal_entries(current_user: dict = Depends(require_admin)):
+    # تنظيف لمرة واحدة: حذف جميع القيود العكسية القديمة + القيود الأصلية التي سبق عكسها
+    # (كانت تمثل عمليات محذوفة/ملغاة) لضبط الأرصدة بعد إلغاء نظام القيود العكسية.
+    reversals = await db.journal_entries.delete_many({"is_reversal": True})
+    originals = await db.journal_entries.delete_many({"reversal_entry_id": {"$exists": True, "$ne": None}})
+    return {
+        "deleted_reversals": reversals.deleted_count,
+        "deleted_reversed_originals": originals.deleted_count,
+        "message": "تم تنظيف القيود العكسية القديمة بنجاح",
+    }
+
+
 @api_router.get("/chart-accounts", response_model=List[ChartAccountResponse])
 async def list_chart_accounts(_: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]))):
     await sync_chart_accounts_for_organization(organization_id_or_default())
