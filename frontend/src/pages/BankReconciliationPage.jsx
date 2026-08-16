@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Printer, Save, Trash2, X } from "lucide-react";
+import { Eye, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { BankShell } from "@/components/BankShell";
@@ -41,6 +41,7 @@ export default function BankReconciliationPage() {
   const [bankStatementBalance, setBankStatementBalance] = useState("");
   const [outstandingChecks, setOutstandingChecks] = useState([emptyCheck()]);
   const [collectionChecks, setCollectionChecks] = useState([emptyCheck()]);
+  const [priorYearChecks, setPriorYearChecks] = useState([]);
   const [reconciliations, setReconciliations] = useState([]);
   const [activeReconciliation, setActiveReconciliation] = useState(null);
   const [editingReconciliationId, setEditingReconciliationId] = useState(null);
@@ -56,17 +57,19 @@ export default function BankReconciliationPage() {
 
   const totals = useMemo(() => {
     const outstanding = outstandingChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
-    const collection = collectionChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
+    const priorYear = priorYearChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0);
+    const collection = collectionChecks.reduce((sum, item) => sum + Number(sanitizeDecimalInput(item.amount) || 0), 0) + priorYear;
     const calculated = Number(bookBalance || 0) + outstanding - collection;
     const difference = calculated - Number(bankStatementBalance || 0);
     return {
       outstanding,
       collection,
+      priorYear,
       calculated,
       difference,
       matched: Math.abs(difference) < 0.01,
     };
-  }, [bookBalance, bankStatementBalance, outstandingChecks, collectionChecks]);
+  }, [bookBalance, bankStatementBalance, outstandingChecks, collectionChecks, priorYearChecks]);
 
   const getReconciliationYear = (item) => {
     const labelMatch = String(item.period_label || "").match(/(20\d{2}|19\d{2})/);
@@ -86,6 +89,7 @@ export default function BankReconciliationPage() {
     bankStatementBalance: data.bankStatementBalance,
     outstandingChecks: data.outstandingChecks,
     collectionChecks: data.collectionChecks,
+    priorYearChecks: data.priorYearChecks,
   }), []);
 
   const currentFormSnapshot = useMemo(() => buildFormSnapshot({
@@ -95,7 +99,8 @@ export default function BankReconciliationPage() {
     bankStatementBalance,
     outstandingChecks,
     collectionChecks,
-  }), [administration, bankStatementBalance, bookBalance, buildFormSnapshot, collectionChecks, outstandingChecks, periodLabel]);
+    priorYearChecks,
+  }), [administration, bankStatementBalance, bookBalance, buildFormSnapshot, collectionChecks, outstandingChecks, priorYearChecks, periodLabel]);
 
   const hasUnsavedChanges = canEditReconciliation && Boolean(committedFormSnapshot) && currentFormSnapshot !== committedFormSnapshot;
 
@@ -261,6 +266,10 @@ export default function BankReconciliationPage() {
       check_date: normalizeDayMonthToDateTime(item.check_date),
     }));
 
+  const addPriorYearCheck = () => setPriorYearChecks((previous) => [...previous, emptyCheck()]);
+  const updatePriorYearCheck = (index, field, value) => setPriorYearChecks((previous) => previous.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)));
+  const removePriorYearCheck = (index) => setPriorYearChecks((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+
   const fillFormFromReconciliation = (item) => {
     const nextOutstandingChecks = (item.outstanding_checks?.length ? item.outstanding_checks : [emptyCheck()]).map((check) => ({
       check_number: check.check_number || "",
@@ -268,6 +277,11 @@ export default function BankReconciliationPage() {
       check_date: formatCheckDate(check.check_date),
     }));
     const nextCollectionChecks = (item.collection_checks?.length ? item.collection_checks : [emptyCheck()]).map((check) => ({
+      check_number: check.check_number || "",
+      amount: String(check.amount ?? ""),
+      check_date: formatCheckDate(check.check_date),
+    }));
+    const nextPriorYearChecks = (item.prior_year_collection_checks || []).map((check) => ({
       check_number: check.check_number || "",
       amount: String(check.amount ?? ""),
       check_date: formatCheckDate(check.check_date),
@@ -281,6 +295,7 @@ export default function BankReconciliationPage() {
     setBankStatementBalance(String(item.bank_statement_balance ?? ""));
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
+    setPriorYearChecks(nextPriorYearChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: item.period_label || "",
       administration: currentAdministrationName,
@@ -288,6 +303,7 @@ export default function BankReconciliationPage() {
       bankStatementBalance: String(item.bank_statement_balance ?? ""),
       outstandingChecks: nextOutstandingChecks,
       collectionChecks: nextCollectionChecks,
+      priorYearChecks: nextPriorYearChecks,
     }));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -303,6 +319,7 @@ export default function BankReconciliationPage() {
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
+    setPriorYearChecks([]);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: "",
       administration: currentAdministrationName,
@@ -310,6 +327,7 @@ export default function BankReconciliationPage() {
       bankStatementBalance: "",
       outstandingChecks: nextOutstandingChecks,
       collectionChecks: nextCollectionChecks,
+      priorYearChecks: [],
     }));
     setTimeout(() => syncChecksFromRecords("both", true), 0);
   };
@@ -325,6 +343,7 @@ export default function BankReconciliationPage() {
         bank_statement_balance: Number(bankStatementBalance || 0),
         outstanding_checks: cleanChecks(outstandingChecks),
         collection_checks: cleanChecks(collectionChecks),
+        prior_year_collection_checks: cleanChecks(priorYearChecks),
       };
       const response = editingReconciliationId
         ? await api.put(`/banks/${bankId}/reconciliations/${editingReconciliationId}`, payload)
@@ -405,7 +424,7 @@ export default function BankReconciliationPage() {
       const logo = logoSource ? `<div class="memo-logo-box"><img class="memo-logo" src="${escapePrintHtml(logoSource)}" alt="${escapePrintHtml(bank.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" /><div class="memo-logo-fallback">${escapePrintHtml(bank.name)}</div></div>` : `<div class="memo-logo-box"><div class="memo-logo-fallback" style="display:flex">${escapePrintHtml(bank.name)}</div></div>`;
       const rowsHtml = (rows) => (rows || []).length ? rows.map((row) => `<tr><td>${escapePrintHtml(formatCheckDate(row.check_date))}</td><td>${escapePrintHtml(row.check_number)}</td><td>${escapePrintHtml(formatEgpText(row.amount))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty-cell">—</td></tr>`;
       const checksSection = (title, rows, total) => `<section class="checks-section"><h3>${escapePrintHtml(title)}</h3><table><thead><tr><th>التاريخ يوم/شهر</th><th>رقم الشيك</th><th>المبلغ</th></tr></thead><tbody>${rowsHtml(rows)}<tr class="total-row"><td colspan="2">الإجمالي</td><td>${escapePrintHtml(formatEgpText(total))}</td></tr></tbody></table></section>`;
-      printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مذكرة التسوية</title><style>@page{size:A4 portrait;margin:5mm}html,body{margin:0;padding:0;background:#fff;direction:rtl;font-family:Tahoma,Arial,sans-serif;color:#111827}body{width:200mm;height:287mm;overflow:hidden}.memo-page{position:relative;box-sizing:border-box;width:190mm;height:277mm;max-height:277mm;overflow:hidden;padding:10mm 12mm 8mm;margin:0 auto;background:#fff}.memo-header{position:relative;min-height:38mm;text-align:center}.memo-logo-box{position:absolute;left:0;top:0;width:42mm;height:24mm;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;background:#fff}.memo-logo{width:40mm;height:22mm;object-fit:contain;display:block}.memo-logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;text-align:center;font-weight:900;font-size:13px;line-height:1.35;color:#111827;padding:2mm}.memo-logo-text{position:absolute;left:0;top:0;width:38mm;border:1px solid #ddd;padding:3mm;font-weight:700;text-align:center}.org-title{font-size:15px;line-height:1.5;font-weight:900;margin:0;padding:0 42mm 0 20mm}.bank-line{font-size:10px;font-weight:700;color:#4b5563;margin:2mm 0 0}.period-line{font-size:13px;font-weight:900;margin:2mm 0 0}.balance{margin:15mm 0 7mm;text-align:right;padding-right:8mm}.balance .label{font-size:13px;font-weight:900}.balance .value{font-size:16px;font-weight:900;margin-top:2mm}.checks-section{padding:0 8mm;margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.checks-section h3{font-size:12px;font-weight:900;margin:0 0 2mm;text-align:right}table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #d7d7d7;padding:1.3mm 2mm;font-size:9px;line-height:1.15;text-align:right;vertical-align:middle}th{font-weight:900;background:#fff}.total-row td{border-top:1.6px solid #111827;font-weight:900}.empty-cell{text-align:center;color:#9ca3af}.footer{position:absolute;left:20mm;bottom:15mm;text-align:left;direction:rtl}.footer .status{font-size:13px;font-weight:900}.footer .amount{font-size:10px;font-weight:700;color:#374151;margin-top:1mm}@media print{html,body{width:200mm;height:287mm;overflow:hidden}.memo-page{page-break-after:avoid;break-after:avoid}.memo-logo-box{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><main class="memo-page"><header class="memo-header">${logo}<h1 class="org-title">${escapePrintHtml(item.administration || administration || currentAdministrationName)}</h1><p class="bank-line">${escapePrintHtml(bank.name)}</p><p class="period-line">${escapePrintHtml(`${meta.month} ${meta.year}`)}</p></header><section class="balance"><p class="label">الرصيد</p><p class="value">${escapePrintHtml(formatEgpText(item.book_balance))}</p></section>${checksSection("يضاف: شيكات لم تقدم للصرف", item.outstanding_checks, item.total_outstanding_checks)}${checksSection("يخصم: شيكات تحت التحصيل", item.collection_checks, item.total_collection_checks)}<footer class="footer"><p class="status">${escapePrintHtml(item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق")}</p><p class="amount">${escapePrintHtml(formatEgpText(item.calculated_balance))}</p></footer></main></body></html>`);
+      printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مذكرة التسوية</title><style>@page{size:A4 portrait;margin:5mm}html,body{margin:0;padding:0;background:#fff;direction:rtl;font-family:Tahoma,Arial,sans-serif;color:#111827}body{width:200mm;height:287mm;overflow:hidden}.memo-page{position:relative;box-sizing:border-box;width:190mm;height:277mm;max-height:277mm;overflow:hidden;padding:10mm 12mm 8mm;margin:0 auto;background:#fff}.memo-header{position:relative;min-height:38mm;text-align:center}.memo-logo-box{position:absolute;left:0;top:0;width:42mm;height:24mm;display:flex;align-items:center;justify-content:center;border:1px solid #e5e7eb;background:#fff}.memo-logo{width:40mm;height:22mm;object-fit:contain;display:block}.memo-logo-fallback{display:none;width:100%;height:100%;align-items:center;justify-content:center;text-align:center;font-weight:900;font-size:13px;line-height:1.35;color:#111827;padding:2mm}.memo-logo-text{position:absolute;left:0;top:0;width:38mm;border:1px solid #ddd;padding:3mm;font-weight:700;text-align:center}.org-title{font-size:15px;line-height:1.5;font-weight:900;margin:0;padding:0 42mm 0 20mm}.bank-line{font-size:10px;font-weight:700;color:#4b5563;margin:2mm 0 0}.period-line{font-size:13px;font-weight:900;margin:2mm 0 0}.balance{margin:15mm 0 7mm;text-align:right;padding-right:8mm}.balance .label{font-size:13px;font-weight:900}.balance .value{font-size:16px;font-weight:900;margin-top:2mm}.checks-section{padding:0 8mm;margin-top:7mm;break-inside:avoid;page-break-inside:avoid}.checks-section h3{font-size:12px;font-weight:900;margin:0 0 2mm;text-align:right}table{width:100%;border-collapse:collapse;table-layout:fixed;break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #d7d7d7;padding:1.3mm 2mm;font-size:9px;line-height:1.15;text-align:right;vertical-align:middle}th{font-weight:900;background:#fff}.total-row td{border-top:1.6px solid #111827;font-weight:900}.empty-cell{text-align:center;color:#9ca3af}.footer{position:absolute;left:20mm;bottom:15mm;text-align:left;direction:rtl}.footer .status{font-size:13px;font-weight:900}.footer .amount{font-size:10px;font-weight:700;color:#374151;margin-top:1mm}@media print{html,body{width:200mm;height:287mm;overflow:hidden}.memo-page{page-break-after:avoid;break-after:avoid}.memo-logo-box{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><main class="memo-page"><header class="memo-header">${logo}<h1 class="org-title">${escapePrintHtml(item.administration || administration || currentAdministrationName)}</h1><p class="bank-line">${escapePrintHtml(bank.name)}</p><p class="period-line">${escapePrintHtml(`${meta.month} ${meta.year}`)}</p></header><section class="balance"><p class="label">الرصيد</p><p class="value">${escapePrintHtml(formatEgpText(item.book_balance))}</p></section>${checksSection("يضاف: شيكات لم تقدم للصرف", item.outstanding_checks, item.total_outstanding_checks)}${checksSection("يخصم: شيكات تحت التحصيل", [...(item.collection_checks || []), ...(item.prior_year_collection_checks || [])], item.total_collection_checks)}<footer class="footer"><p class="status">${escapePrintHtml(item.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق")}</p><p class="amount">${escapePrintHtml(formatEgpText(item.calculated_balance))}</p></footer></main></body></html>`);
       printWindow.document.close();
       printWindow.focus();
       const images = Array.from(printWindow.document.images || []);
@@ -467,6 +486,45 @@ export default function BankReconciliationPage() {
           </div>
         ))}
       </div>
+      {type === "collection" && (
+        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 print:hidden" data-testid="prior-year-checks-block">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" data-testid="prior-year-checks-heading">
+            <div>
+              <h4 className="text-base font-extrabold text-amber-900" data-testid="prior-year-checks-title">شيكات تحت التحصيل عن سنوات سابقة</h4>
+              <p className="text-xs font-bold text-amber-700" data-testid="prior-year-checks-subtitle">تُضاف يدويًا لإجمالي شيكات تحت التحصيل وحساب المطابقة (بدون قيود محاسبية)</p>
+            </div>
+            <Button type="button" onClick={addPriorYearCheck} className="h-10 rounded-lg bg-amber-600 text-white hover:bg-amber-700" data-testid="add-prior-year-check-button">
+              <Plus className="h-4 w-4" /> إضافة شيك قديم
+            </Button>
+          </div>
+          <div className="space-y-3" data-testid="prior-year-checks-list">
+            {priorYearChecks.length === 0 && (
+              <div className="rounded-lg border border-dashed border-amber-300 bg-white p-4 text-center text-sm font-bold text-amber-600" data-testid="prior-year-checks-empty-state">لا توجد شيكات قديمة مضافة</div>
+            )}
+            {priorYearChecks.map((item, index) => (
+              <div key={`prior-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-amber-200 bg-white p-4 md:grid-cols-[1fr_1fr_1fr_auto]" data-testid={`prior-year-check-row-${index}`}>
+                <div className="space-y-2">
+                  <Label data-testid={`prior-year-check-${index}-number-label`}>رقم الشيك</Label>
+                  <Input inputMode="numeric" dir="ltr" value={item.check_number} onChange={(event) => updatePriorYearCheck(index, "check_number", sanitizeDigitsInput(event.target.value))} className="h-11 rounded-lg bg-slate-50 text-right font-extrabold" data-testid={`prior-year-check-${index}-number-input`} />
+                </div>
+                <div className="space-y-2">
+                  <Label data-testid={`prior-year-check-${index}-amount-label`}>مبلغ الشيك</Label>
+                  <Input inputMode="decimal" dir="ltr" value={item.amount} onChange={(event) => updatePriorYearCheck(index, "amount", sanitizeDecimalInput(event.target.value))} className="h-11 rounded-lg bg-slate-50 text-right font-extrabold" data-testid={`prior-year-check-${index}-amount-input`} />
+                </div>
+                <div className="space-y-2">
+                  <Label data-testid={`prior-year-check-${index}-date-label`}>تاريخ الشيك</Label>
+                  <Input inputMode="numeric" dir="ltr" value={item.check_date} onChange={(event) => updatePriorYearCheck(index, "check_date", sanitizeDayMonthInput(event.target.value))} placeholder="يوم/شهر" maxLength={5} className="h-11 rounded-lg bg-slate-50 text-center font-extrabold tracking-wider" data-testid={`prior-year-check-${index}-date-input`} />
+                </div>
+                <div className="flex items-end" data-testid={`prior-year-check-${index}-actions`}>
+                  <Button type="button" variant="outline" onClick={() => removePriorYearCheck(index)} className="h-11 rounded-lg border-rose-300 text-rose-700 hover:bg-rose-50" data-testid={`prior-year-check-${index}-delete-button`}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 
@@ -616,11 +674,6 @@ export default function BankReconciliationPage() {
                   <p className="mt-1 text-lg font-extrabold" data-testid={`reconciliation-history-button-${item.id}-status`}>{item.status_text}</p>
                   <p className="mt-1 text-sm font-bold opacity-80" data-testid={`reconciliation-history-button-${item.id}-balance`}>{formatEgpText(item.calculated_balance)}</p>
                 </button>
-                {user?.role === "admin" && (
-                  <button type="button" onClick={() => deleteReconciliation(item)} className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-extrabold text-red-700 hover:bg-red-100" data-testid={`delete-reconciliation-button-${item.id}`}>
-                    <Trash2 className="h-4 w-4" /> حذف مذكرة التسوية
-                  </button>
-                )}
                 <div className="mt-3 grid grid-cols-1 gap-2" data-testid={`reconciliation-history-actions-${item.id}`}>
                   <button type="button" onClick={() => previewReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-extrabold text-slate-800 hover:bg-slate-100" data-testid={`preview-reconciliation-button-${item.id}`}>
                     <Eye className="h-4 w-4" /> معاينة
@@ -631,6 +684,11 @@ export default function BankReconciliationPage() {
                   {canEditReconciliation && (
                     <button type="button" onClick={() => fillFormFromReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-extrabold text-amber-700 hover:bg-amber-100" data-testid={`edit-reconciliation-button-${item.id}`}>
                       <Pencil className="h-4 w-4" /> تعديل
+                    </button>
+                  )}
+                  {user?.role === "admin" && (
+                    <button type="button" onClick={() => deleteReconciliation(item)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-sm font-extrabold text-red-700 hover:bg-red-100" data-testid={`delete-reconciliation-button-${item.id}`}>
+                      <Trash2 className="h-4 w-4" /> حذف مذكرة التسوية
                     </button>
                   )}
                 </div>
@@ -664,7 +722,7 @@ export default function BankReconciliationPage() {
               </div>
             </div>
             <ChecksTable title="يضاف: شيكات لم تقدم للصرف" rows={activeReconciliation.outstanding_checks || []} testId="outstanding-print" total={activeReconciliation.total_outstanding_checks} />
-            <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={activeReconciliation.collection_checks || []} testId="collection-print" total={activeReconciliation.total_collection_checks} />
+            <ChecksTable title="يخصم: شيكات تحت التحصيل" rows={[...(activeReconciliation.collection_checks || []), ...(activeReconciliation.prior_year_collection_checks || [])]} testId="collection-print" total={activeReconciliation.total_collection_checks} />
             <div className="hidden" data-testid="reconciliation-print-formula-wrapper"><span data-testid="reconciliation-print-formula-table" /><span data-testid="reconciliation-print-formula-outstanding">{formatEgpText(activeReconciliation.total_outstanding_checks)}</span><span data-testid="reconciliation-print-formula-collection">{formatEgpText(activeReconciliation.total_collection_checks)}</span><span data-testid="reconciliation-print-formula-calculated">{formatEgpText(activeReconciliation.calculated_balance)}</span><span data-testid="reconciliation-print-formula-bank-statement">{formatEgpText(activeReconciliation.bank_statement_balance)}</span><span data-testid="reconciliation-print-formula-difference">{formatEgpText(activeReconciliation.difference)}</span></div>
             <div className="reconciliation-memo-footer flex justify-start pt-8" data-testid="print-status-wrapper">
               <div className="text-left" data-testid="print-status"><p className="reconciliation-memo-status font-extrabold text-slate-950" data-testid="print-status-text">{activeReconciliation.is_matched ? "الرصيد مطابق" : "الرصيد غير مطابق"}</p><p className="reconciliation-memo-final-balance mt-1 font-bold text-slate-700" data-testid="print-matched-balance-value">{formatEgpText(activeReconciliation.calculated_balance)}</p></div>

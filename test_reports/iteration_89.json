@@ -1,0 +1,24 @@
+{
+  "summary": "Tested new 'prior_year_collection_checks' feature on bank reconciliation memo (bank=industrial-development, org=social-solidarity). Backend pytest covers create/get/update/delete with correct totals and no journal side-effect; UI verified block visibility, add/edit/delete rows, save, and that the printed memo table merges prior-year rows into 'يخصم: شيكات تحت التحصيل' with matching totals. Cleaned all test data; trial-balance is_balanced=true and balance_sheet.check.total=0.0 confirmed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_reconciliation_prior_year_checks.py",
+    "/app/test_reports/pytest/prior_year_checks.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 10833 lines - consider splitting into modules (reconciliations, banks, reports, auth, etc.). Not blocking.",
+    "The prior-year block is only rendered for type==='collection' by design (correct)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_reconciliation_prior_year_checks.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin / Admin@123 / social-solidarity",
+  "seed_data_creation": "Created 1 reconciliation via UI + 1 via pytest (both deleted after verification). No pollution.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints for reports: /api/trial-balance and /api/financial-statements (not under /api/reports/). Login form uses positional inputs; use inputs[0]/[1]. Reconciliation save button testid=save-reconciliation-button. Prior-year block testid=prior-year-checks-block; rows= prior-year-check-row-{i} with number/amount/date sub-inputs and prior-year-check-{i}-delete-button.",
+  "rca of the issue": "N/A - feature works end to end. Backend total_collection_checks = sum(collection)+sum(prior_year); total_prior_year_collection_checks is returned separately. GET hydrates check_date. Only the residual reconciliation difference creates a journal (source_type=reconciliation); prior-year checks themselves post no journal."
+}

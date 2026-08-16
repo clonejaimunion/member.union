@@ -1308,6 +1308,7 @@ class BankReconciliationCreate(BaseModel):
     bank_statement_balance: float
     outstanding_checks: List[ReconciliationCheck] = Field(default_factory=list)
     collection_checks: List[ReconciliationCheck] = Field(default_factory=list)
+    prior_year_collection_checks: List[ReconciliationCheck] = Field(default_factory=list)
 
 
 class BankReconciliation(BankReconciliationCreate):
@@ -1317,6 +1318,7 @@ class BankReconciliation(BankReconciliationCreate):
     bank_id: str
     total_outstanding_checks: float
     total_collection_checks: float
+    total_prior_year_collection_checks: float = 0.0
     calculated_balance: float
     difference: float
     is_matched: bool
@@ -4979,7 +4981,7 @@ def hydrate_reconciliation(document: dict) -> dict:
     for field_name in ["created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
-    for list_name in ["outstanding_checks", "collection_checks"]:
+    for list_name in ["outstanding_checks", "collection_checks", "prior_year_collection_checks"]:
         for item in clean.get(list_name, []):
             if isinstance(item.get("check_date"), str):
                 item["check_date"] = datetime.fromisoformat(item["check_date"])
@@ -5849,13 +5851,15 @@ def hydrate_custody_advance(document: dict) -> dict:
 
 def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
     total_outstanding = round(sum(item.amount for item in payload.outstanding_checks), 2)
-    total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
+    total_prior_year_collection = round(sum(item.amount for item in payload.prior_year_collection_checks), 2)
+    total_collection = round(sum(item.amount for item in payload.collection_checks) + total_prior_year_collection, 2)
     calculated_balance = round(payload.book_balance + total_outstanding - total_collection, 2)
     difference = round(calculated_balance - payload.bank_statement_balance, 2)
     is_matched = abs(difference) < 0.01
     return {
         "total_outstanding_checks": total_outstanding,
         "total_collection_checks": total_collection,
+        "total_prior_year_collection_checks": total_prior_year_collection,
         "calculated_balance": calculated_balance,
         "difference": difference,
         "is_matched": is_matched,
@@ -7501,7 +7505,7 @@ async def create_bank_reconciliation(
     payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
     computed = calculate_reconciliation(payload)
     document = payload.model_dump()
-    for list_name in ["outstanding_checks", "collection_checks"]:
+    for list_name in ["outstanding_checks", "collection_checks", "prior_year_collection_checks"]:
         for item in document[list_name]:
             item["check_date"] = serialize_datetime(item["check_date"])
     document.update(
@@ -7582,7 +7586,7 @@ async def update_bank_reconciliation(
     payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
     computed = calculate_reconciliation(payload)
     updates = payload.model_dump()
-    for list_name in ["outstanding_checks", "collection_checks"]:
+    for list_name in ["outstanding_checks", "collection_checks", "prior_year_collection_checks"]:
         for item in updates[list_name]:
             item["check_date"] = serialize_datetime(item["check_date"])
     updates.update({**computed, "updated_at": serialize_datetime(datetime.now(timezone.utc))})
