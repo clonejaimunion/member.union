@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, FileSpreadsheet, Pencil, Plus, Printer, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -78,6 +78,7 @@ export default function BankReconciliationPage() {
   const [pendingNavigation, setPendingNavigation] = useState(null);
   const [reconciliationToDelete, setReconciliationToDelete] = useState(null);
   const [deletingReconciliation, setDeletingReconciliation] = useState(false);
+  const priorYearSeededRef = useRef(false);
 
   const bank = banks.find((item) => item.id === bankId) || fallbackBanks.find((item) => item.id === bankId) || fallbackBanks[0];
   const canEditReconciliation = user?.role === "admin" || user?.permissions?.enter_deposits || user?.permissions?.manage_reconciliations;
@@ -144,6 +145,35 @@ export default function BankReconciliationPage() {
       setActiveReconciliation(null);
     });
   }, [bankId]);
+
+  // شيكات السنوات السابقة اليدوية تُرحّل تلقائياً من آخر مذكرة محفوظة لنفس البنك
+  const getPriorYearChecksFromLatestMemo = () => {
+    if (!reconciliations.length) return [];
+    const sorted = [...reconciliations].sort((a, b) => {
+      const dateA = resolvePeriodEndDate(a.period_label);
+      const dateB = resolvePeriodEndDate(b.period_label);
+      const timeA = dateA ? dateA.getTime() : new Date(a.created_at || 0).getTime();
+      const timeB = dateB ? dateB.getTime() : new Date(b.created_at || 0).getTime();
+      return timeB - timeA;
+    });
+    const latest = sorted[0];
+    return (latest?.prior_year_outstanding_checks || []).map((check) => {
+      const value = check.check_date;
+      let dayMonth = currentDayMonth();
+      if (value) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+          dayMonth = `${String(parsed.getDate()).padStart(2, "0")}/${String(parsed.getMonth() + 1).padStart(2, "0")}`;
+        }
+      }
+      return {
+        check_number: check.check_number || "",
+        amount: String(check.amount ?? ""),
+        check_date: dayMonth,
+        year: check.year ? String(check.year) : "",
+      };
+    });
+  };
 
   const loadBookBalance = useCallback(async () => {
     try {
@@ -248,6 +278,19 @@ export default function BankReconciliationPage() {
     const timer = setTimeout(() => syncChecksFromRecords("both", true), 300);
     return () => clearTimeout(timer);
   }, [canEditReconciliation, editingReconciliationId, syncChecksFromRecords]);
+
+  // ترحيل شيكات السنوات السابقة تلقائياً عند فتح مذكرة جديدة (مرة واحدة بعد تحميل المذكرات)
+  useEffect(() => {
+    if (editingReconciliationId) { priorYearSeededRef.current = true; return; }
+    if (priorYearSeededRef.current || !reconciliations.length) return;
+    const seed = getPriorYearChecksFromLatestMemo();
+    priorYearSeededRef.current = true;
+    if (seed.length) {
+      setPriorYearChecks(seed);
+      setCommittedFormSnapshot("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reconciliations, editingReconciliationId]);
 
   useEffect(() => {
     if (!committedFormSnapshot) setCommittedFormSnapshot(currentFormSnapshot);
@@ -368,6 +411,8 @@ export default function BankReconciliationPage() {
   const resetForm = () => {
     const nextOutstandingChecks = [emptyCheck()];
     const nextCollectionChecks = [emptyCheck()];
+    const nextPriorYearChecks = getPriorYearChecksFromLatestMemo();
+    priorYearSeededRef.current = true;
     setEditingReconciliationId(null);
     setPeriodLabel("");
     setAdministration(currentAdministrationName);
@@ -376,7 +421,7 @@ export default function BankReconciliationPage() {
     setBankStatementBalance("");
     setOutstandingChecks(nextOutstandingChecks);
     setCollectionChecks(nextCollectionChecks);
-    setPriorYearChecks([]);
+    setPriorYearChecks(nextPriorYearChecks);
     setCommittedFormSnapshot(buildFormSnapshot({
       periodLabel: "",
       administration: currentAdministrationName,
@@ -384,7 +429,7 @@ export default function BankReconciliationPage() {
       bankStatementBalance: "",
       outstandingChecks: nextOutstandingChecks,
       collectionChecks: nextCollectionChecks,
-      priorYearChecks: [],
+      priorYearChecks: nextPriorYearChecks,
     }));
     setTimeout(() => syncChecksFromRecords("both", true), 0);
   };
