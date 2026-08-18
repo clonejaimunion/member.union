@@ -3921,18 +3921,39 @@ async def calculate_bank_book_balance(bank_id: str, as_of_date: Optional[date] =
 async def calculate_bank_period_opening_balance(bank_id: str, period_from: date) -> float:
     organization_id = organization_id_or_default()
     bank = await ensure_bank_async(bank_id)
-    await sync_chart_accounts_for_organization(organization_id)
-    account = await db.chart_accounts.find_one(with_organization({"system_key": f"bank:{bank_id}", "is_active": True}, organization_id), {"_id": 0})
-    balance = round(float(bank.get("opening_balance") or 0), 2)
-    if not account:
-        return balance
-    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$ne": "opening_balance"}, "entry_date": {"$lt": period_from.isoformat()}}, organization_id), {"_id": 0, "lines": 1}).to_list(100000)
-    for entry in entries:
-        for line in entry.get("lines", []):
-            if line.get("account_id") != account.get("id") and line.get("account_code") != account.get("code"):
-                continue
-            balance = round(balance + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
-    return balance
+    base = round(float(bank.get("opening_balance") or 0), 2)
+    opening_date_value = bank.get("opening_balance_date")
+    if isinstance(opening_date_value, datetime):
+        opening_date = opening_date_value.date()
+    elif isinstance(opening_date_value, date):
+        opening_date = opening_date_value
+    elif isinstance(opening_date_value, str) and opening_date_value:
+        try:
+            opening_date = date.fromisoformat(opening_date_value[:10])
+        except ValueError:
+            opening_date = date.min
+    else:
+        opening_date = date.min
+    if period_from <= opening_date:
+        return base
+    prior_from = opening_date
+    prior_to = period_from - timedelta(days=1)
+    date_filter = {"$gte": prior_from.isoformat(), "$lte": prior_to.isoformat()}
+    revenue_documents = await db.revenues.find(with_organization({"bank_id": bank_id, "issued_at": date_filter}, organization_id), {"_id": 0, "amount": 1}).to_list(100000)
+    prior_revenues = round(sum(float(item.get("amount") or 0) for item in revenue_documents), 2)
+    prior_interest = await calculate_total_deposit_interest_for_period(organization_id, prior_from, prior_to, bank_id=bank_id)
+    expense_documents = await db.expenses.find(with_organization({"bank_id": bank_id, "issued_at": date_filter}, organization_id), {"_id": 0, "net_amount": 1, "gross_amount": 1}).to_list(100000)
+    prior_expenses = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in expense_documents), 2)
+    charge_documents = await db.banking_manual_charges.find(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0}).to_list(100000)
+    prior_charges = 0.0
+    for charge in charge_documents:
+        try:
+            charge_month = date(int(charge.get("year")), int(charge.get("month")), 1)
+        except (TypeError, ValueError):
+            continue
+        if prior_from <= charge_month <= prior_to:
+            prior_charges = round(prior_charges + sum_manual_charge_items(charge), 2)
+    return round(base + prior_revenues + prior_interest - prior_expenses - prior_charges, 2)
 
 
 ARABIC_MONTH_NAME_TO_NUMBER = {
