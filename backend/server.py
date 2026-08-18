@@ -3941,7 +3941,7 @@ async def calculate_bank_period_opening_balance(bank_id: str, period_from: date)
     date_filter = {"$gte": prior_from.isoformat(), "$lte": prior_to.isoformat()}
     revenue_documents = await db.revenues.find(with_organization({"bank_id": bank_id, "issued_at": date_filter}, organization_id), {"_id": 0, "amount": 1}).to_list(100000)
     prior_revenues = round(sum(float(item.get("amount") or 0) for item in revenue_documents), 2)
-    prior_interest = await calculate_total_deposit_interest_for_period(organization_id, prior_from, prior_to, bank_id=bank_id)
+    prior_interest = await reconciliation_deposit_interest_for_period(organization_id, prior_from, prior_to, bank_id=bank_id)
     expense_documents = await db.expenses.find(with_organization({"bank_id": bank_id, "issued_at": date_filter}, organization_id), {"_id": 0, "net_amount": 1, "gross_amount": 1}).to_list(100000)
     prior_expenses = round(sum(float(item.get("net_amount") if item.get("net_amount") is not None else item.get("gross_amount") or 0) for item in expense_documents), 2)
     charge_documents = await db.banking_manual_charges.find(with_organization({"bank_id": bank_id}, organization_id), {"_id": 0}).to_list(100000)
@@ -4026,7 +4026,7 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     revenue_query = with_organization({"bank_id": bank_id, "issued_at": period_filter}, organization_id)
     revenues = await db.revenues.find(revenue_query, {"_id": 0, "amount": 1}).to_list(100000)
     monthly_revenues = round(sum(float(item.get("amount") or 0) for item in revenues), 2)
-    monthly_deposit_interest = await calculate_total_deposit_interest_for_period(organization_id, period_from, period_to, bank_id=bank_id)
+    monthly_deposit_interest = await reconciliation_deposit_interest_for_period(organization_id, period_from, period_to, bank_id=bank_id)
     deposit_settlements = monthly_deposit_interest
     collection_query = with_organization({"bank_id": bank_id, "collection_method": "check", "bank_collection_status": "under_collection", "issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id)
     collection_checks = await db.revenues.find(collection_query, {"_id": 0, "amount": 1}).to_list(100000)
@@ -6510,6 +6510,53 @@ async def calculate_total_deposit_interest_for_period(organization_id: str, peri
     for document in documents:
         total = round(total + calculate_deposit_interest_for_period(Deposit(**hydrate_deposit(document)), period_from, period_to), 2)
     return total
+
+
+def deposit_interest_report_total(deposit: Deposit, period_from: date, period_to: date) -> float:
+    # يطابق "كشف العوائد التفريجي": فائدة كل شهر تُحسب على الدورة الشهرية للوديعة (تاريخ الأساس)
+    # وليس على أيام الشهر الميلادي. نجمع فوائد كل شهر يقع ضمن [period_from, period_to].
+    creation = normalize_datetime(deposit.creation_datetime).date()
+    year, month = period_from.year, period_from.month
+    if year < creation.year:
+        year, month = creation.year, 1
+    rows_by_year: dict[int, list] = {}
+    total = 0.0
+    while (year < period_to.year) or (year == period_to.year and month <= period_to.month):
+        if year not in rows_by_year:
+            rows_by_year[year] = calculate_interest_rows(deposit, year)[0]
+        for row in rows_by_year[year]:
+            if row.month_number == month:
+                total = round(total + float(row.interest_amount or 0), 2)
+                break
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    return total
+
+
+async def reconciliation_deposit_interest_for_period(organization_id: str, period_from: Optional[date], period_to: Optional[date], bank_id: Optional[str] = None) -> float:
+    # نسخة مخصّصة للتسوية البنكية تطابق كشف العوائد التفريجي (الدورة الشهرية للوديعة)
+    if not period_from or not period_to:
+        return 0.0
+    period_start_iso = datetime.combine(period_from, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    period_end_iso = datetime.combine(period_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    query_body = {
+        "maturity_datetime": {"$gt": period_start_iso},
+        "status": {"$ne": "closed"},
+        "$or": [
+            {"accounting_start_datetime": {"$lt": period_end_iso}},
+            {"creation_datetime": {"$lt": period_end_iso}},
+        ],
+    }
+    if bank_id:
+        query_body["bank_id"] = bank_id
+    documents = await db.deposits.find(with_organization(query_body, organization_id), {"_id": 0}).to_list(100000)
+    total = 0.0
+    for document in documents:
+        total = round(total + deposit_interest_report_total(Deposit(**hydrate_deposit(document)), period_from, period_to), 2)
+    return total
+
 
 
 def calculate_daily_interest_amount(deposit: Deposit, year: int) -> tuple[float, float]:
