@@ -50,9 +50,6 @@ const analysisCategories = [
   { key: "maintenance", label: "قطع غيار وصيانة", keywords: ["قطع غيار", "صيانة", "صيانه"] },
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
   { key: "death_benefits", label: "إعانات الوفاة", keywords: ["اعانات الوفاه", "اعانات الوفاة", "إعانات الوفاة", "اعانة وفاة", "إعانة وفاة"], expenseCategory: "death_benefits" },
-  { key: "hajj_umrah", label: "جمعية الحج والعمرة", keywords: ["جمعية الحج والعمرة", "جمعيه الحج والعمره", "حج وعمرة", "حج وعمره", "عمرة", "عمره", "حج"] },
-  { key: "meat_installment", label: "قسط لحوم", keywords: ["قسط لحوم", "لحوم"] },
-  { key: "union_committee", label: "لجنة نقابية", keywords: ["لجنة نقابية", "لجنه نقابيه", "اللجنة النقابية"] },
 ];
 
 const escapeHtml = (value) => String(value ?? "")
