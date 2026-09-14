@@ -664,7 +664,7 @@ class TreasuryBanksAccount(BaseModel):
 
 class TreasuryBanksTransaction(BaseModel):
     serial: int
-    entry_id: str
+    entry_id: Optional[str] = None
     entry_number: int
     entry_date: date
     description: str
@@ -8799,17 +8799,12 @@ async def get_treasury_banks_report(
         return "revenue" if debit >= credit else "expense"
 
     movement_labels = {"revenue": "إيراد", "expense": "مصروف", "opening": "رصيد افتتاحي"}
-    opening_balance = 0.0
-    running_by_account = {account_id_value: 0.0 for account_id_value in selected_ids}
-    transactions: List[TreasuryBanksTransaction] = []
-    total_revenues = 0.0
-    total_expenses = 0.0
     normalized_search = normalize_arabic_key(search) if search else ""
 
-    serial = 1
+    # تجميع كل الحركات (قيود اليومية + فوائد الودائع الدورية) في قائمة واحدة ثم ترتيبها زمنياً
+    raw_movements: List[dict] = []
     for entry in entries:
         entry_date = date.fromisoformat(str(entry.get("entry_date")))
-        is_prior = bool(from_date and entry_date < from_date)
         for line in entry.get("lines", []):
             account = resolve_treasury_account(line)
             if not account:
@@ -8819,45 +8814,122 @@ async def get_treasury_banks_report(
             delta = round(debit - credit, 2)
             if delta == 0:
                 continue
-            account_id_value = account.get("id")
-            running_by_account[account_id_value] = round(running_by_account.get(account_id_value, 0.0) + delta, 2)
-            if is_prior:
-                opening_balance = round(opening_balance + delta, 2)
-                continue
             key = movement_key_for(entry, debit, credit)
-            if movement_type and movement_type != "all" and key != movement_type:
-                continue
             bank_id = account.get("bank_id") or (str(account.get("system_key") or "").split(":", 1)[1] if str(account.get("system_key") or "").startswith("bank:") else line.get("bank_id"))
             account_kind_value = "cash" if account.get("system_key") == "cash_box" else "bank"
             bank_name = bank_names.get(bank_id) if bank_id else None
             searchable_text = normalize_arabic_key(" ".join([str(entry.get("entry_number") or ""), entry.get("description") or "", entry.get("reference") or "", account.get("name") or "", bank_name or "", line.get("notes") or ""]))
-            if normalized_search and normalized_search not in searchable_text:
+            raw_movements.append({
+                "entry_date": entry_date,
+                "entry_number": int(entry.get("entry_number") or 0),
+                "entry_id": entry.get("id"),
+                "description": entry.get("description") or line.get("notes") or "-",
+                "reference": entry.get("reference"),
+                "source_type": entry.get("source_type") or "manual",
+                "movement_key": key,
+                "account_id": account.get("id"),
+                "account_code": account.get("code"),
+                "account_name": account.get("name") or "-",
+                "account_kind": account_kind_value,
+                "bank_id": bank_id,
+                "bank_name": bank_name,
+                "debit": debit,
+                "credit": credit,
+                "delta": delta,
+                "searchable_text": searchable_text,
+                "is_interest": False,
+            })
+
+    # فوائد الودائع الدورية: تُحسب من نفس بوابة فوائد الودائع (calculate_interest_rows)
+    # وتُرحَّل تلقائياً على البنك في يوم استحقاقها الشهري لتطابق كشف الحساب الفعلي
+    if to_date and account_kind != "cash":
+        deposit_documents = await db.deposits.find(with_organization({"status": {"$ne": "closed"}}, organization_id), {"_id": 0}).to_list(100000)
+        for deposit_document in deposit_documents:
+            deposit_bank_id = deposit_document.get("bank_id")
+            bank_account = accounts_by_bank_id.get(deposit_bank_id)
+            if not bank_account or bank_account.get("id") not in selected_ids:
                 continue
-            if key != "opening" and delta > 0:
-                total_revenues = round(total_revenues + delta, 2)
-            if key != "opening" and delta < 0:
-                total_expenses = round(total_expenses + abs(delta), 2)
-            transactions.append(TreasuryBanksTransaction(
-                serial=serial,
-                entry_id=entry.get("id"),
-                entry_number=int(entry.get("entry_number") or 0),
-                entry_date=entry_date,
-                description=entry.get("description") or line.get("notes") or "-",
-                reference=entry.get("reference"),
-                source_type=entry.get("source_type") or "manual",
-                movement_type=movement_labels.get(key, key),
-                account_id=account_id_value,
-                account_code=account.get("code"),
-                account_name=account.get("name") or "-",
-                account_kind=account_kind_value,
-                bank_id=bank_id,
-                bank_name=bank_name,
-                debit=debit,
-                credit=credit,
-                amount=abs(delta),
-                running_balance=running_by_account.get(account_id_value, 0.0),
-            ))
-            serial += 1
+            deposit_obj = Deposit(**hydrate_deposit(deposit_document))
+            creation_dt = normalize_datetime(deposit_obj.creation_datetime)
+            maturity_year = normalize_datetime(deposit_obj.maturity_datetime).year
+            anniversary_day = creation_dt.day
+            deposit_bank_name = bank_names.get(deposit_bank_id)
+            for interest_year in range(creation_dt.year, min(maturity_year, to_date.year) + 1):
+                rows_for_year, _, _ = calculate_interest_rows(deposit_obj, interest_year)
+                for row in rows_for_year:
+                    interest_amount = round(float(row.interest_amount or 0), 2)
+                    if interest_amount <= 0:
+                        continue
+                    last_day = calendar.monthrange(interest_year, row.month_number)[1]
+                    credit_date = date(interest_year, row.month_number, min(anniversary_day, last_day))
+                    if credit_date > to_date:
+                        continue
+                    raw_movements.append({
+                        "entry_date": credit_date,
+                        "entry_number": 0,
+                        "entry_id": None,
+                        "description": f"فائدة وديعة رقم {deposit_obj.deposit_number} عن {row.month}",
+                        "reference": deposit_obj.deposit_number,
+                        "source_type": "deposit_interest",
+                        "movement_key": "revenue",
+                        "account_id": bank_account.get("id"),
+                        "account_code": bank_account.get("code"),
+                        "account_name": bank_account.get("name") or "-",
+                        "account_kind": "bank",
+                        "bank_id": deposit_bank_id,
+                        "bank_name": deposit_bank_name,
+                        "debit": interest_amount,
+                        "credit": 0.0,
+                        "delta": interest_amount,
+                        "searchable_text": normalize_arabic_key(" ".join(["فائدة وديعة", str(deposit_obj.deposit_number or ""), bank_account.get("name") or "", deposit_bank_name or ""])),
+                        "is_interest": True,
+                    })
+
+    raw_movements.sort(key=lambda item: (item["entry_date"], item["entry_number"], 1 if item["is_interest"] else 0))
+
+    opening_balance = 0.0
+    running_by_account = {account_id_value: 0.0 for account_id_value in selected_ids}
+    transactions: List[TreasuryBanksTransaction] = []
+    total_revenues = 0.0
+    total_expenses = 0.0
+    serial = 1
+    for movement in raw_movements:
+        account_id_value = movement["account_id"]
+        delta = movement["delta"]
+        running_by_account[account_id_value] = round(running_by_account.get(account_id_value, 0.0) + delta, 2)
+        if from_date and movement["entry_date"] < from_date:
+            opening_balance = round(opening_balance + delta, 2)
+            continue
+        key = movement["movement_key"]
+        if movement_type and movement_type != "all" and key != movement_type:
+            continue
+        if normalized_search and normalized_search not in movement["searchable_text"]:
+            continue
+        if key != "opening" and delta > 0:
+            total_revenues = round(total_revenues + delta, 2)
+        if key != "opening" and delta < 0:
+            total_expenses = round(total_expenses + abs(delta), 2)
+        transactions.append(TreasuryBanksTransaction(
+            serial=serial,
+            entry_id=movement["entry_id"],
+            entry_number=movement["entry_number"],
+            entry_date=movement["entry_date"],
+            description=movement["description"],
+            reference=movement["reference"],
+            source_type=movement["source_type"],
+            movement_type=movement_labels.get(key, key),
+            account_id=account_id_value,
+            account_code=movement["account_code"],
+            account_name=movement["account_name"],
+            account_kind=movement["account_kind"],
+            bank_id=movement["bank_id"],
+            bank_name=movement["bank_name"],
+            debit=movement["debit"],
+            credit=movement["credit"],
+            amount=abs(delta),
+            running_balance=running_by_account.get(account_id_value, 0.0),
+        ))
+        serial += 1
     total_balance = round(sum(running_by_account.values()), 2)
     summary = TreasuryBanksSummary(
         organization_id=organization_id,

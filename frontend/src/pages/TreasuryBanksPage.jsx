@@ -30,6 +30,7 @@ const sourceLabels = {
   expense: "مصروف",
   banking_expense: "مصروف بنكي",
   deposit: "وديعة",
+  deposit_interest: "فائدة وديعة",
   reconciliation: "تسوية بنكية",
   fixed_asset: "أصل ثابت",
   custody_advance: "عهدة/سلفة",
