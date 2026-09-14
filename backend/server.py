@@ -8949,7 +8949,35 @@ async def get_treasury_banks_report(
             summary_opening = round(summary_opening + breakdown.opening_balance, 2)
             summary_total_revenues = round(summary_total_revenues + breakdown.total_receipts, 2)
             summary_total_expenses = round(summary_total_expenses + breakdown.total_payments, 2)
-            summary_total_balance = round(summary_total_balance + breakdown.book_balance, 2)
+            to_iso = to_date.isoformat()
+            # الشيكات المعلّقة الحية (بتتقري لحظياً حسب حالتها في بوابتي المصروفات/الإيرادات)
+            not_presented_docs = await db.expenses.find(with_organization({"bank_id": bank_id_value, "payment_method": "check", "bank_payment_status": "not_presented", "issued_at": {"$lte": to_iso}}, organization_id), {"_id": 0, "net_amount": 1, "gross_amount": 1, "check_number": 1, "issued_at": 1, "gross_statement": 1}).to_list(100000)
+            under_collection_docs = await db.revenues.find(with_organization({"bank_id": bank_id_value, "collection_method": "check", "bank_collection_status": "under_collection", "issued_at": {"$lte": to_iso}}, organization_id), {"_id": 0, "amount": 1, "check_number": 1, "issued_at": 1, "statement": 1}).to_list(100000)
+            latest_rec = await db.reconciliations.find_one(with_organization({"bank_id": bank_id_value}, organization_id), {"_id": 0, "prior_year_outstanding_checks": 1}, sort=[("created_at", -1)])
+            prior_year_checks = (latest_rec or {}).get("prior_year_outstanding_checks") or []
+            running_bank = breakdown.book_balance
+            for check_doc in not_presented_docs:
+                amount = round(float(check_doc.get("net_amount") if check_doc.get("net_amount") is not None else check_doc.get("gross_amount") or 0), 2)
+                if amount <= 0:
+                    continue
+                running_bank = round(running_bank + amount, 2)
+                transactions.append(TreasuryBanksTransaction(serial=serial, entry_id=None, entry_number=0, entry_date=date.fromisoformat(str(check_doc.get("issued_at"))[:10]), description=f"شيك لم يُقدَّم للصرف رقم {check_doc.get('check_number') or '-'}", reference=check_doc.get("check_number"), source_type="outstanding_check", movement_type="شيك لم يُقدَّم للصرف", account_id=account_id_value, account_code=account_item.get("code"), account_name=account_item.get("name") or "-", account_kind="bank", bank_id=bank_id_value, bank_name=account_item.get("bank_name"), debit=amount, credit=0.0, amount=amount, running_balance=running_bank))
+                serial += 1
+            for check_item in prior_year_checks:
+                amount = round(float(check_item.get("amount") or 0), 2)
+                if amount <= 0:
+                    continue
+                running_bank = round(running_bank + amount, 2)
+                transactions.append(TreasuryBanksTransaction(serial=serial, entry_id=None, entry_number=0, entry_date=to_date, description=f"شيك سنوات سابقة لم يُقدَّم للصرف رقم {check_item.get('check_number') or '-'}", reference=check_item.get("check_number"), source_type="prior_year_check", movement_type="شيك لم يُقدَّم للصرف", account_id=account_id_value, account_code=account_item.get("code"), account_name=account_item.get("name") or "-", account_kind="bank", bank_id=bank_id_value, bank_name=account_item.get("bank_name"), debit=amount, credit=0.0, amount=amount, running_balance=running_bank))
+                serial += 1
+            for check_doc in under_collection_docs:
+                amount = round(float(check_doc.get("amount") or 0), 2)
+                if amount <= 0:
+                    continue
+                running_bank = round(running_bank - amount, 2)
+                transactions.append(TreasuryBanksTransaction(serial=serial, entry_id=None, entry_number=0, entry_date=date.fromisoformat(str(check_doc.get("issued_at"))[:10]), description=f"شيك تحت التحصيل رقم {check_doc.get('check_number') or '-'}", reference=check_doc.get("check_number"), source_type="collection_check", movement_type="شيك تحت التحصيل", account_id=account_id_value, account_code=account_item.get("code"), account_name=account_item.get("name") or "-", account_kind="bank", bank_id=bank_id_value, bank_name=account_item.get("bank_name"), debit=0.0, credit=amount, amount=amount, running_balance=running_bank))
+                serial += 1
+            summary_total_balance = round(summary_total_balance + running_bank, 2)
         else:
             summary_total_balance = round(summary_total_balance + running_by_account.get(account_id_value, 0.0), 2)
             for movement in raw_movements:
