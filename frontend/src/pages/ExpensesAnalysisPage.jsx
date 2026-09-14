@@ -49,7 +49,6 @@ const analysisCategories = [
   { key: "effort", label: "بدل جهد", keywords: ["بدل اعباء", "بدل أعباء"] },
   { key: "maintenance", label: "قطع غيار وصيانة", keywords: ["قطع غيار", "صيانة", "صيانه"] },
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
-  { key: "death_benefits", label: "إعانات الوفاة", keywords: ["اعانات الوفاه", "اعانات الوفاة", "إعانات الوفاة", "اعانة وفاة", "إعانة وفاة"], expenseCategory: "death_benefits" },
 ];
 
 const escapeHtml = (value) => String(value ?? "")
