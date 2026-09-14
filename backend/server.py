@@ -8930,7 +8930,45 @@ async def get_treasury_banks_report(
             running_balance=running_by_account.get(account_id_value, 0.0),
         ))
         serial += 1
-    total_balance = round(sum(running_by_account.values()), 2)
+
+    # ملخص الأرصدة: البنوك بنفس منطق التسوية البنكية (مطابق لكشف البنك، بيشمل الودائع لأجل
+    # ولا يخصمها، ويستخدم الرصيد الافتتاحي المُرحّل)، والخزينة تُحسب من القيود مباشرة.
+    summary_total_balance = 0.0
+    summary_total_revenues = 0.0
+    summary_total_expenses = 0.0
+    summary_opening = 0.0
+    processed_bank_ids: set = set()
+    for account_item in treasury_accounts:
+        account_id_value = account_item.get("id")
+        bank_id_value = account_item.get("bank_id")
+        if account_item.get("account_kind") == "bank" and bank_id_value and to_date:
+            if bank_id_value in processed_bank_ids:
+                continue  # تفادي ازدواج الحسابات المكررة لنفس البنك
+            processed_bank_ids.add(bank_id_value)
+            breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id_value, year=to_date.year, month=to_date.month)
+            summary_opening = round(summary_opening + breakdown.opening_balance, 2)
+            summary_total_revenues = round(summary_total_revenues + breakdown.total_receipts, 2)
+            summary_total_expenses = round(summary_total_expenses + breakdown.total_payments, 2)
+            summary_total_balance = round(summary_total_balance + breakdown.book_balance, 2)
+        else:
+            summary_total_balance = round(summary_total_balance + running_by_account.get(account_id_value, 0.0), 2)
+            for movement in raw_movements:
+                if movement["account_id"] != account_id_value:
+                    continue
+                if from_date and movement["entry_date"] < from_date:
+                    summary_opening = round(summary_opening + movement["delta"], 2)
+                    continue
+                if movement["movement_key"] == "opening":
+                    continue
+                if movement["delta"] > 0:
+                    summary_total_revenues = round(summary_total_revenues + movement["delta"], 2)
+                elif movement["delta"] < 0:
+                    summary_total_expenses = round(summary_total_expenses + abs(movement["delta"]), 2)
+
+    total_balance = summary_total_balance
+    total_revenues = summary_total_revenues
+    total_expenses = summary_total_expenses
+    opening_balance = summary_opening
     summary = TreasuryBanksSummary(
         organization_id=organization_id,
         from_date=from_date,
