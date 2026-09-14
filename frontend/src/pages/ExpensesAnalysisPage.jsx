@@ -49,6 +49,8 @@ const analysisCategories = [
   { key: "effort", label: "بدل جهد", keywords: ["بدل اعباء", "بدل أعباء"] },
   { key: "maintenance", label: "قطع غيار وصيانة", keywords: ["قطع غيار", "صيانة", "صيانه"] },
   { key: "consulting", label: "إستشارات فنية", keywords: ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"] },
+  { key: "postage_stamps", label: "طوابع بريد", keywords: ["طوابع بريد", "طوابع بريديه", "طوابع بريدية", "طوابع", "بريد"] },
+  { key: "office_supplies", label: "أدوات مكتبية", keywords: ["ادوات مكتبيه", "ادوات مكتبية", "أدوات مكتبية", "أدوات مكتبيه", "قرطاسيه", "قرطاسية", "مهمات مكتبيه", "مهمات مكتبية"] },
 ];
 
 const escapeHtml = (value) => String(value ?? "")
