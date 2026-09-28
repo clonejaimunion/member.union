@@ -1332,7 +1332,7 @@ class BankReconciliation(BankReconciliationCreate):
 class RevenueBase(BaseModel):
     receipt_number: str = Field(..., min_length=1)
     amount: float = Field(..., gt=0)
-    collection_method: Literal["cash", "check", "payment_order", "current_account_interest", "deposit_maturity"]
+    collection_method: Literal["cash", "check", "payment_order", "current_account_interest", "deposit_maturity", "joining_fee", "resource_development_fee", "publications", "other_revenue"]
     supplier_name: Optional[str] = None
     check_number: Optional[str] = None
     check_clearing_type: Optional[Literal["internal", "external"]] = None
@@ -3255,6 +3255,10 @@ def default_chart_accounts_for_banks(banks: List[dict]) -> List[dict]:
         {"code": "4103", "name": "إيرادات اشتراكات العضوية", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "membership_subscription_revenue"},
         {"code": "4104", "name": "إيرادات فوائد الحساب الجاري", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "current_account_interest_revenue"},
         {"code": "4105", "name": "إيرادات أوامر الدفع", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "payment_order_revenue"},
+        {"code": "4106", "name": "رسم انضمام", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "joining_fee_revenue"},
+        {"code": "4107", "name": "رسم تنمية موارد", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "resource_development_revenue"},
+        {"code": "4108", "name": "مطبوعات", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "publications_revenue"},
+        {"code": "4109", "name": "إيرادات أخرى", "account_type": "revenue", "nature": "credit", "is_postable": True, "parent_code": "4000", "system_key": "other_activity_revenue"},
         {"code": "5000", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": False, "system_key": "expenses"},
         {"code": "5101", "name": "المصروفات", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "expense_general"},
         {"code": "5102", "name": "المصروفات البنكية", "account_type": "expense", "nature": "debit", "is_postable": True, "parent_code": "5000", "system_key": "bank_expenses"},
@@ -3344,6 +3348,10 @@ async def resolve_journal_account(line: dict) -> dict:
         "عوائد ودائع مستحقة": "accrued_deposit_interest",
         "إيرادات فوائد ودائع": "deposit_interest_revenue",
         "إيرادات أوامر الدفع": "payment_order_revenue",
+        "رسم انضمام": "joining_fee_revenue",
+        "رسم تنمية موارد": "resource_development_revenue",
+        "مطبوعات": "publications_revenue",
+        "إيرادات أخرى": "other_activity_revenue",
         "رصيد افتتاحي": "opening_balance_equity",
         "الخزينة": "cash_box",
         "مديونية اشتراكات العضوية": "membership_subscription_receivable",
@@ -3508,11 +3516,15 @@ async def delete_journal_for_source(source_type: str, source_id: str):
 
 
 REPORT_EXCLUDED_SOURCE_TYPES = ["deposit_interest"]
-REVENUE_DIRECT_BANK_METHODS = {"current_account_interest", "deposit_maturity"}
+REVENUE_DIRECT_BANK_METHODS = {"current_account_interest", "deposit_maturity", "joining_fee", "resource_development_fee", "publications", "other_revenue"}
 REVENUE_RULE_ACCOUNT_MAP = {
     "payment_order": {"account_name": "إيرادات أوامر الدفع", "system_key": "payment_order_revenue", "analysis_type": "أمر دفع"},
     "deposit_maturity": {"account_name": "إيرادات فوائد ودائع", "system_key": "deposit_interest_revenue", "analysis_type": "استحقاق وديعة"},
     "current_account_interest": {"account_name": "إيرادات فوائد الحساب الجاري", "system_key": "current_account_interest_revenue", "analysis_type": "فوائد الحساب الجاري"},
+    "joining_fee": {"account_name": "رسم انضمام", "system_key": "joining_fee_revenue", "analysis_type": "رسم انضمام"},
+    "resource_development_fee": {"account_name": "رسم تنمية موارد", "system_key": "resource_development_revenue", "analysis_type": "رسم تنمية موارد"},
+    "publications": {"account_name": "مطبوعات", "system_key": "publications_revenue", "analysis_type": "مطبوعات"},
+    "other_revenue": {"account_name": "إيرادات أخرى", "system_key": "other_activity_revenue", "analysis_type": "إيرادات أخرى"},
 }
 EXPENSE_RULE_ACCOUNT_MAP = {
     "general_expenses": {"account_name": "المصروفات", "system_key": "expense_general", "analysis_type": "مصروفات عمومية"},
@@ -3799,6 +3811,88 @@ async def journal_for_inventory_movement(movement: dict, current_user: Optional[
         lines=lines,
         force_new=True,
     )
+
+
+def replay_inventory_movements(movements: List[dict]) -> tuple[List[dict], dict, Optional[str]]:
+    """احتساب سلسلة حركات المخزون بمتوسط التكلفة المتحرك وإعادة أرصدة كل حركة والصنف.
+    يعيد (الحركات المحسوبة، رصيد الصنف النهائي، رسالة خطأ إن وُجدت)."""
+    running_qty = 0.0
+    running_value = 0.0
+    running_avg = 0.0
+    computed: List[dict] = []
+    for movement in movements:
+        quantity = round(float(movement.get("quantity") or 0), 4)
+        if movement.get("movement_type") == "in":
+            unit_cost = round(float(movement.get("unit_cost") or 0), 4)
+            if unit_cost <= 0:
+                return computed, {}, "يجب إدخال تكلفة الوحدة في حركة الوارد"
+            total_value = round(quantity * unit_cost, 2)
+            running_qty = round(running_qty + quantity, 4)
+            running_value = round(running_value + total_value, 2)
+            running_avg = round(running_value / running_qty, 4) if running_qty > 0 else 0.0
+        else:
+            if running_qty < quantity:
+                return computed, {}, f"رصيد الصنف لا يكفي لتنفيذ منصرف بتاريخ {movement.get('movement_date')}"
+            unit_cost = running_avg if running_avg > 0 else round(float(movement.get("unit_cost") or 0), 4)
+            total_value = round(quantity * unit_cost, 2)
+            running_qty = round(running_qty - quantity, 4)
+            running_value = round(max(0.0, running_value - total_value), 2)
+            running_avg = round(running_value / running_qty, 4) if running_qty > 0 else running_avg
+        computed.append({
+            **movement,
+            "quantity": quantity,
+            "unit_cost": unit_cost,
+            "total_value": total_value,
+            "quantity_balance_after": running_qty,
+            "value_balance_after": running_value,
+        })
+    return computed, {"quantity_balance": running_qty, "value_balance": running_value, "average_cost": running_avg}, None
+
+
+def _inventory_movement_sort_key(movement: dict):
+    return (str(movement.get("movement_date") or ""), str(movement.get("created_at") or ""))
+
+
+async def rebuild_inventory_item(item_id: str, current_user: Optional[dict] = None):
+    """يعيد احتساب أرصدة الصنف وحركاته من قاعدة البيانات، ويعيد توليد القيود المتأثرة فقط."""
+    movements = await db.inventory_movements.find(with_organization({"item_id": item_id}), {"_id": 0}).to_list(20000)
+    movements.sort(key=_inventory_movement_sort_key)
+    computed, balance, error = replay_inventory_movements(movements)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    now_iso = serialize_datetime(datetime.now(timezone.utc))
+    originals = {movement.get("id"): movement for movement in movements}
+    for snapshot in computed:
+        original = originals.get(snapshot.get("id")) or {}
+        snapshot_changed = (
+            round(float(original.get("unit_cost") or 0), 4) != snapshot["unit_cost"]
+            or round(float(original.get("total_value") or 0), 2) != snapshot["total_value"]
+            or round(float(original.get("quantity_balance_after") or 0), 4) != snapshot["quantity_balance_after"]
+            or round(float(original.get("value_balance_after") or 0), 2) != snapshot["value_balance_after"]
+        )
+        journal_changed = snapshot_changed or (
+            str(original.get("movement_date") or "") != str(snapshot.get("movement_date") or "")
+            or (original.get("movement_type") or "") != (snapshot.get("movement_type") or "")
+            or (original.get("description") or "") != (snapshot.get("description") or "")
+            or (original.get("reference") or "") != (snapshot.get("reference") or "")
+            or not original.get("journal_entry_id")
+        )
+        if snapshot_changed:
+            await db.inventory_movements.update_one(with_organization({"id": snapshot["id"]}), {"$set": {
+                "unit_cost": snapshot["unit_cost"],
+                "total_value": snapshot["total_value"],
+                "quantity_balance_after": snapshot["quantity_balance_after"],
+                "value_balance_after": snapshot["value_balance_after"],
+                "updated_at": now_iso,
+            }})
+        if journal_changed:
+            await delete_journal_for_source("inventory", snapshot["id"])
+            movement_date = snapshot.get("movement_date")
+            movement_date = movement_date if isinstance(movement_date, date) else date.fromisoformat(str(movement_date))
+            journal = await journal_for_inventory_movement({**snapshot, "movement_date": movement_date}, current_user)
+            await db.inventory_movements.update_one(with_organization({"id": snapshot["id"]}), {"$set": {"journal_entry_id": journal.get("id") if journal else None, "updated_at": now_iso}})
+    await db.inventory_items.update_one(with_organization({"id": item_id}), {"$set": {**balance, "updated_at": now_iso}})
+
 
 
 async def ensure_misc_creditor_from_payload(payload: MiscCreditorMovementCreate) -> dict:
@@ -9155,6 +9249,58 @@ async def create_inventory_movement(payload: InventoryMovementCreate, current_us
     document["journal_entry_id"] = journal.get("id") if journal else None
     await db.inventory_items.update_one(with_organization({"id": item["id"]}), {"$set": {"quantity_balance": next_qty, "value_balance": next_value, "average_cost": next_average, "updated_at": now_iso}})
     return InventoryMovementResponse(**hydrate_inventory_movement(document))
+
+
+@api_router.put("/inventory/movements/{movement_id}", response_model=InventoryMovementResponse)
+async def update_inventory_movement(movement_id: str, payload: InventoryMovementCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    await sync_chart_accounts_for_organization(organization_id_or_default())
+    existing = await db.inventory_movements.find_one(with_organization({"id": movement_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="حركة المخزون غير موجودة")
+    item_id = existing["item_id"]
+    quantity = round(float(payload.quantity), 4)
+    provided_unit_cost = round(float(payload.unit_cost), 4) if payload.unit_cost is not None else None
+    if payload.movement_type == "in" and (provided_unit_cost is None or provided_unit_cost <= 0):
+        raise HTTPException(status_code=400, detail="يجب إدخال تكلفة الوحدة في حركة الوارد")
+    updated_base = {
+        "movement_date": payload.movement_date.isoformat(),
+        "movement_type": payload.movement_type,
+        "quantity": quantity,
+        "unit_cost": provided_unit_cost if payload.movement_type == "in" else 0.0,
+        "description": payload.description.strip(),
+        "reference": (payload.reference or "").strip() or None,
+    }
+    # تحقق مسبق: أعِد احتساب السلسلة افتراضياً قبل أي تعديل فعلي حتى لا نكسر أرصدة الصنف
+    movements = await db.inventory_movements.find(with_organization({"item_id": item_id}), {"_id": 0}).to_list(20000)
+    projected = [({**movement, **updated_base} if movement.get("id") == movement_id else movement) for movement in movements]
+    projected.sort(key=_inventory_movement_sort_key)
+    _, _, error = replay_inventory_movements(projected)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    await db.inventory_movements.update_one(with_organization({"id": movement_id}), {"$set": {**updated_base, "updated_at": serialize_datetime(datetime.now(timezone.utc))}})
+    await rebuild_inventory_item(item_id, current_user)
+    refreshed = await db.inventory_movements.find_one(with_organization({"id": movement_id}), {"_id": 0})
+    return InventoryMovementResponse(**hydrate_inventory_movement(refreshed))
+
+
+@api_router.delete("/inventory/movements/{movement_id}")
+async def delete_inventory_movement(movement_id: str, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    existing = await db.inventory_movements.find_one(with_organization({"id": movement_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="حركة المخزون غير موجودة")
+    item_id = existing["item_id"]
+    # تحقق مسبق: تأكد أن حذف الحركة لن يجعل رصيد الصنف غير كافٍ لحركات منصرف لاحقة
+    movements = await db.inventory_movements.find(with_organization({"item_id": item_id}), {"_id": 0}).to_list(20000)
+    remaining = [movement for movement in movements if movement.get("id") != movement_id]
+    remaining.sort(key=_inventory_movement_sort_key)
+    _, _, error = replay_inventory_movements(remaining)
+    if error:
+        raise HTTPException(status_code=400, detail=f"تعذّر حذف الحركة: {error}")
+    await delete_journal_for_source("inventory", movement_id)
+    await db.inventory_movements.delete_one(with_organization({"id": movement_id}))
+    await rebuild_inventory_item(item_id, current_user)
+    return {"deleted": True, "message": "تم حذف حركة المخزون وقيدها وإعادة احتساب رصيد الصنف"}
+
 
 
 @api_router.get("/misc-creditors", response_model=List[MiscCreditorResponse])
