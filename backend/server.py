@@ -1872,7 +1872,6 @@ async def bank_transactions_before_date(bank_id: str, opening_date: date) -> Lis
         ("الودائع", "deposits", {"bank_id": bank_id, "creation_datetime": {"$lt": f"{date_value}T00:00:00"}, "is_opening_balance_deposit": {"$ne": True}}, "deposit_number", "creation_datetime"),
         ("الإيرادات", "revenues", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "receipt_number", "issued_at"),
         ("المصروفات", "expenses", {"bank_id": bank_id, "issued_at": {"$lt": date_value}}, "expense_number", "issued_at"),
-        ("الأصول الثابتة", "fixed_assets", {"bank_id": bank_id, "purchase_date": {"$lt": date_value}}, "asset_code", "purchase_date"),
         ("العهد والسلف", "custody_advances", {"bank_id": bank_id, "issue_date": {"$lt": date_value}}, "document_number", "issue_date"),
         ("أذون العضوية الجماعية", "membership_batch_payments", {"bank_id": bank_id, "payment_date": {"$lt": date_value}}, "receipt_number", "payment_date"),
         ("التسويات البنكية", "reconciliations", {"bank_id": bank_id, "created_at": {"$lt": f"{date_value}T00:00:00"}}, "period_label", "created_at"),
@@ -4261,6 +4260,14 @@ async def journal_for_fixed_asset(asset: dict, current_user: Optional[dict] = No
     category = fixed_asset_category(asset.get("category_code"))
     purchase_value = asset.get("purchase_date")
     entry_date = purchase_value if isinstance(purchase_value, date) else date.fromisoformat(str(purchase_value))
+    # أصل افتتاحي (اتشرى قبل تاريخ الرصيد الافتتاحي للبنك): قيمته مدفوعة سابقاً ومدمجة في الرصيد
+    # الافتتاحي، فالطرف الدائن يروح لحساب «رصيد افتتاحي» بدل البنك حتى لا يُخصم من البنك مرتين.
+    bank = await ensure_bank_async(asset.get("bank_id")) if asset.get("bank_id") else None
+    opening_date = parse_date_field(bank.get("opening_balance_date")) if bank else None
+    if opening_date and entry_date < opening_date:
+        credit_line = {"account_name": "رصيد افتتاحي", "system_key": "opening_balance_equity", "debit": 0, "credit": amount}
+    else:
+        credit_line = {"account_name": "البنك", "bank_id": asset.get("bank_id"), "debit": 0, "credit": amount}
     await save_journal_entry_document(
         entry_date=entry_date,
         description=f"قيد تلقائي لإثبات أصل ثابت: {asset.get('asset_name')}",
@@ -4271,7 +4278,7 @@ async def journal_for_fixed_asset(asset: dict, current_user: Optional[dict] = No
         current_user=current_user,
         lines=[
             {"account_name": category["name"], "system_key": f"fixed_asset:{category['code']}", "debit": amount, "credit": 0},
-            {"account_name": "البنك", "bank_id": asset.get("bank_id"), "debit": 0, "credit": amount},
+            credit_line,
         ],
     )
 
@@ -5746,7 +5753,10 @@ async def expense_document_from_payload(payload: ExpenseCreate, expense_id: Opti
 async def fixed_asset_document_from_payload(payload: FixedAssetCreate, asset_id: Optional[str] = None) -> dict:
     bank = await ensure_bank_async(payload.bank_id)
     await ensure_period_is_open(payload.purchase_date)
-    await ensure_bank_transaction_date_allowed(payload.bank_id, payload.purchase_date)
+    # الأصول الثابتة الافتتاحية (تاريخها قبل الرصيد الافتتاحي) مسموح تسجيلها؛ قيدها يروح لرصيد افتتاحي
+    opening_date = parse_date_field(bank.get("opening_balance_date"))
+    if not (opening_date and payload.purchase_date < opening_date):
+        await ensure_bank_transaction_date_allowed(payload.bank_id, payload.purchase_date)
     organization_id = organization_id_or_default()
     category = await fixed_asset_category_with_rate(payload.category_code, organization_id)
     normalized_name = payload.asset_name.strip()
@@ -7079,6 +7089,10 @@ async def update_bank_opening_balance(bank_id: str, payload: BankOpeningBalanceU
     bank["opening_balance"] = opening_balance
     bank["opening_balance_date"] = serialize_date(opening_balance_date)
     await journal_for_bank_opening_balance(bank, opening_balance, current_user)
+    # تحويل الأصول الثابتة الأقدم من تاريخ الرصيد الافتتاحي لأصول افتتاحية (قيدها يروح لرصيد افتتاحي بدل البنك)
+    opening_assets = await db.fixed_assets.find(with_organization({"bank_id": bank_id, "purchase_date": {"$lt": serialize_date(opening_balance_date)}}, organization_id), {"_id": 0}).to_list(100000)
+    for asset_doc in opening_assets:
+        await journal_for_fixed_asset(asset_doc, current_user)
     return Bank(**{key: value for key, value in bank.items() if key not in {"created_at", "updated_at"}})
 
 
