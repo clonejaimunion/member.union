@@ -6705,14 +6705,16 @@ def deposit_interest_report_total(deposit: Deposit, period_from: date, period_to
     return total
 
 
-async def interest_rows_with_chain(deposit: Deposit, year: int) -> list:
+async def interest_rows_with_chain(deposit: Deposit, year: int, bank_id: Optional[str] = None) -> list:
     # صفوف العوائد للوديعة المستمرة: تدمج صفوف سلسلة التجديد السابقة بنفس سياسة تقريب الوديعة المعروضة
+    # مقيّدة على نفس البنك فقط حتى لا تختلط حسابات البنوك ببعضها
+    scope_bank = bank_id or deposit.bank_id
     rows, _, _ = calculate_interest_rows(deposit, year)
     predecessor_id = deposit.renewed_from_deposit_id
     visited = set()
     while predecessor_id and predecessor_id not in visited:
         visited.add(predecessor_id)
-        pred_doc = await db.deposits.find_one(with_organization({"id": predecessor_id}), {"_id": 0})
+        pred_doc = await db.deposits.find_one(with_organization({"id": predecessor_id, "bank_id": scope_bank}), {"_id": 0})
         if not pred_doc:
             break
         pred = Deposit(**hydrate_deposit(pred_doc))
@@ -6726,7 +6728,7 @@ async def interest_rows_with_chain(deposit: Deposit, year: int) -> list:
     return rows
 
 
-async def deposit_interest_report_total_chain(deposit: Deposit, period_from: date, period_to: date) -> float:
+async def deposit_interest_report_total_chain(deposit: Deposit, period_from: date, period_to: date, bank_id: Optional[str] = None) -> float:
     creation = normalize_datetime(deposit.creation_datetime).date()
     year, month = period_from.year, period_from.month
     if year < creation.year:
@@ -6735,7 +6737,7 @@ async def deposit_interest_report_total_chain(deposit: Deposit, period_from: dat
     total = 0.0
     while (year < period_to.year) or (year == period_to.year and month <= period_to.month):
         if year not in rows_by_year:
-            rows_by_year[year] = await interest_rows_with_chain(deposit, year)
+            rows_by_year[year] = await interest_rows_with_chain(deposit, year, bank_id=bank_id)
         for row in rows_by_year[year]:
             if row.month_number == month:
                 total = round(total + float(row.interest_amount or 0), 2)
@@ -6771,7 +6773,7 @@ async def reconciliation_deposit_interest_for_period(organization_id: str, perio
     for deposit in deposits:
         if deposit.id in predecessor_ids:
             continue
-        total = round(total + await deposit_interest_report_total_chain(deposit, period_from, period_to), 2)
+        total = round(total + await deposit_interest_report_total_chain(deposit, period_from, period_to, bank_id=bank_id), 2)
     return total
 
 
@@ -7672,7 +7674,7 @@ async def get_interest_report(
     deposit = await get_deposit_or_latest(bank_id, deposit_id)
     _, monthly_interest, _ = calculate_interest_rows(deposit, target_year)
     # استمرارية كشف الحساب: ضمّ فوائد الودائع السابقة في سلسلة التجديد لنفس السنة (الوديعة الواحدة المستمرة)
-    rows = await interest_rows_with_chain(deposit, target_year)
+    rows = await interest_rows_with_chain(deposit, target_year, bank_id=bank_id)
     total = round(sum(row.interest_amount for row in rows), 2)
 
     return InterestReport(

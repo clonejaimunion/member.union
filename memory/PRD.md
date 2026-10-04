@@ -703,3 +703,9 @@
 - التحقق (الأصلية تقريب مفعّل، النشطة ملغي): تسوية فبراير=1023.97، سنة 2026 كاملة=4062.49 (بدون ازدواج)، مايو=990.58.
 - التسوية والفائدة موحّدة عبر كل البنوك (لا كود خاص ببنك).
 - أُعيد تجميع الحزمة (main.95f5933c.js) في المسارات الثلاثة.
+
+## تقييد سلسلة الوديعة على نفس البنك في التسوية + تأكيد توحيد المعادلة بتاريخ 2026-06
+- تأكيد: معادلة calculate_bank_reconciliation_balance_breakdown موحّدة لكل البنوك (نفس معادلة بنك التنمية تُطبّق على بنك مصر). الصيغة: book_balance(قبل الشيكات)=opening+revenues+deposit_interest−bank_expenses−other_expenses؛ reconciliation_balance=book_balance+checks_not_presented−checks_under_collection؛ والافتتاحي يُرحَّل من نهاية الشهر السابق عبر calculate_bank_period_opening_balance.
+- منعاً لخلط حسابات البنوك: interest_rows_with_chain و deposit_interest_report_total_chain صارت تقيّد سلسلة التجديد على نفس البنك (scope_bank)، وتمرير bank_id من get_interest_report والتسوية.
+- اختبار API: /banks/banque-misr/reconciliation-balance يعمل بلا أخطاء؛ before_checks=opening+interest−bank_exp (متّسق). الفائدة تظهر في شهر النزول (فبراير) لأن الوديعة استحقت/جُدّدت فيه.
+- أُعيد تجميع الحزمة في المسارات الثلاثة.
