@@ -250,21 +250,21 @@ export default function DepositRegistration() {
               <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="empty-deposit-description">ابدأ بإدخال بيانات الوديعة من النموذج.</p>
             </div>
           )}
-          {(user?.role === "admin" || user?.role === "super_admin" || user?.permissions?.enter_deposits || user?.permissions?.edit_deposits) && activeDeposits.length > 0 && (
+          {(user?.role === "admin" || user?.role === "super_admin" || user?.permissions?.enter_deposits || user?.permissions?.edit_deposits) && deposits.length > 0 && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="admin-delete-deposits-section">
               <div className="mb-4" data-testid="admin-delete-deposits-heading">
-                <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-delete-deposits-eyebrow">إدارة الودائع النشطة</p>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-delete-deposits-eyebrow">إدارة الودائع</p>
                 <h3 className="text-xl font-extrabold text-slate-950" data-testid="admin-delete-deposits-title">تعديل أو حذف وديعة</h3>
-                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">اضغط "تعديل" لفتح بيانات الوديعة في النموذج أعلاه، أو "حذف" لإزالتها بالكامل. الودائع المنتهية/المجددة لا تظهر هنا. الحذف لا يمكن التراجع عنه.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">تظهر هنا كل السجلات (النشطة والمجددة/المنتهية). اضغط "تعديل" لفتح البيانات في النموذج أعلاه، أو "حذف" لإزالة الوديعة وكل تجديداتها وقيودها نهائياً. الحذف لا يمكن التراجع عنه.</p>
               </div>
               <div className="space-y-3" data-testid="admin-delete-deposits-list">
-                {activeDeposits.map((deposit) => (
-                  <div key={deposit.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between" data-testid={`admin-delete-deposit-row-${deposit.id}`}>
+                {deposits.map((deposit) => (
+                  <div key={deposit.id} className={`flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${deposit.status === "renewed" ? "border-amber-200 bg-amber-50/60" : "border-slate-200 bg-slate-50"}`} data-testid={`admin-delete-deposit-row-${deposit.id}`}>
                     <div className="min-w-0" data-testid={`admin-delete-deposit-row-${deposit.id}-details`}>
                       <p className="break-words text-base font-extrabold text-slate-950" data-testid={`admin-delete-deposit-row-${deposit.id}-number`}>{deposit.deposit_number}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-account`}>حساب: {deposit.account_number}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-rate`}>نسبة الفائدة: {formatRate(deposit.monthly_interest_rate)}%</p>
-                      <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}{deposit.renewed_from_deposit_id ? " • 🔁 مجددة من وديعة سابقة" : ""}</p>
+                      <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "renewed" ? "مجددة (منتهية)" : deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}{deposit.renewed_from_deposit_id ? " • 🔁 تجديد لوديعة سابقة" : ""}</p>
                     </div>
                     <div className="flex gap-2" data-testid={`admin-deposit-row-${deposit.id}-actions`}>
                       <button
