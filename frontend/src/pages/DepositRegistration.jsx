@@ -27,6 +27,7 @@ const defaultForm = () => {
     renewal_notes: "",
     deposit_nature: "monthly",
     auto_renew: false,
+    contract_duration_years: 1,
   };
 };
 
@@ -78,6 +79,7 @@ export default function DepositRegistration() {
       renewal_notes: deposit.renewal_notes || "",
       deposit_nature: deposit.deposit_nature || "monthly",
       auto_renew: !!deposit.auto_renew,
+      contract_duration_years: deposit.contract_duration_years || 1,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -97,6 +99,7 @@ export default function DepositRegistration() {
         renewal_notes: form.renewal_notes || null,
         deposit_nature: form.deposit_nature || "monthly",
         auto_renew: !!form.auto_renew,
+        contract_duration_years: Number(form.contract_duration_years) || 1,
       };
       let response;
       if (editingDepositId) {
@@ -183,6 +186,15 @@ export default function DepositRegistration() {
                 })}
               </select>
             </div>
+            <div className="space-y-2" data-testid="field-contract-duration-wrapper">
+              <Label htmlFor="contract_duration_years" data-testid="label-contract-duration">مدة التعاقد (بالسنوات)</Label>
+              <select id="contract_duration_years" value={form.contract_duration_years} onChange={(event) => updateField("contract_duration_years", Number(event.target.value))} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="select-contract-duration">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((years) => (
+                  <option key={years} value={years} data-testid={`contract-duration-option-${years}`}>{years === 1 ? "سنة واحدة" : years === 2 ? "سنتان" : `${years} سنوات`}</option>
+                ))}
+              </select>
+              <p className="text-xs font-bold text-slate-500" data-testid="contract-duration-hint">تُستخدم لتحديد مدة التجديد التلقائي عند الاستحقاق.</p>
+            </div>
             <div className="space-y-2" data-testid="field-deposit-nature-wrapper">
               <Label htmlFor="deposit_nature" data-testid="label-deposit-nature">طبيعة الوديعة</Label>
               <select id="deposit_nature" value={form.deposit_nature} onChange={(event) => updateField("deposit_nature", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="select-deposit-nature">
@@ -191,9 +203,9 @@ export default function DepositRegistration() {
                 <option value="quarterly" data-testid="deposit-nature-quarterly-option">ربع سنوية (3 شهور)</option>
               </select>
             </div>
-            <button type="button" onClick={() => updateField("auto_renew", !form.auto_renew)} className={`rounded-xl border p-4 text-right transition-colors ${form.auto_renew ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700"}`} data-testid="deposit-auto-renew-toggle">
+            <button type="button" onClick={() => updateField("auto_renew", !form.auto_renew)} className={`rounded-xl border p-4 text-right transition-colors md:col-span-2 ${form.auto_renew ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700"}`} data-testid="deposit-auto-renew-toggle">
               <span className="block text-sm font-extrabold" data-testid="deposit-auto-renew-toggle-title">{form.auto_renew ? "✓ تجديد تلقائي عند الاستحقاق" : "○ بدون تجديد تلقائي"}</span>
-              <span className="mt-1 block text-xs font-bold" data-testid="deposit-auto-renew-toggle-description">عند تفعيله تتجدد الوديعة تلقائياً عند تاريخ الاستحقاق بنفس المبلغ والمدة (بدون إضافة العائد للأصل).</span>
+              <span className="mt-1 block text-xs font-bold" data-testid="deposit-auto-renew-toggle-description">عند تفعيله تتجدد الوديعة تلقائياً عند تاريخ الاستحقاق بنفس المبلغ ولمدة التعاقد المحددة أعلاه (بدون إضافة العائد للأصل).</span>
             </button>
             <div className="space-y-2 md:col-span-2" data-testid="field-renewal-notes-wrapper">
               <Label htmlFor="renewal_notes" data-testid="label-renewal-notes">ملاحظات التجديد / الملاحظات التوضيحية</Label>

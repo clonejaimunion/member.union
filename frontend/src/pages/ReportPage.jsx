@@ -9,7 +9,7 @@ import { ReportTable } from "@/components/ReportTable";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { bankPalette } from "@/lib/banks";
-import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
+import { formatCurrency, formatDate, formatNumber, formatRate } from "@/lib/format";
 
 export default function ReportPage({ type }) {
   const { bankId } = useParams();
@@ -239,7 +239,7 @@ export default function ReportPage({ type }) {
                 <table>
                   <tbody>
                     <tr><th>رقم الحساب</th><td>{deposit?.account_number || "—"}</td><th>رقم الوديعة</th><td>{deposit?.deposit_number || "—"}</td></tr>
-                    <tr><th>مبلغ الوديعة</th><td>{formatCurrency(deposit?.amount)}</td><th>نسبة الفائدة السنوية</th><td>{formatNumber(annualRate)}%</td></tr>
+                    <tr><th>مبلغ الوديعة</th><td>{formatCurrency(deposit?.amount)}</td><th>نسبة الفائدة السنوية</th><td>{formatRate(annualRate)}%</td></tr>
                     <tr><th>الفائدة اليومية</th><td>{formatCurrency(dailyInterestAmount)}</td><th>السنة</th><td>{report.year}</td></tr>
                     <tr><th>تاريخ إنشاء الوديعة</th><td>{formatDate(deposit?.creation_datetime)}</td><th>تاريخ الاستحقاق</th><td>{formatDate(deposit?.maturity_datetime)}</td></tr>
                   </tbody>

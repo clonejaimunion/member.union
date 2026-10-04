@@ -258,6 +258,7 @@ class DepositBase(BaseModel):
     use_daily_rounding: bool = True
     deposit_nature: Literal["monthly", "advance", "quarterly"] = "monthly"
     auto_renew: bool = False
+    contract_duration_years: int = Field(default=1, ge=1, le=50)
 
 
 class DepositCreate(DepositBase):
@@ -2060,6 +2061,13 @@ def normalize_datetime(value) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def add_years(value: datetime, years: int) -> datetime:
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:
+        return value.replace(year=value.year + years, day=28)
+
+
 def serialize_datetime(value: datetime) -> str:
     return normalize_datetime(value).isoformat()
 
@@ -2313,6 +2321,7 @@ def hydrate_deposit(document: dict) -> dict:
     clean.setdefault("use_daily_rounding", True)
     clean.setdefault("deposit_nature", "monthly")
     clean.setdefault("auto_renew", False)
+    clean.setdefault("contract_duration_years", 1)
     for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -7435,6 +7444,7 @@ async def create_deposit(
         renewal_notes=(payload.renewal_notes or "").strip() or None,
         deposit_nature=payload.deposit_nature,
         auto_renew=bool(payload.auto_renew),
+        contract_duration_years=int(payload.contract_duration_years or 1),
         status="active",
         created_at=now,
         updated_at=now,
@@ -7469,9 +7479,9 @@ async def auto_renew_due_deposits(bank_id: str, current_user: Optional[dict] = N
             await db.deposits.update_one(with_organization({"id": dep["id"], "bank_id": bank_id}), {"$set": {"status": "renewed", "updated_at": serialize_datetime(now)}})
             continue
         creation = normalize_datetime(dep.get("creation_datetime"))
-        duration = maturity - creation
+        years = int(dep.get("contract_duration_years") or 1)
         new_creation = maturity
-        new_maturity = maturity + (duration if duration.days > 0 else timedelta(days=30))
+        new_maturity = add_years(new_creation, years)
         new_doc = {key: value for key, value in dep.items() if key != "_id"}
         new_doc.update({
             "id": str(uuid.uuid4()),
@@ -7543,6 +7553,7 @@ async def update_deposit(
         "renewal_notes": (payload.renewal_notes or "").strip() or None,
         "deposit_nature": payload.deposit_nature,
         "auto_renew": bool(payload.auto_renew),
+        "contract_duration_years": int(payload.contract_duration_years or 1),
         "updated_at": serialize_datetime(datetime.now(timezone.utc)),
     }
     result = await db.deposits.update_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"$set": updates})
@@ -7589,6 +7600,22 @@ async def get_interest_report(
 
     deposit = await get_deposit_or_latest(bank_id, deposit_id)
     rows, monthly_interest, total = calculate_interest_rows(deposit, target_year)
+    # استمرارية كشف الحساب: ضمّ فوائد الودائع السابقة في سلسلة التجديد لنفس السنة (الوديعة الواحدة المستمرة)
+    predecessor_id = deposit.renewed_from_deposit_id
+    visited = set()
+    while predecessor_id and predecessor_id not in visited:
+        visited.add(predecessor_id)
+        pred_doc = await db.deposits.find_one(with_organization({"id": predecessor_id, "bank_id": bank_id}), {"_id": 0})
+        if not pred_doc:
+            break
+        pred = Deposit(**hydrate_deposit(pred_doc))
+        pred_rows, _, _ = calculate_interest_rows(pred, target_year)
+        for row, pred_row in zip(rows, pred_rows):
+            if pred_row.interest_amount:
+                row.interest_amount = round(row.interest_amount + pred_row.interest_amount, 2)
+                row.active_days += pred_row.active_days
+        predecessor_id = pred.renewed_from_deposit_id
+    total = round(sum(row.interest_amount for row in rows), 2)
 
     return InterestReport(
         bank=Bank(**bank),
