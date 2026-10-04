@@ -7573,14 +7573,32 @@ async def delete_deposit(
 ):
     await ensure_bank_async(bank_id)
     existing = await db.deposits.find_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"_id": 0})
-    if existing and existing.get("creation_datetime"):
-        await ensure_period_is_open(datetime.fromisoformat(existing["creation_datetime"]).date())
-    result = await db.deposits.delete_one(with_organization({"id": deposit_id, "bank_id": bank_id}))
-    if result.deleted_count == 0:
+    if not existing:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
-    await delete_journal_for_source("deposit", deposit_id)
-    await delete_journal_for_source("deposit_interest", deposit_id)
-    return {"message": "تم حذف الوديعة بالكامل", "deleted_deposit_id": deposit_id}
+
+    # جمع كامل سلسلة التجديد المرتبطة (السابقة واللاحقة) لحذفها نهائياً مع قيودها
+    chain_ids = set()
+    frontier = [deposit_id]
+    while frontier:
+        current_id = frontier.pop()
+        if current_id in chain_ids:
+            continue
+        chain_ids.add(current_id)
+        current_doc = await db.deposits.find_one(with_organization({"id": current_id, "bank_id": bank_id}), {"_id": 0})
+        if current_doc and current_doc.get("renewed_from_deposit_id"):
+            frontier.append(current_doc["renewed_from_deposit_id"])
+        successors = await db.deposits.find(with_organization({"renewed_from_deposit_id": current_id, "bank_id": bank_id}), {"_id": 0, "id": 1}).to_list(500)
+        frontier.extend(successor["id"] for successor in successors)
+
+    if existing.get("creation_datetime"):
+        await ensure_period_is_open(datetime.fromisoformat(existing["creation_datetime"]).date())
+
+    for chain_id in chain_ids:
+        await db.deposits.delete_one(with_organization({"id": chain_id, "bank_id": bank_id}))
+        await delete_journal_for_source("deposit", chain_id)
+        await delete_journal_for_source("deposit_interest", chain_id)
+
+    return {"message": "تم حذف الوديعة وكل تجديداتها نهائياً", "deleted_deposit_id": deposit_id, "deleted_chain_ids": sorted(chain_ids)}
 
 
 @api_router.get("/banks/{bank_id}/reports/{report_type}", response_model=InterestReport)
