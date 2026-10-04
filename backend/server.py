@@ -6534,24 +6534,32 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             )
         )
 
-    # طبيعة "ربع سنوية": نفس حساب الفائدة لكن تُجمَّع كل 3 شهور وتنزل في شهر نهاية الربع (3،6،9،12)
+    # طبيعة "ربع سنوية": الفائدة تنزل كل 3 شهور محسوبة من تاريخ بداية الوديعة (وليس أرباع السنة الميلادية الثابتة)
+    # شهر النزول هو الموافق لدورة الـ3 شهور من شهر الإنشاء، وتُحسب فائدة الربع كاملاً (قد يمتد للسنة السابقة)
     if getattr(deposit, "deposit_nature", "monthly") == "quarterly":
-        bucket = 0.0
-        bucket_days = 0.0
+        def anniversary_shift(y: int, m: int, delta: int) -> date:
+            idx = y * 12 + (m - 1) + delta
+            return anniversary_on(idx // 12, idx % 12 + 1)
+
         for row in rows:
-            bucket = round(bucket + row.interest_amount, 2)
-            bucket_days += row.active_days
-            if row.month_number % 3 == 0:
-                row.interest_amount = round(bucket, 2)
-                row.active_days = bucket_days
-                bucket = 0.0
-                bucket_days = 0.0
-            else:
+            month = row.month_number
+            is_drop_month = (month - creation.month) % 3 == 0
+            if not is_drop_month:
                 row.interest_amount = 0.0
                 row.active_days = 0.0
-        if bucket:
-            rows[-1].interest_amount = round(rows[-1].interest_amount + bucket, 2)
-            rows[-1].active_days += bucket_days
+                continue
+            quarter_end = anniversary_on(year, month)
+            quarter_start = anniversary_shift(year, month, -3)
+            period_start = max(quarter_start, creation)
+            period_end = min(quarter_end, maturity)
+            if period_end <= period_start:
+                row.interest_amount = 0.0
+                row.active_days = 0.0
+            else:
+                quarter_days = (period_end - period_start).days
+                row.interest_amount = round(daily_interest * quarter_days, 2)
+                row.active_days = float(quarter_days)
+        total = round(sum(row.interest_amount for row in rows), 2)
 
     return rows, round(annual_interest, 2), round(total, 2)
 
