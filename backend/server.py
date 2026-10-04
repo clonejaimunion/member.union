@@ -7633,6 +7633,8 @@ async def get_interest_report(
         if not pred_doc:
             break
         pred = Deposit(**hydrate_deposit(pred_doc))
+        # الوديعة المستمرة تُعامَل بسياسة تقريب موحّدة = إعداد الوديعة المعروضة (اتساق كشف الحساب)
+        pred.use_daily_rounding = deposit.use_daily_rounding
         pred_rows, _, _ = calculate_interest_rows(pred, target_year)
         for row, pred_row in zip(rows, pred_rows):
             if pred_row.interest_amount:
