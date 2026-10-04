@@ -622,3 +622,9 @@
 - ملاحظة محاسبية مهمة: إخفاء "دفع الكتروني" من قائمة الإيرادات يقلّل إجمالي الإيرادات المعروض، بينما سطر "الفائض/العجز" ما زال يُحسب من إجمالي الباك إند الكامل — بانتظار قرار المستخدم: إما استبعاده من حساب الفائض أيضاً، أو إبقاء قيمته ضمن الإجمالي بدون إظهار سطره.
 - بناء الإنتاج نجح وتم تحديث BankDepositSystemUpdate.zip (~3.16MB) في المسارين public/downloads و build/downloads.
 - تعذّر التحقق البصري عبر متصفح الأتمتة بسبب وضع معاينة "Frontend Preview Only / Wake up servers"؛ تم التحقق من صحة الكود عبر نجاح yarn build ومن منطق العرض عبر node.
+
+## إعادة بناء حزمة التحديث بميزة طبيعة الوديعة + التجديد التلقائي بتاريخ 2026-06
+- تم التأكد أن كود ميزة "طبيعة الوديعة" (شهرية/فائدة مقدمة/ربع سنوية) و"التجديد التلقائي" موجود في `DepositRegistration.jsx` (حقول select + toggle + تعديل) والباك إند `server.py` (`DepositBase.deposit_nature` و`auto_renew`).
+- اختبار باك إند end-to-end: إنشاء وديعة ربع سنوية مع auto_renew=true عبر `/api/banks/{id}/deposits` رجّع `deposit_nature=quarterly` و`auto_renew=true` بنجاح، ثم حُذفت وديعة الاختبار.
+- `yarn build` نجح (main.a124df30.js)، وأُعيد توليد `BankDepositSystemUpdate.zip` (~2.36MB) بأحدث server.py + build في المسارين `frontend/public/downloads` و`frontend/build/downloads`، وتم تحديث `release/patch/backend` و`release/patch/frontend`.
+- أمر التحديث على جهاز المستخدم (بعد Save to Github): `[Net.ServicePointManager]::SecurityProtocol='Tls12'; iex (irm 'https://raw.githubusercontent.com/clonejaimunion/member.union/tradeunion-app/release/update.ps1')`
