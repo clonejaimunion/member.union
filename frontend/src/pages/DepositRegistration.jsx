@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Calculator, FileText, Save, Trash2, WalletCards } from "lucide-react";
+import { Calculator, FileText, Pencil, Save, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { BankShell } from "@/components/BankShell";
 import { DepositSummary } from "@/components/DepositSummary";
@@ -235,12 +235,12 @@ export default function DepositRegistration() {
               <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="empty-deposit-description">ابدأ بإدخال بيانات الوديعة من النموذج.</p>
             </div>
           )}
-          {user?.role === "admin" && deposits.length > 0 && (
-            <section className="rounded-xl border border-red-200 bg-white p-5 shadow-sm" data-testid="admin-delete-deposits-section">
+          {(user?.role === "admin" || user?.role === "super_admin" || user?.permissions?.enter_deposits || user?.permissions?.edit_deposits) && deposits.length > 0 && (
+            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="admin-delete-deposits-section">
               <div className="mb-4" data-testid="admin-delete-deposits-heading">
-                <p className="text-sm font-extrabold text-red-700" data-testid="admin-delete-deposits-eyebrow">إدارة الأدمن</p>
-                <h3 className="text-xl font-extrabold text-slate-950" data-testid="admin-delete-deposits-title">حذف وديعة بالكامل</h3>
-                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">هذه العملية متاحة للأدمن فقط ولا يمكن التراجع عنها.</p>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-delete-deposits-eyebrow">إدارة الودائع المسجلة</p>
+                <h3 className="text-xl font-extrabold text-slate-950" data-testid="admin-delete-deposits-title">تعديل أو حذف وديعة</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">اضغط "تعديل" لفتح بيانات الوديعة في النموذج أعلاه، أو "حذف" لإزالتها بالكامل. الحذف لا يمكن التراجع عنه.</p>
               </div>
               <div className="space-y-3" data-testid="admin-delete-deposits-list">
                 {deposits.map((deposit) => (
@@ -250,14 +250,24 @@ export default function DepositRegistration() {
                       <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-account`}>حساب: {deposit.account_number}</p>
                       <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "renewed" ? "مجددة" : deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => deleteDeposit(deposit)}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-extrabold text-red-700 transition-colors hover:bg-red-100"
-                      data-testid={`delete-deposit-button-${deposit.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" /> حذف الوديعة
-                    </button>
+                    <div className="flex gap-2" data-testid={`admin-deposit-row-${deposit.id}-actions`}>
+                      <button
+                        type="button"
+                        onClick={() => startEditDeposit(deposit)}
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-extrabold text-emerald-700 transition-colors hover:bg-emerald-100"
+                        data-testid={`edit-deposit-button-${deposit.id}`}
+                      >
+                        <Pencil className="h-4 w-4" /> تعديل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteDeposit(deposit)}
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-extrabold text-red-700 transition-colors hover:bg-red-100"
+                        data-testid={`delete-deposit-button-${deposit.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" /> حذف
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

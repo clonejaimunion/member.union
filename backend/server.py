@@ -2052,7 +2052,9 @@ async def get_tariff_document(bank_id: str) -> dict:
     return attach_organization(build_tariff_document(bank, default_tariff_rules(bank_id), notes="القيم الافتراضية الحالية", status="default"))
 
 
-def normalize_datetime(value: datetime) -> datetime:
+def normalize_datetime(value) -> datetime:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)

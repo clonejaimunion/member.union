@@ -628,3 +628,12 @@
 - اختبار باك إند end-to-end: إنشاء وديعة ربع سنوية مع auto_renew=true عبر `/api/banks/{id}/deposits` رجّع `deposit_nature=quarterly` و`auto_renew=true` بنجاح، ثم حُذفت وديعة الاختبار.
 - `yarn build` نجح (main.a124df30.js)، وأُعيد توليد `BankDepositSystemUpdate.zip` (~2.36MB) بأحدث server.py + build في المسارين `frontend/public/downloads` و`frontend/build/downloads`، وتم تحديث `release/patch/backend` و`release/patch/frontend`.
 - أمر التحديث على جهاز المستخدم (بعد Save to Github): `[Net.ServicePointManager]::SecurityProtocol='Tls12'; iex (irm 'https://raw.githubusercontent.com/clonejaimunion/member.union/tradeunion-app/release/update.ps1')`
+
+## إصلاح كراش تحميل الودائع + ظهور تعديل/حذف الودائع بتاريخ 2026-06
+- السبب الجذري لاختفاء الودائع وظهور "لا توجد ودائع مسجلة": `GET /api/banks/{id}/deposits` كان يكرش بـ500 لأن `auto_renew_due_deposits` يمرّر `maturity_datetime`/`creation_datetime` كنص إلى `normalize_datetime` التي تتوقع datetime (AttributeError: 'str' object has no attribute 'tzinfo').
+- الإصلاح: جعل `normalize_datetime` يحوّل النص عبر `datetime.fromisoformat` قبل المعالجة. بعد الإصلاح: القائمة ترجع 200، والتجديد التلقائي للودائع المستحقة يعمل (الوديعة المستحقة تصبح "مجددة" وتُنشأ وديعة جديدة نشطة).
+- الواجهة `DepositRegistration.jsx`: أُضيف زر "تعديل" بجانب كل وديعة في قسم إدارة الودائع (يملأ النموذج ويحوّل زر الحفظ إلى "حفظ تعديل الوديعة")، وأُعيدت تسمية القسم إلى "إدارة الودائع المسجلة / تعديل أو حذف وديعة".
+- إصلاح مهم: كان قسم التعديل/الحذف يظهر فقط لـ`role === "admin"` فيختفي عن `super_admin`. تم توسيع الشرط ليشمل super_admin ومن له صلاحية `enter_deposits`/`edit_deposits`.
+- تم التحقق بالواجهة (Playwright): القائمة تحمّل، زر التعديل يملأ النموذج (حساب 15108869، مبلغ 50000، نسبة 8.125، ربع سنوية، تجديد تلقائي)، وزرّا تعديل/حذف ظاهران.
+- أُعيد بناء الواجهة (main.8b8663f0.js) وتحديث `BankDepositSystemUpdate.zip` (~2.36MB) في public/downloads و build/downloads و release/patch.
+- ملاحظة: منطق تجميع الأرباع "ربع سنوية" ما زال يعتمد على الأرباع التقويمية (مارس/يونيو/سبتمبر/ديسمبر) وليس من تاريخ بداية الوديعة — تم تشخيصه ولم يُعدَّل بانتظار موافقة المستخدم.
