@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { formatCurrency, toDateInput } from "@/lib/format";
+import { formatCurrency, formatRate, toDateInput } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
 
 const defaultForm = () => {
@@ -48,12 +48,15 @@ export default function DepositRegistration() {
   const loadDeposits = useCallback(() => {
     api.get(`/banks/${bankId}/deposits`).then((response) => {
       setDeposits(response.data);
-      setSelectedDeposit(response.data[0] || null);
+      const active = response.data.filter((deposit) => deposit.status !== "renewed");
+      setSelectedDeposit(active[0] || response.data[0] || null);
     }).catch(() => {
       setDeposits([]);
       setSelectedDeposit(null);
     });
   }, [bankId]);
+
+  const activeDeposits = useMemo(() => deposits.filter((deposit) => deposit.status !== "renewed"), [deposits]);
 
   useEffect(() => {
     loadDeposits();
@@ -216,8 +219,8 @@ export default function DepositRegistration() {
             <div className="flex items-center gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-white/10" data-testid="deposit-count-icon"><WalletCards className="h-6 w-6" /></div>
               <div>
-                <p className="text-sm font-bold text-slate-300" data-testid="deposit-count-label">عدد الودائع المسجلة لهذا البنك</p>
-                <p className="text-4xl font-extrabold" data-testid="deposit-count-value">{deposits.length}</p>
+                <p className="text-sm font-bold text-slate-300" data-testid="deposit-count-label">عدد الودائع النشطة لهذا البنك</p>
+                <p className="text-4xl font-extrabold" data-testid="deposit-count-value">{activeDeposits.length}</p>
               </div>
             </div>
           </section>
@@ -235,20 +238,21 @@ export default function DepositRegistration() {
               <p className="mt-2 text-sm font-semibold text-slate-500" data-testid="empty-deposit-description">ابدأ بإدخال بيانات الوديعة من النموذج.</p>
             </div>
           )}
-          {(user?.role === "admin" || user?.role === "super_admin" || user?.permissions?.enter_deposits || user?.permissions?.edit_deposits) && deposits.length > 0 && (
+          {(user?.role === "admin" || user?.role === "super_admin" || user?.permissions?.enter_deposits || user?.permissions?.edit_deposits) && activeDeposits.length > 0 && (
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="admin-delete-deposits-section">
               <div className="mb-4" data-testid="admin-delete-deposits-heading">
-                <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-delete-deposits-eyebrow">إدارة الودائع المسجلة</p>
+                <p className="text-sm font-extrabold text-emerald-700" data-testid="admin-delete-deposits-eyebrow">إدارة الودائع النشطة</p>
                 <h3 className="text-xl font-extrabold text-slate-950" data-testid="admin-delete-deposits-title">تعديل أو حذف وديعة</h3>
-                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">اضغط "تعديل" لفتح بيانات الوديعة في النموذج أعلاه، أو "حذف" لإزالتها بالكامل. الحذف لا يمكن التراجع عنه.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500" data-testid="admin-delete-deposits-description">اضغط "تعديل" لفتح بيانات الوديعة في النموذج أعلاه، أو "حذف" لإزالتها بالكامل. الودائع المنتهية/المجددة لا تظهر هنا. الحذف لا يمكن التراجع عنه.</p>
               </div>
               <div className="space-y-3" data-testid="admin-delete-deposits-list">
-                {deposits.map((deposit) => (
+                {activeDeposits.map((deposit) => (
                   <div key={deposit.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between" data-testid={`admin-delete-deposit-row-${deposit.id}`}>
                     <div className="min-w-0" data-testid={`admin-delete-deposit-row-${deposit.id}-details`}>
                       <p className="break-words text-base font-extrabold text-slate-950" data-testid={`admin-delete-deposit-row-${deposit.id}-number`}>{deposit.deposit_number}</p>
                       <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-account`}>حساب: {deposit.account_number}</p>
-                      <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "renewed" ? "مجددة" : deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}</p>
+                      <p className="text-sm font-bold text-slate-500" data-testid={`admin-delete-deposit-row-${deposit.id}-rate`}>نسبة الفائدة: {formatRate(deposit.monthly_interest_rate)}%</p>
+                      <p className="text-xs font-extrabold text-emerald-700" data-testid={`admin-delete-deposit-row-${deposit.id}-status`}>الحالة: {deposit.status === "matured" ? "مستحقة" : deposit.status === "closed" ? "مغلقة" : "نشطة"}{deposit.renewed_from_deposit_id ? " • 🔁 مجددة من وديعة سابقة" : ""}</p>
                     </div>
                     <div className="flex gap-2" data-testid={`admin-deposit-row-${deposit.id}-actions`}>
                       <button

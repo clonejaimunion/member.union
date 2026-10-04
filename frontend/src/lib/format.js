@@ -8,6 +8,9 @@ export const formatCurrency = (value) =>
 export const formatNumber = (value) =>
   new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2 }).format(Number(value || 0));
 
+export const formatRate = (value) =>
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 6, useGrouping: false }).format(Number(value || 0));
+
 export const formatEgpLabel = (value) => `${formatNumber(value)} ج.م`;
 
 export const formatDate = (value) => {

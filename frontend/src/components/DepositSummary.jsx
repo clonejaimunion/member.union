@@ -1,5 +1,5 @@
 import { CalendarClock, CreditCard, Landmark, Percent, ReceiptText, WalletCards } from "lucide-react";
-import { formatCurrency, formatDateTime, formatNumber } from "@/lib/format";
+import { formatCurrency, formatDateTime, formatRate } from "@/lib/format";
 
 const statusLabels = { active: "نشطة", matured: "مستحقة", renewed: "مجددة", closed: "مغلقة" };
 
@@ -8,7 +8,7 @@ export const DepositSummary = ({ deposit }) => {
     { label: "رقم الحساب", value: deposit?.account_number, icon: CreditCard, testId: "summary-account-number" },
     { label: "رقم الوديعة", value: deposit?.deposit_number, icon: ReceiptText, testId: "summary-deposit-number" },
     { label: "مبلغ الوديعة", value: formatCurrency(deposit?.amount), icon: WalletCards, testId: "summary-deposit-amount" },
-    { label: "نسبة الفائدة السنوية", value: `${formatNumber(deposit?.monthly_interest_rate)}%`, icon: Percent, testId: "summary-interest-rate" },
+    { label: "نسبة الفائدة السنوية", value: `${formatRate(deposit?.monthly_interest_rate)}%`, icon: Percent, testId: "summary-interest-rate" },
     { label: "تاريخ إنشاء الوديعة", value: formatDateTime(deposit?.creation_datetime), icon: CalendarClock, testId: "summary-creation-date" },
     { label: "بداية الاحتساب", value: deposit?.is_opening_balance_deposit ? formatDateTime(deposit?.accounting_start_datetime) : "من تاريخ الربط", icon: CalendarClock, testId: "summary-accounting-start-date" },
     { label: "تاريخ الاستحقاق", value: formatDateTime(deposit?.maturity_datetime), icon: Landmark, testId: "summary-maturity-date" },
@@ -17,6 +17,11 @@ export const DepositSummary = ({ deposit }) => {
 
   return (
     <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="deposit-summary-section">
+      {deposit?.renewed_from_deposit_id && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm md:col-span-2 xl:col-span-3" data-testid="summary-renewed-badge">
+          <p className="text-sm font-extrabold text-amber-700" data-testid="summary-renewed-badge-text">🔁 وديعة مُجدَّدة — ناتجة عن التجديد التلقائي لوديعة سابقة انتهت مدتها</p>
+        </div>
+      )}
       {items.map((item) => {
         const Icon = item.icon;
         return (
