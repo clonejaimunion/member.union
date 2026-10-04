@@ -25,6 +25,8 @@ const defaultForm = () => {
     is_opening_balance_deposit: false,
     renewed_from_deposit_id: "",
     renewal_notes: "",
+    deposit_nature: "monthly",
+    auto_renew: false,
   };
 };
 
@@ -35,6 +37,7 @@ export default function DepositRegistration() {
   const [deposits, setDeposits] = useState([]);
   const [selectedDeposit, setSelectedDeposit] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingDepositId, setEditingDepositId] = useState(null);
 
   const expectedAnnualInterest = useMemo(() => {
     const amount = Number(form.amount || 0);
@@ -58,6 +61,25 @@ export default function DepositRegistration() {
 
   const updateField = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
+  const startEditDeposit = (deposit) => {
+    setEditingDepositId(deposit.id);
+    setForm({
+      account_number: deposit.account_number || "",
+      deposit_number: deposit.deposit_number || "",
+      amount: String(deposit.amount ?? ""),
+      creation_datetime: String(deposit.creation_datetime).slice(0, 10),
+      maturity_datetime: String(deposit.maturity_datetime).slice(0, 10),
+      monthly_interest_rate: String(deposit.monthly_interest_rate ?? ""),
+      is_opening_balance_deposit: !!deposit.is_opening_balance_deposit,
+      renewed_from_deposit_id: deposit.renewed_from_deposit_id || "",
+      renewal_notes: deposit.renewal_notes || "",
+      deposit_nature: deposit.deposit_nature || "monthly",
+      auto_renew: !!deposit.auto_renew,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const cancelEditDeposit = () => { setEditingDepositId(null); setForm(defaultForm()); };
+
   const submitDeposit = async (event) => {
     event.preventDefault();
     setIsSaving(true);
@@ -70,10 +92,19 @@ export default function DepositRegistration() {
         maturity_datetime: `${form.maturity_datetime}T00:00`,
         renewed_from_deposit_id: form.renewed_from_deposit_id || null,
         renewal_notes: form.renewal_notes || null,
+        deposit_nature: form.deposit_nature || "monthly",
+        auto_renew: !!form.auto_renew,
       };
-      const response = await api.post(`/banks/${bankId}/deposits`, payload);
-      toast.success("تم تسجيل الوديعة بنجاح");
+      let response;
+      if (editingDepositId) {
+        response = await api.put(`/banks/${bankId}/deposits/${editingDepositId}`, payload);
+        toast.success("تم تعديل بيانات الوديعة وتحديث قيدها");
+      } else {
+        response = await api.post(`/banks/${bankId}/deposits`, payload);
+        toast.success("تم تسجيل الوديعة بنجاح");
+      }
       setSelectedDeposit(response.data);
+      setEditingDepositId(null);
       setForm(defaultForm());
       loadDeposits();
     } catch (error) {
@@ -83,8 +114,7 @@ export default function DepositRegistration() {
     }
   };
 
-  const deleteDeposit = async (deposit) => {
-    const confirmed = window.confirm(`هل أنت متأكد من حذف الوديعة رقم ${deposit.deposit_number} بالكامل؟ لا يمكن التراجع عن هذه العملية.`);
+  const deleteDeposit = async (deposit) => {    const confirmed = window.confirm(`هل أنت متأكد من حذف الوديعة رقم ${deposit.deposit_number} بالكامل؟ لا يمكن التراجع عن هذه العملية.`);
     if (!confirmed) return;
 
     try {
@@ -150,14 +180,29 @@ export default function DepositRegistration() {
                 })}
               </select>
             </div>
+            <div className="space-y-2" data-testid="field-deposit-nature-wrapper">
+              <Label htmlFor="deposit_nature" data-testid="label-deposit-nature">طبيعة الوديعة</Label>
+              <select id="deposit_nature" value={form.deposit_nature} onChange={(event) => updateField("deposit_nature", event.target.value)} className="h-12 w-full rounded-lg border border-slate-300 bg-slate-50 px-4 text-sm font-extrabold outline-none" data-testid="select-deposit-nature">
+                <option value="monthly" data-testid="deposit-nature-monthly-option">شهرية</option>
+                <option value="advance" data-testid="deposit-nature-advance-option">فائدة مقدمة</option>
+                <option value="quarterly" data-testid="deposit-nature-quarterly-option">ربع سنوية (3 شهور)</option>
+              </select>
+            </div>
+            <button type="button" onClick={() => updateField("auto_renew", !form.auto_renew)} className={`rounded-xl border p-4 text-right transition-colors ${form.auto_renew ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700"}`} data-testid="deposit-auto-renew-toggle">
+              <span className="block text-sm font-extrabold" data-testid="deposit-auto-renew-toggle-title">{form.auto_renew ? "✓ تجديد تلقائي عند الاستحقاق" : "○ بدون تجديد تلقائي"}</span>
+              <span className="mt-1 block text-xs font-bold" data-testid="deposit-auto-renew-toggle-description">عند تفعيله تتجدد الوديعة تلقائياً عند تاريخ الاستحقاق بنفس المبلغ والمدة (بدون إضافة العائد للأصل).</span>
+            </button>
             <div className="space-y-2 md:col-span-2" data-testid="field-renewal-notes-wrapper">
               <Label htmlFor="renewal_notes" data-testid="label-renewal-notes">ملاحظات التجديد / الملاحظات التوضيحية</Label>
               <textarea id="renewal_notes" value={form.renewal_notes} onChange={(event) => updateField("renewal_notes", event.target.value)} rows={3} className="w-full rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-right text-sm font-bold outline-none" placeholder="تظهر داخل تقارير الودائع فقط بدون أي أثر محاسبي" data-testid="textarea-renewal-notes" />
             </div>
             <div className="flex flex-col gap-3 md:col-span-2 sm:flex-row" data-testid="deposit-form-actions">
               <Button type="submit" disabled={isSaving} className="h-12 rounded-lg bg-slate-950 px-7 text-white hover:bg-slate-800" data-testid="submit-deposit-button">
-                <Save className="h-4 w-4" /> {isSaving ? "جاري الحفظ..." : "حفظ بيانات الوديعة"}
+                <Save className="h-4 w-4" /> {isSaving ? "جاري الحفظ..." : editingDepositId ? "حفظ تعديل الوديعة" : "حفظ بيانات الوديعة"}
               </Button>
+              {editingDepositId && (
+                <Button type="button" variant="outline" onClick={cancelEditDeposit} className="h-12 rounded-lg border-slate-300 bg-white px-7" data-testid="cancel-edit-deposit-button">إلغاء التعديل</Button>
+              )}
               {selectedDeposit && (
                 <Button asChild type="button" variant="outline" className="h-12 rounded-lg border-slate-300 bg-white px-7" data-testid="open-current-report-button">
                   <Link to={`/bank/${bankId}/current-year?deposit_id=${selectedDeposit.id}`}><FileText className="h-4 w-4" /> عرض تقرير السنة الحالية</Link>

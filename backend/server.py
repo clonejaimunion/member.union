@@ -256,6 +256,8 @@ class DepositBase(BaseModel):
     renewed_from_deposit_id: Optional[str] = None
     renewal_notes: Optional[str] = None
     use_daily_rounding: bool = True
+    deposit_nature: Literal["monthly", "advance", "quarterly"] = "monthly"
+    auto_renew: bool = False
 
 
 class DepositCreate(DepositBase):
@@ -2307,6 +2309,8 @@ def hydrate_deposit(document: dict) -> dict:
     clean.setdefault("renewed_from_deposit_id", None)
     clean.setdefault("renewal_notes", None)
     clean.setdefault("use_daily_rounding", True)
+    clean.setdefault("deposit_nature", "monthly")
+    clean.setdefault("auto_renew", False)
     for field_name in ["creation_datetime", "maturity_datetime", "accounting_start_datetime", "created_at", "updated_at"]:
         if isinstance(clean.get(field_name), str):
             clean[field_name] = datetime.fromisoformat(clean[field_name])
@@ -4692,23 +4696,47 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         ))
         equity_total = round(sum(line.amount for line in equity_with_result), 2)
         liability_equity_total = round(liabilities_total + equity_total, 2)
-    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
-    receipts = []
-    payments = []
-    for entry in entries:
-        for line in entry.get("lines", []):
-            account_code = str(line.get("account_code") or "")
-            account_name = str(line.get("account_name") or "")
-            is_bank_line = account_code.startswith("11") or account_name in ["البنوك", "البنك"] or line.get("bank_id")
-            if not is_bank_line:
+    # حساب المقبوضات والمدفوعات على شكل حساب نقدي متوازن:
+    # المقبوضات = رصيد أول المدة (أرصدة البنوك) + مقبوضات النشاط (مبوّبة حسب الحساب المقابل)
+    # المدفوعات = مصروفات النشاط (مبوّبة حسب الحساب المقابل) + رصيد آخر المدة (أرصدة البنوك)
+    all_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
+
+    def _is_bank_line(line: dict) -> bool:
+        code = str(line.get("account_code") or "")
+        name = str(line.get("account_name") or "")
+        return code.startswith("11") or name in ["البنوك", "البنك"]
+
+    from_iso = period_from.isoformat()
+    to_iso = period_to.isoformat()
+    opening_by_bank: Dict[str, float] = {}
+    closing_by_bank: Dict[str, float] = {}
+    receipts_by_cat: Dict[str, float] = {}
+    payments_by_cat: Dict[str, float] = {}
+    for entry in all_entries:
+        edate = str(entry.get("entry_date") or "")
+        in_period = from_iso <= edate <= to_iso
+        lines = entry.get("lines", [])
+        contra_lines = [ln for ln in lines if not _is_bank_line(ln)]
+        contra_name = contra_lines[0].get("account_name") if contra_lines else (entry.get("description") or "حركة نقدية")
+        for line in lines:
+            if not _is_bank_line(line):
                 continue
+            bank_name = str(line.get("account_name") or "البنك")
             debit = round(float(line.get("debit") or 0), 2)
             credit = round(float(line.get("credit") or 0), 2)
-            statement_line = FinancialStatementLine(code=account_code or None, name=entry.get("description") or account_name, debit=debit, credit=credit, amount=debit or credit, reference=entry.get("reference"), entry_number=entry.get("entry_number"), entry_date=date.fromisoformat(entry["entry_date"]), details=account_name)
-            if debit > 0:
-                receipts.append(statement_line)
-            if credit > 0:
-                payments.append(statement_line)
+            closing_by_bank[bank_name] = round(closing_by_bank.get(bank_name, 0) + debit - credit, 2)
+            if not in_period:
+                opening_by_bank[bank_name] = round(opening_by_bank.get(bank_name, 0) + debit - credit, 2)
+            else:
+                if debit > 0:
+                    receipts_by_cat[contra_name] = round(receipts_by_cat.get(contra_name, 0) + debit, 2)
+                if credit > 0:
+                    payments_by_cat[contra_name] = round(payments_by_cat.get(contra_name, 0) + credit, 2)
+
+    receipts = [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value) for bank, value in opening_by_bank.items() if round(value, 2) != 0]
+    receipts += [FinancialStatementLine(name=cat, amount=value) for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
+    payments = [FinancialStatementLine(name=cat, amount=value) for cat, value in payments_by_cat.items() if round(value, 2) != 0]
+    payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value) for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
     payments_total = round(sum(line.amount for line in payments), 2)
     errors = await build_accounting_errors(organization_id, balance_report, income_report, assets_total, liability_equity_total)
@@ -6504,6 +6532,25 @@ def calculate_interest_rows(deposit: Deposit, year: int) -> tuple[List[InterestR
             )
         )
 
+    # طبيعة "ربع سنوية": نفس حساب الفائدة لكن تُجمَّع كل 3 شهور وتنزل في شهر نهاية الربع (3،6،9،12)
+    if getattr(deposit, "deposit_nature", "monthly") == "quarterly":
+        bucket = 0.0
+        bucket_days = 0.0
+        for row in rows:
+            bucket = round(bucket + row.interest_amount, 2)
+            bucket_days += row.active_days
+            if row.month_number % 3 == 0:
+                row.interest_amount = round(bucket, 2)
+                row.active_days = bucket_days
+                bucket = 0.0
+                bucket_days = 0.0
+            else:
+                row.interest_amount = 0.0
+                row.active_days = 0.0
+        if bucket:
+            rows[-1].interest_amount = round(rows[-1].interest_amount + bucket, 2)
+            rows[-1].active_days += bucket_days
+
     return rows, round(annual_interest, 2), round(total, 2)
 
 
@@ -7376,6 +7423,8 @@ async def create_deposit(
         accounting_start_datetime=accounting_start_datetime,
         renewed_from_deposit_id=renewed_from_deposit_id,
         renewal_notes=(payload.renewal_notes or "").strip() or None,
+        deposit_nature=payload.deposit_nature,
+        auto_renew=bool(payload.auto_renew),
         status="active",
         created_at=now,
         updated_at=now,
@@ -7398,9 +7447,44 @@ async def create_deposit(
     return deposit
 
 
+async def auto_renew_due_deposits(bank_id: str, current_user: Optional[dict] = None):
+    now = datetime.now(timezone.utc)
+    due = await db.deposits.find(with_organization({"bank_id": bank_id, "auto_renew": True, "status": {"$nin": ["renewed", "closed"]}}), {"_id": 0}).to_list(500)
+    for dep in due:
+        maturity = normalize_datetime(dep.get("maturity_datetime")) if dep.get("maturity_datetime") else None
+        if not maturity or maturity > now:
+            continue
+        already = await db.deposits.find_one(with_organization({"renewed_from_deposit_id": dep["id"], "bank_id": bank_id}), {"_id": 0, "id": 1})
+        if already:
+            await db.deposits.update_one(with_organization({"id": dep["id"], "bank_id": bank_id}), {"$set": {"status": "renewed", "updated_at": serialize_datetime(now)}})
+            continue
+        creation = normalize_datetime(dep.get("creation_datetime"))
+        duration = maturity - creation
+        new_creation = maturity
+        new_maturity = maturity + (duration if duration.days > 0 else timedelta(days=30))
+        new_doc = {key: value for key, value in dep.items() if key != "_id"}
+        new_doc.update({
+            "id": str(uuid.uuid4()),
+            "creation_datetime": serialize_datetime(new_creation),
+            "maturity_datetime": serialize_datetime(new_maturity),
+            "accounting_start_datetime": serialize_datetime(new_creation),
+            "is_opening_balance_deposit": False,
+            "status": "active",
+            "renewed_from_deposit_id": dep["id"],
+            "renewal_notes": "تجديد تلقائي عند الاستحقاق (بدون إضافة العائد للأصل)",
+            "created_at": serialize_datetime(now),
+            "updated_at": serialize_datetime(now),
+        })
+        await db.deposits.insert_one(new_doc.copy())
+        await db.deposits.update_one(with_organization({"id": dep["id"], "bank_id": bank_id}), {"$set": {"status": "renewed", "renewal_notes": "تم التجديد التلقائي عند الاستحقاق", "updated_at": serialize_datetime(now)}})
+        await journal_for_deposit_principal(new_doc, current_user)
+        await journal_for_deposit_interest(new_doc, current_user)
+
+
 @api_router.get("/banks/{bank_id}/deposits", response_model=List[Deposit])
 async def list_deposits(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
     await ensure_bank_async(bank_id)
+    await auto_renew_due_deposits(bank_id)
     documents = await db.deposits.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
@@ -7447,6 +7531,8 @@ async def update_deposit(
         "monthly_interest_rate": payload.monthly_interest_rate,
         "renewed_from_deposit_id": (payload.renewed_from_deposit_id or "").strip() or None,
         "renewal_notes": (payload.renewal_notes or "").strip() or None,
+        "deposit_nature": payload.deposit_nature,
+        "auto_renew": bool(payload.auto_renew),
         "updated_at": serialize_datetime(datetime.now(timezone.utc)),
     }
     result = await db.deposits.update_one(with_organization({"id": deposit_id, "bank_id": bank_id}), {"$set": updates})
