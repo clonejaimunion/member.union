@@ -7565,6 +7565,23 @@ async def update_deposit(
     return Deposit(**hydrate_deposit(updated))
 
 
+async def collect_deposit_chain_ids(deposit_id: str, extra_filter: Optional[dict] = None) -> set:
+    base = dict(extra_filter or {})
+    chain_ids = set()
+    frontier = [deposit_id]
+    while frontier:
+        current_id = frontier.pop()
+        if current_id in chain_ids:
+            continue
+        chain_ids.add(current_id)
+        current_doc = await db.deposits.find_one(with_organization({**base, "id": current_id}), {"_id": 0, "renewed_from_deposit_id": 1})
+        if current_doc and current_doc.get("renewed_from_deposit_id"):
+            frontier.append(current_doc["renewed_from_deposit_id"])
+        successors = await db.deposits.find(with_organization({**base, "renewed_from_deposit_id": current_id}), {"_id": 0, "id": 1}).to_list(500)
+        frontier.extend(successor["id"] for successor in successors)
+    return chain_ids
+
+
 @api_router.delete("/banks/{bank_id}/deposits/{deposit_id}")
 async def delete_deposit(
     bank_id: str,
@@ -7577,18 +7594,7 @@ async def delete_deposit(
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
 
     # جمع كامل سلسلة التجديد المرتبطة (السابقة واللاحقة) لحذفها نهائياً مع قيودها
-    chain_ids = set()
-    frontier = [deposit_id]
-    while frontier:
-        current_id = frontier.pop()
-        if current_id in chain_ids:
-            continue
-        chain_ids.add(current_id)
-        current_doc = await db.deposits.find_one(with_organization({"id": current_id, "bank_id": bank_id}), {"_id": 0})
-        if current_doc and current_doc.get("renewed_from_deposit_id"):
-            frontier.append(current_doc["renewed_from_deposit_id"])
-        successors = await db.deposits.find(with_organization({"renewed_from_deposit_id": current_id, "bank_id": bank_id}), {"_id": 0, "id": 1}).to_list(500)
-        frontier.extend(successor["id"] for successor in successors)
+    chain_ids = await collect_deposit_chain_ids(deposit_id, {"bank_id": bank_id})
 
     if existing.get("creation_datetime"):
         await ensure_period_is_open(datetime.fromisoformat(existing["creation_datetime"]).date())
@@ -9677,19 +9683,21 @@ async def update_deposit_rounding(deposit_id: str, payload: DepositRoundingUpdat
     admin_user = await db.users.find_one({"id": current_user.get("id")}, {"_id": 0})
     if not admin_user or not verify_password(payload.password, admin_user.get("password_hash", "")):
         raise HTTPException(status_code=403, detail="كلمة مرور السوبر أدمن غير صحيحة")
-    result = await db.deposits.find_one_and_update(
-        with_organization({"id": deposit_id}),
-        {"$set": {"use_daily_rounding": bool(payload.use_daily_rounding), "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
-        return_document=ReturnDocument.AFTER,
-        projection={"_id": 0},
-    )
-    if not result:
+    target = await db.deposits.find_one(with_organization({"id": deposit_id}), {"_id": 0, "deposit_number": 1})
+    if not target:
         raise HTTPException(status_code=404, detail="الوديعة غير موجودة")
+    # تطبيق حالة التقريب على سلسلة التجديد كاملة (الوديعة المستمرة) لضمان اتساق الحساب
+    chain_ids = await collect_deposit_chain_ids(deposit_id)
+    await db.deposits.update_many(
+        with_organization({"id": {"$in": list(chain_ids)}}),
+        {"$set": {"use_daily_rounding": bool(payload.use_daily_rounding), "updated_at": serialize_datetime(datetime.now(timezone.utc))}},
+    )
     state = "تفعيل" if payload.use_daily_rounding else "إلغاء"
     return {
-        "message": f"تم {state} تقريب الفائدة اليومية للوديعة {result.get('deposit_number')}",
+        "message": f"تم {state} تقريب الفائدة اليومية للوديعة {target.get('deposit_number')} وكل تجديداتها",
         "deposit_id": deposit_id,
         "use_daily_rounding": bool(payload.use_daily_rounding),
+        "affected_count": len(chain_ids),
     }
 
 
