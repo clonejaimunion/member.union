@@ -1370,3 +1370,16 @@
 - auto: شيكات المصروفات/الإيرادات تُقرأ لحظياً حسب حالتها، فتغيير الحالة في البوابة (not_presented→paid / under_collection→collected) يُحدّث الرصيد تلقائياً.
 - frontend: إضافة مسمّيات outstanding_check/collection_check/prior_year_check في sourceLabels بـ TreasuryBanksPage.jsx.
 - بيانات المستخدم الحقيقية (secure-backup-20260914) مستوردة في بيئة social-solidarity للتشخيص.
+
+## رصيد التسوية قبل الشيكات = الرصيد الافتتاحي المُرحّل (2026-06)
+- طلب المستخدم: خانة "رصيد التسوية البنكية التلقائي قبل تسويات الشيكات" تساوي الرصيد الافتتاحي لأول الشهر (7792.20 ليناير) بدون خصم حركة الشهر؛ ورصيد الشهر المطابق يصبح افتتاحي الشهر التالي تلقائياً.
+- التغيير في server.py (calculate_bank_reconciliation_balance_breakdown):
+  - book_balance = opening_balance (رصيد أول الشهر فقط).
+  - أُضيف حقل period_movement = total_receipts − total_payments (صافي حركة الشهر).
+  - reconciliation_balance = opening + period_movement + checks_not_presented − checks_under_collection (نفس القيمة النهائية = 6742.20).
+  - calculate_reconciliation: calculated_balance = book_balance + period_movement + outstanding − collection (المطابقة محفوظة بالضبط).
+  - create/update reconciliation يمرّران period_movement من الـbreakdown؛ وسطر الرصيد الجاري في كشف البنوك = book_balance + period_movement.
+  - الترحيل: افتتاحي الشهر التالي يُحسب عبر calculate_bank_period_opening_balance = افتتاحي + حركات الشهور السابقة = الرصيد المطابق للشهر السابق.
+- الواجهة (BankReconciliationPage.jsx): حساب "مطابق" الحي يضيف period_movement؛ ومذكرة الطباعة/Excel تُظهر "الرصيد قبل الشيكات (رصيد أول الشهر)" + سطر "صافي حركة الشهر".
+- تحقق API على industrial-development/2026-01: book_balance=513024.2 (=الافتتاحي)، period_movement=75663.47، reconciliation_balance=588687.67. المطابقة والقيود غير متأثرة.
+- أُعيد تجميع الحزمة وتعبئتها في /app/frontend/public/downloads/BankDepositSystemUpdate.zip (بدون ملف exe).

@@ -648,6 +648,7 @@ class BankReconciliationBalanceBreakdown(BaseModel):
     checks_under_collection: float = 0
     gross_total: float = 0
     book_balance: float = 0
+    period_movement: float = 0
     monthly_expenses: float = 0
     checks_not_presented: float = 0
     bank_expenses: float = 0
@@ -1309,6 +1310,7 @@ class BankReconciliationCreate(BaseModel):
     period_label: Optional[str] = None
     administration: Optional[str] = "النقابة العامة للعاملين بالزراعة والري"
     book_balance: float
+    period_movement: float = 0
     bank_statement_balance: float
     outstanding_checks: List[ReconciliationCheck] = Field(default_factory=list)
     collection_checks: List[ReconciliationCheck] = Field(default_factory=list)
@@ -4150,8 +4152,11 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
     total_receipts = round(monthly_revenues + monthly_deposit_interest, 2)
     total_payments = round(bank_expenses + monthly_expenses, 2)
     gross_total = round(opening_balance + total_receipts, 2)
-    book_balance = round(gross_total - total_payments, 2)
-    reconciliation_balance = round(book_balance + checks_not_presented - checks_under_collection, 2)
+    # رصيد التسوية قبل الشيكات = الرصيد الافتتاحي المُرحّل (رصيد أول الشهر) بدون خصم حركة الشهر.
+    # حركة الشهر (الإيرادات والفوائد ناقص المصروفات) تُطبَّق لاحقاً للوصول للرصيد المطابق.
+    period_movement = round(total_receipts - total_payments, 2)
+    book_balance = opening_balance
+    reconciliation_balance = round(opening_balance + period_movement + checks_not_presented - checks_under_collection, 2)
     return BankReconciliationBalanceBreakdown(
         bank_id=bank_id,
         period_from=period_from,
@@ -4164,6 +4169,7 @@ async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_l
         checks_under_collection=checks_under_collection,
         gross_total=gross_total,
         book_balance=book_balance,
+        period_movement=period_movement,
         monthly_expenses=monthly_expenses,
         checks_not_presented=checks_not_presented,
         bank_expenses=bank_expenses,
@@ -6018,7 +6024,7 @@ def calculate_reconciliation(payload: BankReconciliationCreate) -> dict:
     total_prior_year_outstanding = round(sum(item.amount for item in payload.prior_year_outstanding_checks), 2)
     total_outstanding = round(sum(item.amount for item in payload.outstanding_checks) + total_prior_year_outstanding, 2)
     total_collection = round(sum(item.amount for item in payload.collection_checks), 2)
-    calculated_balance = round(payload.book_balance + total_outstanding - total_collection, 2)
+    calculated_balance = round(payload.book_balance + payload.period_movement + total_outstanding - total_collection, 2)
     difference = round(calculated_balance - payload.bank_statement_balance, 2)
     is_matched = abs(difference) < 0.01
     return {
@@ -7862,7 +7868,7 @@ async def create_bank_reconciliation(
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
     balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
-    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance, "period_movement": balance_breakdown.period_movement})
     computed = calculate_reconciliation(payload)
     document = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks", "prior_year_outstanding_checks"]:
@@ -7943,7 +7949,7 @@ async def update_bank_reconciliation(
     now = datetime.now(timezone.utc)
     await ensure_bank_transaction_date_allowed(bank_id, now.date())
     balance_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, period_label=payload.period_label, as_of_date=now.date())
-    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance})
+    payload = payload.model_copy(update={"book_balance": balance_breakdown.book_balance, "period_movement": balance_breakdown.period_movement})
     computed = calculate_reconciliation(payload)
     updates = payload.model_dump()
     for list_name in ["outstanding_checks", "collection_checks", "prior_year_outstanding_checks"]:
@@ -9246,7 +9252,7 @@ async def get_treasury_banks_report(
             under_collection_docs = await db.revenues.find(with_organization({"bank_id": bank_id_value, "collection_method": "check", "bank_collection_status": "under_collection", "issued_at": {"$lte": to_iso}}, organization_id), {"_id": 0, "amount": 1, "check_number": 1, "issued_at": 1, "statement": 1}).to_list(100000)
             latest_rec = await db.reconciliations.find_one(with_organization({"bank_id": bank_id_value}, organization_id), {"_id": 0, "prior_year_outstanding_checks": 1}, sort=[("created_at", -1)])
             prior_year_checks = (latest_rec or {}).get("prior_year_outstanding_checks") or []
-            running_bank = breakdown.book_balance
+            running_bank = round(breakdown.book_balance + breakdown.period_movement, 2)
             for check_doc in not_presented_docs:
                 amount = round(float(check_doc.get("net_amount") if check_doc.get("net_amount") is not None else check_doc.get("gross_amount") or 0), 2)
                 if amount <= 0:
