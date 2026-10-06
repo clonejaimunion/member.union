@@ -88,6 +88,8 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
     },
   ].filter(Boolean);
 
+  const canUseDepreciationReports = canUseFixedAssets && user?.organization_id === "social-solidarity";
+
   const accountingModules = [
     canUseFixedAssets && {
       title: "الأصول الثابتة",
@@ -95,6 +97,13 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
       path: "/fixed-assets",
       icon: PackageCheck,
       testId: "module-fixed-assets-card",
+    },
+    canUseDepreciationReports && {
+      title: "تقارير اهلاك الاصول الثابتة",
+      description: "تقارير إهلاك كل فئة، أقساط الإهلاك، مخصصات الإهلاك، والأرصدة — تُولَّد تلقائياً حسب الفترة.",
+      path: "/fixed-asset-depreciation-reports",
+      icon: BarChart3,
+      testId: "module-depreciation-reports-card",
     },
     canUseCustodyAdvances && {
       title: "العهد والسلف",

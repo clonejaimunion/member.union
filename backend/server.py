@@ -8500,6 +8500,86 @@ async def list_fixed_asset_depreciations(
     return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in documents]
 
 
+def _asset_accumulated_as_of(cost: float, monthly: float, purchase_date: date, as_of: date) -> float:
+    if monthly <= 0 or as_of < date(purchase_date.year, purchase_date.month, 1):
+        return 0.0
+    months = months_between_inclusive(purchase_date, as_of)
+    return round(min(float(cost or 0), monthly * months), 2)
+
+
+@api_router.get("/fixed-assets/depreciation-reports")
+async def fixed_asset_depreciation_reports(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    org_id = organization_id_or_default()
+    documents = await db.fixed_assets.find(with_organization({}, org_id), {"_id": 0}).sort("purchase_date", 1).to_list(5000)
+    categories = await fixed_asset_categories_with_rates(org_id)
+    opening_as_of = from_date - timedelta(days=1)
+
+    category_sections = []
+    installments = []
+    provisions = []
+    balances = {}
+    for category in categories:
+        code = category["code"]
+        rate = float(category["annual_depreciation_rate"])
+        assets_rows = []
+        balance_rows = []
+        cat_cost = cat_opening = cat_year = cat_closing = cat_net = 0.0
+        for doc in documents:
+            if str(doc.get("category_code")) != str(code):
+                continue
+            if doc.get("is_active") is False:
+                continue
+            pd = doc.get("purchase_date")
+            pd = date.fromisoformat(pd) if isinstance(pd, str) else pd
+            if pd > to_date:
+                continue
+            cost = float(doc.get("purchase_cost") or 0)
+            asset_rate = float(doc.get("annual_depreciation_rate") or rate)
+            monthly = fixed_asset_monthly_depreciation(cost, asset_rate)
+            opening = _asset_accumulated_as_of(cost, monthly, pd, opening_as_of)
+            closing = _asset_accumulated_as_of(cost, monthly, pd, to_date)
+            year_dep = round(closing - opening, 2)
+            net = round(cost - closing, 2)
+            name = doc.get("asset_name")
+            assets_rows.append({"name": name, "value": cost, "opening_accum": opening, "year_depreciation": year_dep, "closing_accum": closing, "net": net})
+            balance_rows.append({"name": name, "value": cost})
+            cat_cost += cost
+            cat_opening += opening
+            cat_year += year_dep
+            cat_closing += closing
+            cat_net += net
+        totals = {"value": round(cat_cost, 2), "opening_accum": round(cat_opening, 2), "year_depreciation": round(cat_year, 2), "closing_accum": round(cat_closing, 2), "net": round(cat_net, 2)}
+        category_sections.append({"code": code, "name": category["name"], "rate": rate, "assets": assets_rows, "totals": totals})
+        installments.append({"name": category["name"], "amount": round(cat_year, 2)})
+        provisions.append({"name": f"مخصص اهلاك {category['name']}", "amount": round(cat_closing, 2)})
+        balances[code] = {"name": category["name"], "rows": balance_rows, "total": round(cat_cost, 2)}
+
+    installments_total = round(sum(item["amount"] for item in installments), 2)
+    provisions_total = round(sum(item["amount"] for item in provisions), 2)
+
+    deposit_rows = []
+    deposit_total = 0.0
+    for bank_id, bank in BANKS.items():
+        amount = await reconciliation_deposit_interest_for_period(org_id, from_date, to_date, bank_id=bank_id)
+        if amount and round(amount, 2) != 0:
+            deposit_rows.append({"name": bank["name"], "amount": round(amount, 2)})
+            deposit_total = round(deposit_total + amount, 2)
+
+    return {
+        "period": {"from_date": from_date.isoformat(), "to_date": to_date.isoformat()},
+        "categories": category_sections,
+        "installments": {"rows": installments, "total": installments_total},
+        "provisions": {"rows": provisions, "total": provisions_total},
+        "balances": balances,
+        "deposit_interest": {"rows": deposit_rows, "total": deposit_total},
+    }
+
+
+
 @api_router.get("/custody-advances", response_model=List[CustodyAdvanceResponse])
 async def list_custody_advances(
     status: Optional[str] = Query(default=None),
