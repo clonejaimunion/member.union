@@ -26,23 +26,15 @@ const REPORTS = [
   { id: "deposit_interest", title: "فوائد ودائع مستحقة", type: "simple", source: "deposit_interest" },
 ];
 
-const splitAmount = (value) => {
+const formatAmount = (value) => {
   const num = Number(value || 0);
-  const abs = Math.abs(num);
-  let pounds = Math.trunc(abs);
-  let piasters = Math.round((abs - pounds) * 100);
-  if (piasters >= 100) { pounds += 1; piasters -= 100; }
-  return { pounds, piasters, zero: abs < 0.005, negative: num < 0 };
+  if (Math.abs(num) < 0.005) return "-";
+  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
-const fmtPounds = (n, negative) => `${negative ? "-" : ""}${n.toLocaleString("en-US")}`;
-const fmtPiasters = (n) => String(n).padStart(2, "0");
 
-const AmountCells = ({ value, bold }) => {
-  const { pounds, piasters, zero, negative } = splitAmount(value);
-  const cls = `text-center tabular-nums ${bold ? "font-extrabold" : ""}`;
-  if (zero) return (<><TableCell className={cls}>-</TableCell><TableCell className={cls}>-</TableCell></>);
-  return (<><TableCell className={cls} dir="ltr">{fmtPounds(pounds, negative)}</TableCell><TableCell className={cls} dir="ltr">{fmtPiasters(piasters)}</TableCell></>);
-};
+const AmountCell = ({ value, bold }) => (
+  <TableCell className={`text-center tabular-nums ${bold ? "font-extrabold" : ""}`} dir="ltr">{formatAmount(value)}</TableCell>
+);
 
 const formatArabicDate = (iso) => {
   if (!iso) return "";
@@ -88,39 +80,34 @@ export default function FixedAssetDepreciationReportsPage() {
         <Table className="text-sm">
           <TableHeader>
             <TableRow className="bg-slate-950 hover:bg-slate-950">
-              <TableHead rowSpan={2} className="border border-slate-300 text-center align-middle text-white">البيان</TableHead>
-              <TableHead colSpan={2} className="border border-slate-300 text-center text-white">القيمة</TableHead>
-              <TableHead colSpan={2} className="border border-slate-300 text-center text-white">صافي الأصل في {toLabel}</TableHead>
-              <TableHead colSpan={2} className="border border-slate-300 text-center text-white">مجمع الإهلاك في {toLabel}</TableHead>
-              <TableHead colSpan={2} className="border border-slate-300 text-center text-white">الإهلاك خلال الفترة</TableHead>
-              <TableHead colSpan={2} className="border border-slate-300 text-center text-white">مجمع الإهلاك في {formatArabicDate(filters.from_date)}</TableHead>
-            </TableRow>
-            <TableRow className="bg-slate-800 hover:bg-slate-800">
-              {["جنيه", "قروش", "جنيه", "قروش", "جنيه", "قروش", "جنيه", "قروش", "جنيه", "قروش"].map((h, i) => (
-                <TableHead key={i} className="border border-slate-300 text-center text-xs text-white">{h}</TableHead>
-              ))}
+              <TableHead className="border border-slate-300 text-center align-middle text-white">البيان</TableHead>
+              <TableHead className="border border-slate-300 text-center text-white">القيمة</TableHead>
+              <TableHead className="border border-slate-300 text-center text-white">صافي الأصل في {toLabel}</TableHead>
+              <TableHead className="border border-slate-300 text-center text-white">مجمع الإهلاك في {toLabel}</TableHead>
+              <TableHead className="border border-slate-300 text-center text-white">الإهلاك خلال الفترة</TableHead>
+              <TableHead className="border border-slate-300 text-center text-white">مجمع الإهلاك في {formatArabicDate(filters.from_date)}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.length === 0 && <TableRow><TableCell colSpan={11} className="py-6 text-center font-bold text-slate-500">لا توجد أصول في هذه الفئة خلال الفترة</TableCell></TableRow>}
+            {rows.length === 0 && <TableRow><TableCell colSpan={6} className="py-6 text-center font-bold text-slate-500">لا توجد أصول في هذه الفئة خلال الفترة</TableCell></TableRow>}
             {rows.map((row, idx) => (
               <TableRow key={idx} data-testid={`depreciation-row-${idx}`}>
                 <TableCell className="border border-slate-200 font-bold">{row.name}</TableCell>
-                <AmountCells value={row.value} />
-                <AmountCells value={row.net} />
-                <AmountCells value={row.closing_accum} />
-                <AmountCells value={row.year_depreciation} />
-                <AmountCells value={row.opening_accum} />
+                <AmountCell value={row.value} />
+                <AmountCell value={row.net} />
+                <AmountCell value={row.closing_accum} />
+                <AmountCell value={row.year_depreciation} />
+                <AmountCell value={row.opening_accum} />
               </TableRow>
             ))}
             {rows.length > 0 && (
               <TableRow className="bg-emerald-50 font-extrabold hover:bg-emerald-50" data-testid="depreciation-total-row">
                 <TableCell className="border border-slate-200 font-extrabold">الإجمالي</TableCell>
-                <AmountCells value={totals.value} bold />
-                <AmountCells value={totals.net} bold />
-                <AmountCells value={totals.closing_accum} bold />
-                <AmountCells value={totals.year_depreciation} bold />
-                <AmountCells value={totals.opening_accum} bold />
+                <AmountCell value={totals.value} bold />
+                <AmountCell value={totals.net} bold />
+                <AmountCell value={totals.closing_accum} bold />
+                <AmountCell value={totals.year_depreciation} bold />
+                <AmountCell value={totals.opening_accum} bold />
               </TableRow>
             )}
           </TableBody>
@@ -134,26 +121,22 @@ export default function FixedAssetDepreciationReportsPage() {
       <Table className="text-sm">
         <TableHeader>
           <TableRow className="bg-slate-950 hover:bg-slate-950">
-            <TableHead rowSpan={2} className="border border-slate-300 text-center align-middle text-white">البيان</TableHead>
-            <TableHead colSpan={2} className="border border-slate-300 text-center text-white">المبلغ</TableHead>
-          </TableRow>
-          <TableRow className="bg-slate-800 hover:bg-slate-800">
-            <TableHead className="border border-slate-300 text-center text-xs text-white">جنيه</TableHead>
-            <TableHead className="border border-slate-300 text-center text-xs text-white">قروش</TableHead>
+            <TableHead className="border border-slate-300 text-center align-middle text-white">البيان</TableHead>
+            <TableHead className="border border-slate-300 text-center text-white">المبلغ</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && <TableRow><TableCell colSpan={3} className="py-6 text-center font-bold text-slate-500">لا توجد بيانات خلال الفترة</TableCell></TableRow>}
+          {rows.length === 0 && <TableRow><TableCell colSpan={2} className="py-6 text-center font-bold text-slate-500">لا توجد بيانات خلال الفترة</TableCell></TableRow>}
           {rows.map((row, idx) => (
             <TableRow key={idx} data-testid={`simple-row-${idx}`}>
               <TableCell className="border border-slate-200 font-bold">{row.name}</TableCell>
-              <AmountCells value={row[valueKey]} />
+              <AmountCell value={row[valueKey]} />
             </TableRow>
           ))}
           {rows.length > 0 && (
             <TableRow className="bg-emerald-50 font-extrabold hover:bg-emerald-50" data-testid="simple-total-row">
               <TableCell className="border border-slate-200 font-extrabold">الإجمالي</TableCell>
-              <AmountCells value={total} bold />
+              <AmountCell value={total} bold />
             </TableRow>
           )}
         </TableBody>
