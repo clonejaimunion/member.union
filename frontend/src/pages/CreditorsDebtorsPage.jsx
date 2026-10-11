@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck, Gavel, Plane, Beef, HeartHandshake } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck, Gavel, Plane, Beef, HeartHandshake, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ const ACCOUNTS = [
   { id: "hajj_umrah", title: "حـ/ جمعية الحج والعمرة", endpoint: "/creditors-debtors/hajj-umrah", icon: Plane },
   { id: "meat_installment", title: "حـ/ قسط لحوم", endpoint: "/creditors-debtors/meat-installment", icon: Beef },
   { id: "martyrs_fund", title: "حـ/ صندوق أسر الشهداء", endpoint: "/creditors-debtors/martyrs-fund", icon: HeartHandshake },
+  { id: "employee_advances", title: "حـ/ سلف العاملين", endpoint: "/creditors-debtors/employee-advances", icon: Wallet },
 ];
 
 const formatAmount = (value) => {
@@ -165,8 +166,13 @@ export default function CreditorsDebtorsPage() {
               </div>
               {data?.difference != null && (
                 <div className="mt-4 flex items-center justify-between rounded-xl border-2 border-emerald-300 bg-emerald-50 px-6 py-4" data-testid="creditors-difference-box">
-                  <span className="text-base font-extrabold text-emerald-900">الفرق / الرصيد الدائن المستحق</span>
+                  <span className="text-base font-extrabold text-emerald-900">{data.difference_label || "الفرق / الرصيد الدائن المستحق"}</span>
                   <span className="text-lg font-extrabold tabular-nums text-emerald-900" dir="ltr">{formatAmount(data.difference)}</span>
+                </div>
+              )}
+              {data?.warning_note && (
+                <div className="mt-3 rounded-xl border-2 border-amber-300 bg-amber-50 px-6 py-3 text-center text-sm font-extrabold text-amber-900" data-testid="creditors-warning-note">
+                  ⚠ {data.warning_note}
                 </div>
               )}
             </section>

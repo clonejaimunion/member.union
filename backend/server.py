@@ -8800,6 +8800,56 @@ async def martyrs_fund_account(
     return await _compute_mirror_deduction_account(organization_id_or_default(), year, month, ["شهداء"])
 
 
+async def _compute_employee_advances_account(org_id: str, year: int, month: int):
+    query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
+    expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
+
+    debit_rows = []
+    credit_rows = []
+    for exp in expenses:
+        issued = exp.get("issued_at")
+        if not issued or _is_renewed_cheque(exp):
+            continue
+        m = int(issued[5:7])
+        if month and m != month:
+            continue
+        date_label = f"{issued[8:10]}/{issued[5:7]}"
+        statement = _ar_norm(exp.get("gross_statement"))
+        if "سلفه شخصيه" in statement:
+            net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
+            if net != 0:
+                debit_rows.append({"amount": net, "month_index": m, "month_name": exp.get("payee_name") or "", "year": None, "date_label": date_label})
+        installment = 0.0
+        for ded in exp.get("deductions") or []:
+            if "سلف عاملين" in _ar_norm(ded.get("statement")):
+                installment += float(ded.get("amount") or 0)
+        if installment > 0:
+            credit_rows.append({"amount": round(installment, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": date_label})
+
+    debit_total = round(sum(r["amount"] for r in debit_rows), 2)
+    credit_total = round(sum(r["amount"] for r in credit_rows), 2)
+    return {
+        "year": year,
+        "month": month,
+        "debit": debit_rows,
+        "credit": credit_rows,
+        "debit_total": debit_total,
+        "credit_total": credit_total,
+        "difference": round(debit_total - credit_total, 2),
+        "difference_label": f"المبلغ المتبقي على الدائن في 31/12 سنة {year}",
+        "warning_note": "يجب تحصيل المبالغ المستحقة قبل نهاية السنة المالية (آخر يوم من ديسمبر) من كل سنة.",
+    }
+
+
+@api_router.get("/creditors-debtors/employee-advances")
+async def employee_advances_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_employee_advances_account(organization_id_or_default(), year, month)
+
+
 @api_router.get("/creditors-debtors/penalties-fund")
 async def penalties_fund_account(
     year: int = Query(...),
