@@ -8579,6 +8579,76 @@ async def fixed_asset_depreciation_reports(
     }
 
 
+AR_MONTHS = ["يناير", "فبراير", "مارس", "ابريل", "مايو", "يونيو", "يوليو", "اغسطس", "سبتمبر", "اكتوبر", "نوفمبر", "ديسمبر"]
+
+
+def _ar_norm(value: str) -> str:
+    text = value or ""
+    for src, dst in [("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ة", "ه"), ("ى", "ي"), ("ؤ", "و"), ("ئ", "ي")]:
+        text = text.replace(src, dst)
+    for diac in ["\u064b", "\u064c", "\u064d", "\u064e", "\u064f", "\u0650", "\u0651", "\u0652"]:
+        text = text.replace(diac, "")
+    return text.strip()
+
+
+@api_router.get("/creditors-debtors/social-insurance")
+async def social_insurance_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    org_id = organization_id_or_default()
+    query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
+    expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
+
+    def row_month(iso: str) -> int:
+        return int(iso[5:7])
+
+    credit_rows = []
+    monthly_insurance = {}
+    for exp in expenses:
+        issued = exp.get("issued_at")
+        if not issued:
+            continue
+        m = row_month(issued)
+        if month and m != month:
+            continue
+        total_deduction = 0.0
+        for ded in exp.get("deductions") or []:
+            if "تامينات" in _ar_norm(ded.get("statement")):
+                total_deduction += float(ded.get("amount") or 0)
+        if total_deduction > 0:
+            day = issued[8:10]
+            credit_rows.append({"amount": round(total_deduction, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{day}/{issued[5:7]}"})
+            monthly_insurance[m] = round(monthly_insurance.get(m, 0.0) + total_deduction, 2)
+
+    debit_rows = []
+    for exp in expenses:
+        issued = exp.get("issued_at")
+        if not issued:
+            continue
+        m = row_month(issued)
+        if month and m != month:
+            continue
+        payee = _ar_norm(exp.get("payee_name"))
+        statement = _ar_norm(exp.get("gross_statement"))
+        if "النقابه العامه" in payee and "تامين" in statement:
+            amount = monthly_insurance.get(m, 0.0)
+            day = issued[8:10]
+            debit_rows.append({"amount": round(amount, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{day}/{issued[5:7]}"})
+
+    return {
+        "year": year,
+        "month": month,
+        "debit": debit_rows,
+        "credit": credit_rows,
+        "debit_total": round(sum(r["amount"] for r in debit_rows), 2),
+        "credit_total": round(sum(r["amount"] for r in credit_rows), 2),
+    }
+
+
+
+
 
 @api_router.get("/custody-advances", response_model=List[CustodyAdvanceResponse])
 async def list_custody_advances(

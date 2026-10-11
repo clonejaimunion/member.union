@@ -29,6 +29,7 @@ import FinancialStatementsPage from "@/pages/FinancialStatementsPage";
 import TreasuryBanksPage from "@/pages/TreasuryBanksPage";
 import FixedAssetsPage from "@/pages/FixedAssetsPage";
 import FixedAssetDepreciationReportsPage from "@/pages/FixedAssetDepreciationReportsPage";
+import CreditorsDebtorsPage from "@/pages/CreditorsDebtorsPage";
 import CustodyAdvancesPage from "@/pages/CustodyAdvancesPage";
 import MembershipPage from "@/pages/MembershipPage";
 import ElectronicInvoicePage from "@/pages/ElectronicInvoicePage";
@@ -58,6 +59,7 @@ const buildSectionTitles = (appTitle) => [
   { test: (path) => path === "/rules-engine", title: `محرك قواعد القيود - ${appTitle}` },
   { test: (path) => path === "/fixed-assets", title: `الأصول الثابتة - ${appTitle}` },
   { test: (path) => path === "/fixed-asset-depreciation-reports", title: `تقارير اهلاك الاصول الثابتة - ${appTitle}` },
+  { test: (path) => path === "/creditors-debtors", title: `الدائنون و المدينون - ${appTitle}` },
   { test: (path) => path === "/chart-accounts", title: `شجرة الحسابات - ${appTitle}` },
   { test: (path) => path === "/trial-balance", title: `ميزان المراجعة - ${appTitle}` },
   { test: (path) => path === "/financial-statements", title: `القوائم المالية - ${appTitle}` },
@@ -193,6 +195,7 @@ function App() {
               <Route path="/rules-engine" element={<ProtectedRoute adminOnly><RulesEnginePage /></ProtectedRoute>} />
               <Route path="/fixed-assets" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="fixed_assets"><FixedAssetsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/fixed-asset-depreciation-reports" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="fixed_assets"><FixedAssetDepreciationReportsPage /></ModuleRoute></ProtectedRoute>} />
+              <Route path="/creditors-debtors" element={<ProtectedRoute anyPermissions={["manage_expenses", "view_reports"]}><ModuleRoute moduleKey="expenses"><CreditorsDebtorsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/chart-accounts" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="chart_accounts"><ChartAccountsPage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/trial-balance" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="trial_balance"><TrialBalancePage /></ModuleRoute></ProtectedRoute>} />
               <Route path="/financial-statements" element={<ProtectedRoute anyPermissions={["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"]}><ModuleRoute moduleKey="financial_statements"><FinancialStatementsPage /></ModuleRoute></ProtectedRoute>} />

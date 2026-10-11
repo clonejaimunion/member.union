@@ -105,6 +105,13 @@ export default function ModuleSelection({ accountingOnly = false, studiesOnly = 
       icon: BarChart3,
       testId: "module-depreciation-reports-card",
     },
+    canUseDepreciationReports && {
+      title: "الدائنون و المدينون",
+      description: "حسابات الدائنين والمدينين بشكل حساب أستاذ (مدين/دائن) — تُولَّد تلقائياً من المصروفات.",
+      path: "/creditors-debtors",
+      icon: Scale,
+      testId: "module-creditors-debtors-card",
+    },
     canUseCustodyAdvances && {
       title: "العهد والسلف",
       description: "صرف عهد وسلف وتسويتها بقيود يومية تلقائية.",
