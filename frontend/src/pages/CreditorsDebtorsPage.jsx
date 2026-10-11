@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck, Gavel } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ const ACCOUNTS = [
   { id: "union_committee", title: "حـ/ لجنة نقابية", endpoint: "/creditors-debtors/union-committee", icon: Users },
   { id: "supplier_tax", title: "حـ/ ضرائب الموردين", endpoint: "/creditors-debtors/supplier-tax", icon: Receipt },
   { id: "legal_accountant", title: "حـ/ المحاسب القانوني", endpoint: "/creditors-debtors/legal-accountant", icon: UserCheck },
+  { id: "penalties_fund", title: "حـ/ صندوق الجزاءات", endpoint: "/creditors-debtors/penalties-fund", icon: Gavel },
 ];
 
 const formatAmount = (value) => {

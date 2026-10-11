@@ -8664,47 +8664,40 @@ async def union_committee_account(
     return await _compute_withholding_account(organization_id_or_default(), year, month, ["لجنه نقابيه"])
 
 
-@api_router.get("/creditors-debtors/supplier-tax")
-async def supplier_tax_account(
-    year: int = Query(...),
-    month: int = Query(0),
-    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
-):
-    org_id = organization_id_or_default()
+async def _compute_deduction_liability_account(org_id: str, year: int, month: int, deduction_keywords, payment_keywords):
     expenses = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(10000)
-    tax_keywords = ["ضرايب", "تحت حساب"]
     year_start = f"{year}-01-01"
 
-    def tax_deduction_total(exp) -> float:
+    def deduction_total(exp) -> float:
         total = 0.0
         for ded in exp.get("deductions") or []:
             statement = _ar_norm(ded.get("statement"))
-            if any(kw in statement for kw in tax_keywords):
+            if any(kw in statement for kw in deduction_keywords):
                 total += float(ded.get("amount") or 0)
         return round(total, 2)
 
-    def is_tax_payment(exp) -> bool:
+    def is_payment(exp) -> bool:
         statement = _ar_norm(exp.get("gross_statement"))
         payee = _ar_norm(exp.get("payee_name"))
-        return ("ضريب" in statement or "ضرايب" in statement) and "النقابه العامه" not in payee
+        return any(kw in statement for kw in payment_keywords) and "النقابه العامه" not in payee
 
-    monthly_tax = {}
+    monthly_amount = {}
     for exp in expenses:
         iss = exp.get("issued_at")
         if not iss or _is_renewed_cheque(exp):
             continue
-        amt = tax_deduction_total(exp)
+        amt = deduction_total(exp)
         if amt > 0:
-            monthly_tax[iss[0:7]] = round(monthly_tax.get(iss[0:7], 0.0) + amt, 2)
+            monthly_amount[iss[0:7]] = round(monthly_amount.get(iss[0:7], 0.0) + amt, 2)
 
     opening_credit = 0.0
     for exp in expenses:
         iss = exp.get("issued_at")
         if not iss or iss >= year_start or _is_renewed_cheque(exp):
             continue
-        opening_credit += tax_deduction_total(exp)
-        if is_tax_payment(exp):
-            opening_credit -= monthly_tax.get(iss[0:7], 0.0)
+        opening_credit += deduction_total(exp)
+        if is_payment(exp):
+            opening_credit -= monthly_amount.get(iss[0:7], 0.0)
     opening_credit = round(opening_credit, 2)
 
     credit_rows = []
@@ -8719,11 +8712,11 @@ async def supplier_tax_account(
         m = int(iss[5:7])
         if month and m != month:
             continue
-        amt = tax_deduction_total(exp)
+        amt = deduction_total(exp)
         if amt > 0:
             credit_rows.append({"amount": amt, "month_name": AR_MONTHS[m - 1], "year": int(iss[0:4]), "date_label": f"{iss[8:10]}/{iss[5:7]}"})
-        if is_tax_payment(exp):
-            debit_rows.append({"amount": monthly_tax.get(iss[0:7], 0.0), "month_name": AR_MONTHS[m - 1], "year": int(iss[0:4]), "date_label": f"{iss[8:10]}/{iss[5:7]}"})
+        if is_payment(exp):
+            debit_rows.append({"amount": monthly_amount.get(iss[0:7], 0.0), "month_name": AR_MONTHS[m - 1], "year": int(iss[0:4]), "date_label": f"{iss[8:10]}/{iss[5:7]}"})
 
     credit_total = round(sum(r["amount"] for r in credit_rows), 2)
     debit_total = round(sum(r["amount"] for r in debit_rows), 2)
@@ -8738,6 +8731,26 @@ async def supplier_tax_account(
         "debit_total": debit_total,
         "difference": round(credit_total - debit_total, 2),
     }
+
+
+@api_router.get("/creditors-debtors/supplier-tax")
+async def supplier_tax_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_deduction_liability_account(organization_id_or_default(), year, month, ["ضرايب", "تحت حساب"], ["ضريب", "ضرايب"])
+
+
+@api_router.get("/creditors-debtors/penalties-fund")
+async def penalties_fund_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_deduction_liability_account(organization_id_or_default(), year, month, ["غياب", "جزاءات", "جزاء"], ["صندوق الجزاءات", "جزاءات"])
+
+
 
 
 @api_router.get("/creditors-debtors/legal-accountant")
