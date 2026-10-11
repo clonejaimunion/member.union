@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 const MONTHS = ["يناير", "فبراير", "مارس", "ابريل", "مايو", "يونيو", "يوليو", "اغسطس", "سبتمبر", "اكتوبر", "نوفمبر", "ديسمبر"];
 const ACCOUNTS = [
   { id: "social_insurance", title: "حـ/ التامينات الاجتماعية", endpoint: "/creditors-debtors/social-insurance", icon: ShieldCheck },
+  { id: "union_committee", title: "حـ/ لجنة نقابية", endpoint: "/creditors-debtors/union-committee", icon: Users },
 ];
 
 const formatAmount = (value) => {

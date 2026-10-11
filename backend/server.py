@@ -8592,12 +8592,7 @@ def _ar_norm(value: str) -> str:
 
 
 @api_router.get("/creditors-debtors/social-insurance")
-async def social_insurance_account(
-    year: int = Query(...),
-    month: int = Query(0),
-    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
-):
-    org_id = organization_id_or_default()
+async def _compute_withholding_account(org_id: str, year: int, month: int, deduction_keywords, payment_keywords):
     query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
     expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
 
@@ -8605,7 +8600,7 @@ async def social_insurance_account(
         return int(iso[5:7])
 
     credit_rows = []
-    monthly_insurance = {}
+    monthly_amount = {}
     for exp in expenses:
         issued = exp.get("issued_at")
         if not issued:
@@ -8615,12 +8610,13 @@ async def social_insurance_account(
             continue
         total_deduction = 0.0
         for ded in exp.get("deductions") or []:
-            if "تامينات" in _ar_norm(ded.get("statement")):
+            statement = _ar_norm(ded.get("statement"))
+            if any(kw in statement for kw in deduction_keywords):
                 total_deduction += float(ded.get("amount") or 0)
         if total_deduction > 0:
             day = issued[8:10]
             credit_rows.append({"amount": round(total_deduction, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{day}/{issued[5:7]}"})
-            monthly_insurance[m] = round(monthly_insurance.get(m, 0.0) + total_deduction, 2)
+            monthly_amount[m] = round(monthly_amount.get(m, 0.0) + total_deduction, 2)
 
     debit_rows = []
     for exp in expenses:
@@ -8632,8 +8628,8 @@ async def social_insurance_account(
             continue
         payee = _ar_norm(exp.get("payee_name"))
         statement = _ar_norm(exp.get("gross_statement"))
-        if "النقابه العامه" in payee and "تامين" in statement:
-            amount = monthly_insurance.get(m, 0.0)
+        if "النقابه العامه" in payee and any(kw in statement for kw in payment_keywords):
+            amount = monthly_amount.get(m, 0.0)
             day = issued[8:10]
             debit_rows.append({"amount": round(amount, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{day}/{issued[5:7]}"})
 
@@ -8645,6 +8641,24 @@ async def social_insurance_account(
         "debit_total": round(sum(r["amount"] for r in debit_rows), 2),
         "credit_total": round(sum(r["amount"] for r in credit_rows), 2),
     }
+
+
+@api_router.get("/creditors-debtors/social-insurance")
+async def social_insurance_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_withholding_account(organization_id_or_default(), year, month, ["تامينات"], ["تامين"])
+
+
+@api_router.get("/creditors-debtors/union-committee")
+async def union_committee_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_withholding_account(organization_id_or_default(), year, month, ["لجنه نقابيه"], ["لجنه نقابيه"])
 
 
 
