@@ -73,6 +73,8 @@ const isAccumDepCode = (code) => String(code || "").endsWith("-م");
 const isFixedAssetCode = (code) => FIXED_ASSET_CODES.includes(String(code || ""));
 const isBankCashCode = (code) => { const c = String(code || ""); return c.startsWith("11") || c === "1250"; };
 const isAccruedInterestCode = (code) => String(code || "") === "1300";
+const isInventoryCode = (code) => String(code || "") === "1700";
+const isAdvancesCode = (code) => String(code || "") === "1500";
 
 const prevHasData = (p) => !!p && (
   Number(p?.balance_sheet?.assets?.total || 0) !== 0 ||
@@ -139,16 +141,20 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
   const sumAmt = (lines) => Math.round(lines.reduce((s, l) => s + Number(l.amount || 0), 0) * 100) / 100;
 
   const fixedAssetRows = pick(assetLines, isFixedAssetCode);
+  const inventoryRows = pick(assetLines, isInventoryCode);
   const bankRows = pick(assetLines, isBankCashCode);
   const accruedRows = pick(assetLines, isAccruedInterestCode);
-  const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAccumDepCode(l.code));
+  const advanceRows = pick(assetLines, isAdvancesCode);
+  const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isInventoryCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAdvancesCode(l.code) && !isAccumDepCode(l.code));
   const provisionRows = pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
 
   const assetGroups = [
     { title: "أصول ثابتة", rows: fixedAssetRows },
+    { title: "المخزون", rows: inventoryRows },
     { title: "نقدية وبنوك", rows: bankRows },
     { title: "فوائد ودائع مستحقة", rows: accruedRows },
     { title: "حسابات مدينة", rows: debtorRows },
+    { title: "السلف", rows: advanceRows },
   ];
   const creditGroups = [
     { title: "المخصصات", rows: provisionRows },
@@ -156,7 +162,7 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
     { title: "الفائض", rows: equityLines },
   ];
 
-  const assetsTotal = sumAmt([...fixedAssetRows, ...bankRows, ...accruedRows, ...debtorRows]);
+  const assetsTotal = sumAmt([...fixedAssetRows, ...inventoryRows, ...bankRows, ...accruedRows, ...debtorRows, ...advanceRows]);
   const creditTotal = Math.round((sumAmt(provisionRows) + sumAmt(liabilityLines) + sumAmt(equityLines)) * 100) / 100;
 
   const prevMap = {};
