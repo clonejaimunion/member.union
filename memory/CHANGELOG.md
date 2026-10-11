@@ -1390,3 +1390,9 @@
 - CreditorsDebtorsPage.jsx: أُضيف الكارت hajj_umrah بأيقونة Plane، والواجهة عامة تعرض debit/credit والإجماليات كما هي.
 - التحقق: curl بعد حقن بيانات تجريبية → debit=credit (200، مارس، 11/03)، وشيك «تجديد شيك» (999) مستبعَد صح، debit_total=credit_total=200. تم تنظيف البيانات التجريبية.
 - أُعيد تجميع الحزمة وتعبئة BankDepositSystemUpdate.zip (frontend/ + backend/server.py، بدون أي .exe).
+
+## حـ/ قسط لحوم في بوابة الدائنون والمدينون — 2026-06
+- نفس نمط حساب الحج والعمرة (مرآة: مدين = دائن متطابقان). endpoint جديد GET /api/creditors-debtors/meat-installment يعيد نفس الصفوف في الجانبين، المطابقة بكلمة «لحوم» على بيان الاستقطاع المُطَبَّع، مع استبعاد «تجديد شيك» وإجمالي عمود المبلغ فقط.
+- CreditorsDebtorsPage.jsx: كارت meat_installment بأيقونة Beef.
+- التحقق: curl ببيانات تجريبية → debit=credit (370، ابريل، 10/04)، شيك «تجديد شيك» (888) مستبعَد صح. تم تنظيف البيانات التجريبية.
+- أُعيد تجميع الحزمة وتعبئة BankDepositSystemUpdate.zip (frontend/ + backend/server.py، بدون أي .exe).
