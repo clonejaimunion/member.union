@@ -4721,7 +4721,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     def _is_bank_line(line: dict) -> bool:
         code = str(line.get("account_code") or "")
         name = str(line.get("account_name") or "")
-        return code.startswith("11") or name in ["البنوك", "البنك"]
+        return code.startswith("11") or code == "1250" or name in ["البنوك", "البنك"] or "ودائع لأجل" in name
 
     from_iso = period_from.isoformat()
     to_iso = period_to.isoformat()
@@ -4744,7 +4744,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             closing_by_bank[bank_name] = round(closing_by_bank.get(bank_name, 0) + debit - credit, 2)
             if not in_period:
                 opening_by_bank[bank_name] = round(opening_by_bank.get(bank_name, 0) + debit - credit, 2)
-            else:
+            elif contra_lines:
                 if debit > 0:
                     receipts_by_cat[contra_name] = round(receipts_by_cat.get(contra_name, 0) + debit, 2)
                 if credit > 0:
