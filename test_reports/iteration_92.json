@@ -1,0 +1,48 @@
+{
+  "summary": "Frontend-only verification of restyled annual Financial Statements (Balance Sheet / Income & Expenses / Receipts & Payments) for org social-solidarity, year 2025. All expected grouped sub-headers render in the correct order with the exact seeded values. Comparative (مقارن 2024) column is correctly hidden since no prior-year data exists. Accumulated depreciation (مجمع إهلاك الأثاث) is shown as POSITIVE 5,000.00 under المخصصات on the credit side. Both sides of each statement balance to equal totals, balance-check reads 0.00 and is NOT red. No React runtime/page errors observed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verification_details": {
+    "balance_sheet": {
+      "comparative_column_hidden": true,
+      "assets_groups_in_order": ["أصول ثابتة", "نقدية وبنوك", "فوائد ودائع مستحقة", "حسابات مدينة"],
+      "assets_values": {"الأثاث": "50,000.00", "بنك التنمية الصناعية": "1,090,000.00", "فوائد ودائع مستحقة": "—", "العهد والسلف": "10,000.00", "المخزون": "20,000.00"},
+      "assets_total": "1,170,000.00",
+      "liab_groups_in_order": ["المخصصات", "حسابات دائنة", "الفائض"],
+      "liab_values": {"مجمع إهلاك الأثاث": "5,000.00 (positive)", "حسابات دائنة": "—", "رصيد افتتاحي": "1,000,000.00", "فائض / عجز الفترة": "165,000.00"},
+      "liab_total": "1,170,000.00",
+      "balance_check_text": "فرق اتزان الميزانية: 0.00 ج.م.",
+      "balance_check_color_rgb": "rgb(2, 6, 23) - not red"
+    },
+    "income_expenses": {
+      "expenses_rows": {"المصروفات": "30,000.00", "إهلاك الأثاث": "5,000.00", "الفائض": "165,000.00"},
+      "expenses_total": "200,000.00",
+      "revenues_rows": {"رسم انضمام": "200,000.00"},
+      "revenues_total": "200,000.00",
+      "sides_balanced": true,
+      "result_box": "الفائض: 165,000.00"
+    },
+    "receipts_payments": {
+      "receipts_groups": ["رصيد أول المدة (—)", "مقبوضات النشاط (رصيد افتتاحي 1,000,000; رسم انضمام 200,000)"],
+      "receipts_total": "1,200,000.00",
+      "payments_groups": ["مصروفات النشاط (الأثاث 50,000; المصروفات 30,000; المخزون 20,000; العهد والسلف 10,000)", "رصيد آخر المدة (بنك العمال-جاري 1,090,000)"],
+      "payments_total": "1,200,000.00",
+      "sides_balanced": true
+    },
+    "runtime_errors": "none"
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "admin / Admin@123 / organization social-solidarity",
+  "seed_data_creation": "none (used existing seeded _tmp_fs 2025 journal entries)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "FinancialStatementsPage.jsx print presentation refactor verified end-to-end on live preview URL. Year 2025 generates expected grouped Balance Sheet, Income & Expenses, Receipts & Payments with proper group sub-headers, totals balanced, comparative column hidden (prevHasData gate works), accumulated depreciation flipped positive on credit side. If a future year gets prior-year data seeded, re-check that comparative column reappears automatically."
+}
