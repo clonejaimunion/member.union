@@ -8791,6 +8791,15 @@ async def meat_installment_account(
     return await _compute_mirror_deduction_account(organization_id_or_default(), year, month, ["لحوم"])
 
 
+@api_router.get("/creditors-debtors/martyrs-fund")
+async def martyrs_fund_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_mirror_deduction_account(organization_id_or_default(), year, month, ["شهداء"])
+
+
 @api_router.get("/creditors-debtors/penalties-fund")
 async def penalties_fund_account(
     year: int = Query(...),

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck, Gavel, Plane, Beef } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck, Gavel, Plane, Beef, HeartHandshake } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ const ACCOUNTS = [
   { id: "penalties_fund", title: "حـ/ صندوق الجزاءات", endpoint: "/creditors-debtors/penalties-fund", icon: Gavel },
   { id: "hajj_umrah", title: "حـ/ جمعية الحج والعمرة", endpoint: "/creditors-debtors/hajj-umrah", icon: Plane },
   { id: "meat_installment", title: "حـ/ قسط لحوم", endpoint: "/creditors-debtors/meat-installment", icon: Beef },
+  { id: "martyrs_fund", title: "حـ/ صندوق أسر الشهداء", endpoint: "/creditors-debtors/martyrs-fund", icon: HeartHandshake },
 ];
 
 const formatAmount = (value) => {
