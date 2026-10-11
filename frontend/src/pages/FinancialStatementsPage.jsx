@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowRight, FileSpreadsheet, FileWarning, Home, LogOut, Printer, Scale } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +18,6 @@ const years = Array.from({ length: 16 }, (_, index) => currentYear - 10 + index)
 
 const yearRange = (year) => ({ from_date: `${year}-01-01`, to_date: `${year}-12-31` });
 const sectionTotal = (section) => Number(section?.total || 0);
-const lineAmount = (line) => Number(line?.amount || 0);
 const officialEmailOrEmpty = (email) => {
   const value = (email || "").trim();
   if (!value || value.toLowerCase().endsWith("@example.com") || value.toLowerCase().includes("+iter")) return "";
@@ -68,32 +67,60 @@ function ReportHeader({ title, subtitle, year, dateLabel, testId, unionName, pro
   );
 }
 
-function AnnualRowsTable({ title, rows, total, testId, year, prevYear, prevMap = {}, prevTotal = 0 }) {
-  const prevOf = (line) => Number(prevMap[line.name] ?? 0);
+// أكواد شجرة الحسابات لتجميع بنود الميزانية بنفس أقسام نماذج الإكسل
+const FIXED_ASSET_CODES = ["5", "101", "151", "155"];
+const isAccumDepCode = (code) => String(code || "").endsWith("-م");
+const isFixedAssetCode = (code) => FIXED_ASSET_CODES.includes(String(code || ""));
+const isBankCashCode = (code) => { const c = String(code || ""); return c.startsWith("11") || c === "1250"; };
+const isAccruedInterestCode = (code) => String(code || "") === "1300";
+
+const prevHasData = (p) => !!p && (
+  Number(p?.balance_sheet?.assets?.total || 0) !== 0 ||
+  (p?.revenues_expenses?.revenues?.lines || []).length > 0 ||
+  (p?.receipts_payments?.receipts?.lines || []).length > 0
+);
+
+// جدول جانب واحد (مدين أو دائن) مقسّم إلى مجموعات بعناوين فرعية مثل نماذج الإكسل
+function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, prevMap = {}, prevTotal = 0, testId }) {
+  const cols = showPrev ? 3 : 2;
+  const prevOf = (name) => Number(prevMap[name] ?? 0);
+  let rowIndex = -1;
   return (
     <div className="rounded-lg border border-slate-300 bg-white" data-testid={`${testId}-box`}>
-      <div className="border-b border-slate-300 bg-slate-100 px-4 py-2 text-center text-lg font-extrabold" data-testid={`${testId}-title`}>{title}</div>
+      <div className="border-b border-slate-300 bg-slate-900 px-4 py-2 text-center text-lg font-extrabold text-white" data-testid={`${testId}-title`}>{sideTitle}</div>
       <Table data-testid={testId}>
         <TableHeader>
           <TableRow className="bg-white hover:bg-white">
             <TableHead className="border border-slate-300 text-center font-extrabold text-slate-900">البيان</TableHead>
             <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">{year}</TableHead>
-            <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">مقارن {prevYear}</TableHead>
+            {showPrev && <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">مقارن {prevYear}</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.length === 0 && <TableRow data-testid={`${testId}-empty-row`}><TableCell colSpan={3} className="border border-slate-300 py-7 text-center font-bold text-slate-500">لا توجد بيانات</TableCell></TableRow>}
-          {rows.map((line, index) => (
-            <TableRow key={`${line.code || ""}-${line.name}-${index}`} data-testid={`${testId}-row-${index}`}>
-              <TableCell className="border border-slate-300 font-extrabold" data-testid={`${testId}-row-${index}-name`}>{line.name}</TableCell>
-              <TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${index}-amount`}>{formatCurrency(lineAmount(line))}</TableCell>
-              <TableCell className="border border-slate-300 text-center font-bold text-slate-600" data-testid={`${testId}-row-${index}-prev-amount`}>{formatCurrency(prevOf(line))}</TableCell>
-            </TableRow>
+          {groups.map((group, gi) => (
+            <Fragment key={`g-${gi}`}>
+              <TableRow className="bg-slate-100 hover:bg-slate-100" data-testid={`${testId}-group-${gi}`}>
+                <TableCell colSpan={cols} className="border border-slate-300 font-extrabold text-slate-800">{group.title}</TableCell>
+              </TableRow>
+              {(group.rows || []).length === 0 && (
+                <TableRow><TableCell colSpan={cols} className="border border-slate-300 py-2 text-center text-sm font-bold text-slate-400">—</TableCell></TableRow>
+              )}
+              {(group.rows || []).map((line) => {
+                rowIndex += 1;
+                return (
+                  <TableRow key={`${line.code || ""}-${line.name}-${rowIndex}`} data-testid={`${testId}-row-${rowIndex}`}>
+                    <TableCell className="border border-slate-300 pr-6 font-bold" data-testid={`${testId}-row-${rowIndex}-name`}>{line.name}</TableCell>
+                    <TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${rowIndex}-amount`}>{formatCurrency(Number(line.amount || 0))}</TableCell>
+                    {showPrev && <TableCell className="border border-slate-300 text-center font-bold text-slate-600" data-testid={`${testId}-row-${rowIndex}-prev-amount`}>{formatCurrency(prevOf(line.name))}</TableCell>}
+                  </TableRow>
+                );
+              })}
+            </Fragment>
           ))}
-          <TableRow className="bg-slate-100 font-extrabold" data-testid={`${testId}-total-row`}>
+          <TableRow className="bg-slate-200 font-extrabold hover:bg-slate-200" data-testid={`${testId}-total-row`}>
             <TableCell className="border border-slate-300">الإجمالي</TableCell>
             <TableCell className="border border-slate-300 text-center" data-testid={`${testId}-current-total`}>{formatCurrency(total || 0)}</TableCell>
-            <TableCell className="border border-slate-300 text-center text-slate-600" data-testid={`${testId}-prev-total`}>{formatCurrency(prevTotal || 0)}</TableCell>
+            {showPrev && <TableCell className="border border-slate-300 text-center text-slate-600" data-testid={`${testId}-prev-total`}>{formatCurrency(prevTotal || 0)}</TableCell>}
           </TableRow>
         </TableBody>
       </Table>
@@ -103,23 +130,51 @@ function AnnualRowsTable({ title, rows, total, testId, year, prevYear, prevMap =
 
 function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
-  const currentAssets = report?.balance_sheet?.assets;
-  const currentLiabilities = report?.balance_sheet?.liabilities;
-  const currentEquity = report?.balance_sheet?.equity;
-  const rightRows = [...(currentLiabilities?.lines || []), ...(currentEquity?.lines || [])];
-  const rightTotal = sectionTotal(currentLiabilities) + sectionTotal(currentEquity);
-  const prevAssetsMap = buildPrevMap(prevReport?.balance_sheet?.assets?.lines);
-  const prevRightMap = buildPrevMap([...(prevReport?.balance_sheet?.liabilities?.lines || []), ...(prevReport?.balance_sheet?.equity?.lines || [])]);
-  const prevAssetsTotal = sectionTotal(prevReport?.balance_sheet?.assets);
-  const prevRightTotal = sectionTotal(prevReport?.balance_sheet?.liabilities) + sectionTotal(prevReport?.balance_sheet?.equity);
+  const showPrev = prevHasData(prevReport);
+  const assetLines = report?.balance_sheet?.assets?.lines || [];
+  const liabilityLines = report?.balance_sheet?.liabilities?.lines || [];
+  const equityLines = report?.balance_sheet?.equity?.lines || [];
+
+  const pick = (lines, fn) => lines.filter((l) => fn(l.code));
+  const sumAmt = (lines) => Math.round(lines.reduce((s, l) => s + Number(l.amount || 0), 0) * 100) / 100;
+
+  const fixedAssetRows = pick(assetLines, isFixedAssetCode);
+  const bankRows = pick(assetLines, isBankCashCode);
+  const accruedRows = pick(assetLines, isAccruedInterestCode);
+  const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAccumDepCode(l.code));
+  const provisionRows = pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
+
+  const assetGroups = [
+    { title: "أصول ثابتة", rows: fixedAssetRows },
+    { title: "نقدية وبنوك", rows: bankRows },
+    { title: "فوائد ودائع مستحقة", rows: accruedRows },
+    { title: "حسابات مدينة", rows: debtorRows },
+  ];
+  const creditGroups = [
+    { title: "المخصصات", rows: provisionRows },
+    { title: "حسابات دائنة", rows: liabilityLines },
+    { title: "الفائض", rows: equityLines },
+  ];
+
+  const assetsTotal = sumAmt([...fixedAssetRows, ...bankRows, ...accruedRows, ...debtorRows]);
+  const creditTotal = Math.round((sumAmt(provisionRows) + sumAmt(liabilityLines) + sumAmt(equityLines)) * 100) / 100;
+
+  const prevMap = {};
+  (prevReport?.balance_sheet?.assets?.lines || []).forEach((l) => { prevMap[l.name] = isAccumDepCode(l.code) ? Math.abs(Number(l.amount || 0)) : Number(l.amount || 0); });
+  [...(prevReport?.balance_sheet?.liabilities?.lines || []), ...(prevReport?.balance_sheet?.equity?.lines || [])].forEach((l) => { prevMap[l.name] = Number(l.amount || 0); });
+  const prevAssetLines = prevReport?.balance_sheet?.assets?.lines || [];
+  const prevAssetsTotal = sumAmt(prevAssetLines.filter((l) => !isAccumDepCode(l.code)));
+  const prevCreditTotal = Math.round((Math.abs(sumAmt(prevAssetLines.filter((l) => isAccumDepCode(l.code)))) + Number(prevReport?.balance_sheet?.liabilities?.total || 0) + Number(prevReport?.balance_sheet?.equity?.total || 0)) * 100) / 100;
+
+  const diff = Math.round((assetsTotal - creditTotal) * 100) / 100;
   return (
     <section className="financial-print-sheet" data-testid="balance-sheet-print-section">
-      <ReportHeader title="الميزانية" year={year} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
+      <ReportHeader title="الميزانية" year={year} dateLabel={`في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="balance-sheet-print-grid">
-        <AnnualRowsTable title="الأصول" rows={currentAssets?.lines || []} year={year} prevYear={prevYear} prevMap={prevAssetsMap} prevTotal={prevAssetsTotal} total={sectionTotal(currentAssets)} testId="balance-sheet-print-assets-table" />
-        <AnnualRowsTable title="المخصصات والفائض" rows={rightRows} year={year} prevYear={prevYear} prevMap={prevRightMap} prevTotal={prevRightTotal} total={rightTotal} testId="balance-sheet-print-liabilities-equity-table" />
+        <GroupedSideTable sideTitle="الأصول" groups={assetGroups} total={assetsTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevAssetsTotal} testId="balance-sheet-print-assets-table" />
+        <GroupedSideTable sideTitle="المخصصات والالتزامات والفائض" groups={creditGroups} total={creditTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevCreditTotal} testId="balance-sheet-print-liabilities-equity-table" />
       </div>
-      <div className={`mt-5 border-2 p-3 text-center text-xl font-extrabold ${report?.balance_sheet?.check?.total === 0 ? "border-slate-400" : "border-red-600 text-red-700"}`} data-testid="balance-sheet-print-check">فرق اتزان الميزانية: {formatCurrency(report?.balance_sheet?.check?.total || 0)}</div>
+      <div className={`mt-5 border-2 p-3 text-center text-xl font-extrabold ${diff === 0 ? "border-slate-400" : "border-red-600 text-red-700"}`} data-testid="balance-sheet-print-check">فرق اتزان الميزانية: {formatCurrency(diff)}</div>
       <SignatureStrip testId="balance-sheet-print-signatures" />
     </section>
   );
@@ -127,21 +182,35 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
 
 function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
+  const showPrev = prevHasData(prevReport);
   const revenueRows = transformRevenueLines(report?.revenues_expenses?.revenues?.lines);
   const expenseRows = report?.revenues_expenses?.expenses?.lines || [];
-  const prevRevenueRows = transformRevenueLines(prevReport?.revenues_expenses?.revenues?.lines);
+  const result = Math.round(Number(report?.revenues_expenses?.result?.total || 0) * 100) / 100;
   const revenueTotal = linesTotal(revenueRows);
-  const prevRevenueTotal = linesTotal(prevRevenueRows);
-  const prevRevenueMap = buildPrevMap(prevRevenueRows);
-  const prevExpenseMap = buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines);
+  const expenseTotal = linesTotal(expenseRows);
+
+  // الفائض يظهر في جانب المصروفات (والعجز في جانب الإيرادات) لتتساوى الإجماليات كما في النموذج
+  const expenseGroupRows = result >= 0 ? [...expenseRows, { name: "الفائض", amount: result }] : expenseRows;
+  const revenueGroupRows = result < 0 ? [...revenueRows, { name: "العجز", amount: Math.abs(result) }] : revenueRows;
+  const expenseSideTotal = Math.round((expenseTotal + Math.max(result, 0)) * 100) / 100;
+  const revenueSideTotal = Math.round((revenueTotal + Math.max(-result, 0)) * 100) / 100;
+
+  const prevRevenueRows = transformRevenueLines(prevReport?.revenues_expenses?.revenues?.lines);
+  const prevMap = { ...buildPrevMap(prevRevenueRows), ...buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines) };
+  const prevResult = Math.round(Number(prevReport?.revenues_expenses?.result?.total || 0) * 100) / 100;
+  prevMap["الفائض"] = Math.max(prevResult, 0);
+  prevMap["العجز"] = Math.max(-prevResult, 0);
+  const prevExpenseSideTotal = Math.round((linesTotal(prevReport?.revenues_expenses?.expenses?.lines) + Math.max(prevResult, 0)) * 100) / 100;
+  const prevRevenueSideTotal = Math.round((linesTotal(prevRevenueRows) + Math.max(-prevResult, 0)) * 100) / 100;
+
   return (
     <section className="financial-print-sheet" data-testid="income-expense-print-section">
-      <ReportHeader title="حساب الإيرادات والمصروفات" year={year} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
+      <ReportHeader title="حساب الإيرادات والمصروفات" year={year} dateLabel={`عن السنة المنتهية في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="income-expense-print-grid">
-        <AnnualRowsTable title="إيرادات النشاط" rows={revenueRows} year={year} prevYear={prevYear} prevMap={prevRevenueMap} prevTotal={prevRevenueTotal} total={revenueTotal} testId="income-print-revenues-table" />
-        <AnnualRowsTable title="المصروفات" rows={expenseRows} year={year} prevYear={prevYear} prevMap={prevExpenseMap} prevTotal={sectionTotal(prevReport?.revenues_expenses?.expenses)} total={sectionTotal(report?.revenues_expenses?.expenses)} testId="income-print-expenses-table" />
+        <GroupedSideTable sideTitle="المصروفات" groups={[{ title: "مصروفات النشاط", rows: expenseGroupRows }]} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" />
+        <GroupedSideTable sideTitle="إيرادات النشاط" groups={[{ title: "إيرادات النشاط", rows: revenueGroupRows }]} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" />
       </div>
-      <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="income-expense-print-result">الفائض / العجز: {formatCurrency(report?.revenues_expenses?.result?.total || 0)}</div>
+      <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="income-expense-print-result">{result >= 0 ? "الفائض" : "العجز"}: {formatCurrency(Math.abs(result))}</div>
       <SignatureStrip testId="income-expense-print-signatures" />
     </section>
   );
@@ -149,14 +218,29 @@ function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, 
 
 function ReceiptsPaymentsPrint({ report, prevReport, year, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
-  const receipts = report?.receipts_payments?.receipts;
-  const payments = report?.receipts_payments?.payments;
+  const showPrev = prevHasData(prevReport);
+  const receiptLines = report?.receipts_payments?.receipts?.lines || [];
+  const paymentLines = report?.receipts_payments?.payments?.lines || [];
+  const isOpening = (name) => String(name || "").startsWith("رصيد أول المدة");
+  const isClosing = (name) => String(name || "").startsWith("رصيد آخر المدة") || String(name || "").startsWith("رصيد اخر المدة");
+  const stripBank = (rows) => rows.map((l) => ({ ...l, name: String(l.name || "").replace(/^رصيد (أول|اول|آخر|اخر) المدة\s*-\s*/, "") }));
+
+  const receiptGroups = [
+    { title: "رصيد أول المدة", rows: stripBank(receiptLines.filter((l) => isOpening(l.name))) },
+    { title: "مقبوضات النشاط", rows: receiptLines.filter((l) => !isOpening(l.name)) },
+  ];
+  const paymentGroups = [
+    { title: "مصروفات النشاط", rows: paymentLines.filter((l) => !isClosing(l.name)) },
+    { title: "رصيد آخر المدة", rows: stripBank(paymentLines.filter((l) => isClosing(l.name))) },
+  ];
+
+  const prevMap = { ...buildPrevMap(stripBank(prevReport?.receipts_payments?.receipts?.lines || [])), ...buildPrevMap(stripBank(prevReport?.receipts_payments?.payments?.lines || [])) };
   return (
     <section className="financial-print-sheet" data-testid="receipts-payments-print-section">
       <ReportHeader title="حساب المقبوضات والمدفوعات" year={year} dateLabel={`في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="receipts-payments-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="receipts-payments-print-grid">
-        <AnnualRowsTable title="مقبوضات النشاط" rows={receipts?.lines || []} year={year} prevYear={prevYear} prevMap={buildPrevMap(prevReport?.receipts_payments?.receipts?.lines)} prevTotal={sectionTotal(prevReport?.receipts_payments?.receipts)} total={sectionTotal(receipts)} testId="receipts-print-table" />
-        <AnnualRowsTable title="مصروفات النشاط" rows={payments?.lines || []} year={year} prevYear={prevYear} prevMap={buildPrevMap(prevReport?.receipts_payments?.payments?.lines)} prevTotal={sectionTotal(prevReport?.receipts_payments?.payments)} total={sectionTotal(payments)} testId="payments-print-table" />
+        <GroupedSideTable sideTitle="المقبوضات" groups={receiptGroups} total={sectionTotal(report?.receipts_payments?.receipts)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.receipts)} testId="receipts-print-table" />
+        <GroupedSideTable sideTitle="المدفوعات" groups={paymentGroups} total={sectionTotal(report?.receipts_payments?.payments)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.payments)} testId="payments-print-table" />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="receipts-payments-print-net">صافي المقبوضات والمدفوعات: {formatCurrency(report?.receipts_payments?.net_cash_flow?.total || 0)}</div>
       <SignatureStrip testId="receipts-payments-print-signatures" />
