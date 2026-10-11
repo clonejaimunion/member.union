@@ -8742,6 +8742,46 @@ async def supplier_tax_account(
     return await _compute_deduction_liability_account(organization_id_or_default(), year, month, ["ضرايب", "تحت حساب"], ["ضريب", "ضرايب"])
 
 
+async def _compute_mirror_deduction_account(org_id: str, year: int, month: int, deduction_keywords):
+    query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
+    expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
+
+    rows = []
+    for exp in expenses:
+        issued = exp.get("issued_at")
+        if not issued or _is_renewed_cheque(exp):
+            continue
+        m = int(issued[5:7])
+        if month and m != month:
+            continue
+        total_deduction = 0.0
+        for ded in exp.get("deductions") or []:
+            statement = _ar_norm(ded.get("statement"))
+            if all(kw in statement for kw in deduction_keywords):
+                total_deduction += float(ded.get("amount") or 0)
+        if total_deduction > 0:
+            rows.append({"amount": round(total_deduction, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{issued[8:10]}/{issued[5:7]}"})
+
+    total = round(sum(r["amount"] for r in rows), 2)
+    return {
+        "year": year,
+        "month": month,
+        "debit": [dict(r) for r in rows],
+        "credit": [dict(r) for r in rows],
+        "debit_total": total,
+        "credit_total": total,
+    }
+
+
+@api_router.get("/creditors-debtors/hajj-umrah")
+async def hajj_umrah_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    return await _compute_mirror_deduction_account(organization_id_or_default(), year, month, ["حج", "عمر"])
+
+
 @api_router.get("/creditors-debtors/penalties-fund")
 async def penalties_fund_account(
     year: int = Query(...),
