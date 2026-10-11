@@ -8591,8 +8591,7 @@ def _ar_norm(value: str) -> str:
     return text.strip()
 
 
-@api_router.get("/creditors-debtors/social-insurance")
-async def _compute_withholding_account(org_id: str, year: int, month: int, deduction_keywords, payment_keywords):
+async def _compute_withholding_account(org_id: str, year: int, month: int, deduction_keywords):
     query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
     expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
 
@@ -8627,8 +8626,7 @@ async def _compute_withholding_account(org_id: str, year: int, month: int, deduc
         if month and m != month:
             continue
         payee = _ar_norm(exp.get("payee_name"))
-        statement = _ar_norm(exp.get("gross_statement"))
-        if "النقابه العامه" in payee and any(kw in statement for kw in payment_keywords):
+        if "النقابه العامه" in payee:
             amount = monthly_amount.get(m, 0.0)
             day = issued[8:10]
             debit_rows.append({"amount": round(amount, 2), "month_index": m, "month_name": AR_MONTHS[m - 1], "year": int(issued[0:4]), "date_label": f"{day}/{issued[5:7]}"})
@@ -8649,7 +8647,7 @@ async def social_insurance_account(
     month: int = Query(0),
     _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
 ):
-    return await _compute_withholding_account(organization_id_or_default(), year, month, ["تامينات"], ["تامين"])
+    return await _compute_withholding_account(organization_id_or_default(), year, month, ["تامينات"])
 
 
 @api_router.get("/creditors-debtors/union-committee")
@@ -8658,7 +8656,7 @@ async def union_committee_account(
     month: int = Query(0),
     _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
 ):
-    return await _compute_withholding_account(organization_id_or_default(), year, month, ["لجنه نقابيه"], ["لجنه نقابيه"])
+    return await _compute_withholding_account(organization_id_or_default(), year, month, ["لجنه نقابيه"])
 
 
 
