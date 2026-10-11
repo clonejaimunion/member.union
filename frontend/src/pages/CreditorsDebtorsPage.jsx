@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ const MONTHS = ["يناير", "فبراير", "مارس", "ابريل", "ماي�
 const ACCOUNTS = [
   { id: "social_insurance", title: "حـ/ التامينات الاجتماعية", endpoint: "/creditors-debtors/social-insurance", icon: ShieldCheck },
   { id: "union_committee", title: "حـ/ لجنة نقابية", endpoint: "/creditors-debtors/union-committee", icon: Users },
+  { id: "supplier_tax", title: "حـ/ ضرائب الموردين", endpoint: "/creditors-debtors/supplier-tax", icon: Receipt },
 ];
 
 const formatAmount = (value) => {
@@ -26,10 +27,11 @@ const formatAmount = (value) => {
 
 const BayanCell = ({ row }) => {
   if (!row) return <TableCell className="border border-slate-200" />;
+  if (row.is_opening) return <TableCell className="border border-slate-200 text-center font-extrabold text-emerald-800">{row.month_name}</TableCell>;
   return (
     <TableCell className="border border-slate-200 text-center font-bold">
       <span className="print:hidden">{row.month_name}</span>
-      <span className="hidden print:inline">{row.month_name} {row.year}</span>
+      <span className="hidden print:inline">{row.month_name}{row.year ? ` ${row.year}` : ""}</span>
     </TableCell>
   );
 };
@@ -155,6 +157,12 @@ export default function CreditorsDebtorsPage() {
                   </TableBody>
                 </Table>
               </div>
+              {data?.difference != null && (
+                <div className="mt-4 flex items-center justify-between rounded-xl border-2 border-emerald-300 bg-emerald-50 px-6 py-4" data-testid="creditors-difference-box">
+                  <span className="text-base font-extrabold text-emerald-900">الفرق / الرصيد الدائن المستحق</span>
+                  <span className="text-lg font-extrabold tabular-nums text-emerald-900" dir="ltr">{formatAmount(data.difference)}</span>
+                </div>
+              )}
             </section>
           </section>
         )}
