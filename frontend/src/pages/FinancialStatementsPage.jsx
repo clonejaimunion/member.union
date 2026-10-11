@@ -28,20 +28,6 @@ const officialEmailOrEmpty = (email) => {
 const buildPrevMap = (lines = []) => Object.fromEntries((lines || []).map((line) => [line.name, Number(line.amount || 0)]));
 
 // تحويل سطور الإيرادات حسب طلب المستخدم: تجميع كل ما يحتوي "اشتراك" في سطر واحد، وإخفاء دفع الكتروني/أوامر الدفع
-const transformRevenueLines = (lines = []) => {
-  const result = [];
-  let subsTotal = 0;
-  let hasSubs = false;
-  let subsCode = null;
-  (lines || []).forEach((line) => {
-    const name = line.name || "";
-    if (name.includes("أوامر الدفع") || name.includes("دفع الكتروني") || name.includes("مرحلة ثانية")) return;
-    if (name.includes("اشتراك")) { subsTotal += Number(line.amount || 0); hasSubs = true; if (!subsCode) subsCode = line.code; return; }
-    result.push(line);
-  });
-  if (hasSubs) result.unshift({ code: subsCode, name: "اشتراكات مرحلة اولي", amount: Math.round(subsTotal * 100) / 100 });
-  return result;
-};
 const linesTotal = (lines = []) => Math.round((lines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0) * 100) / 100;
 
 function SignatureStrip({ testId }) {
@@ -189,32 +175,39 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
 function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
   const showPrev = prevHasData(prevReport);
-  const revenueRows = transformRevenueLines(report?.revenues_expenses?.revenues?.lines);
-  const expenseRows = report?.revenues_expenses?.expenses?.lines || [];
+  const expenseLines = report?.revenues_expenses?.expenses?.lines || [];
+  const revenueLines = report?.revenues_expenses?.revenues?.lines || [];
+  const isDepExpense = (code) => String(code || "").startsWith("52");
+  const depRows = expenseLines.filter((l) => isDepExpense(l.code));
+  const opExpenseRows = expenseLines.filter((l) => !isDepExpense(l.code));
   const result = Math.round(Number(report?.revenues_expenses?.result?.total || 0) * 100) / 100;
-  const revenueTotal = linesTotal(revenueRows);
-  const expenseTotal = linesTotal(expenseRows);
-
-  // الفائض يظهر في جانب المصروفات (والعجز في جانب الإيرادات) لتتساوى الإجماليات كما في النموذج
-  const expenseGroupRows = result >= 0 ? [...expenseRows, { name: "الفائض", amount: result }] : expenseRows;
-  const revenueGroupRows = result < 0 ? [...revenueRows, { name: "العجز", amount: Math.abs(result) }] : revenueRows;
+  const expenseTotal = linesTotal(expenseLines);
+  const revenueTotal = linesTotal(revenueLines);
   const expenseSideTotal = Math.round((expenseTotal + Math.max(result, 0)) * 100) / 100;
   const revenueSideTotal = Math.round((revenueTotal + Math.max(-result, 0)) * 100) / 100;
 
-  const prevRevenueRows = transformRevenueLines(prevReport?.revenues_expenses?.revenues?.lines);
-  const prevMap = { ...buildPrevMap(prevRevenueRows), ...buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines) };
+  const expenseGroups = [
+    { title: "مصروفات النشاط", rows: opExpenseRows },
+    { title: "إهلاك الأصول الثابتة", rows: depRows },
+    ...(result >= 0 ? [{ title: "الفائض", rows: [{ name: "الفائض", amount: result }] }] : []),
+  ];
+  const revenueGroups = [
+    { title: "إيرادات النشاط", rows: result < 0 ? [...revenueLines, { name: "العجز", amount: Math.abs(result) }] : revenueLines },
+  ];
+
+  const prevMap = { ...buildPrevMap(prevReport?.revenues_expenses?.revenues?.lines), ...buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines) };
   const prevResult = Math.round(Number(prevReport?.revenues_expenses?.result?.total || 0) * 100) / 100;
   prevMap["الفائض"] = Math.max(prevResult, 0);
   prevMap["العجز"] = Math.max(-prevResult, 0);
   const prevExpenseSideTotal = Math.round((linesTotal(prevReport?.revenues_expenses?.expenses?.lines) + Math.max(prevResult, 0)) * 100) / 100;
-  const prevRevenueSideTotal = Math.round((linesTotal(prevRevenueRows) + Math.max(-prevResult, 0)) * 100) / 100;
+  const prevRevenueSideTotal = Math.round((linesTotal(prevReport?.revenues_expenses?.revenues?.lines) + Math.max(-prevResult, 0)) * 100) / 100;
 
   return (
     <section className="financial-print-sheet" data-testid="income-expense-print-section">
       <ReportHeader title="حساب الإيرادات والمصروفات" year={year} dateLabel={`عن السنة المنتهية في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="income-expense-print-grid">
-        <GroupedSideTable sideTitle="المصروفات" groups={[{ title: "مصروفات النشاط", rows: expenseGroupRows }]} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" />
-        <GroupedSideTable sideTitle="إيرادات النشاط" groups={[{ title: "إيرادات النشاط", rows: revenueGroupRows }]} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" />
+        <GroupedSideTable sideTitle="المصروفات" groups={expenseGroups} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" />
+        <GroupedSideTable sideTitle="إيرادات النشاط" groups={revenueGroups} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="income-expense-print-result">{result >= 0 ? "الفائض" : "العجز"}: {formatCurrency(Math.abs(result))}</div>
       <SignatureStrip testId="income-expense-print-signatures" />
