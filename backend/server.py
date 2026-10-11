@@ -8591,6 +8591,11 @@ def _ar_norm(value: str) -> str:
     return text.strip()
 
 
+def _is_renewed_cheque(exp) -> bool:
+    text = _ar_norm(exp.get("gross_statement"))
+    return "تجديد" in text and "شيك" in text
+
+
 async def _compute_withholding_account(org_id: str, year: int, month: int, deduction_keywords):
     query = with_organization({"issued_at": {"$gte": f"{year}-01-01", "$lte": f"{year}-12-31"}}, org_id)
     expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(5000)
@@ -8602,7 +8607,7 @@ async def _compute_withholding_account(org_id: str, year: int, month: int, deduc
     monthly_amount = {}
     for exp in expenses:
         issued = exp.get("issued_at")
-        if not issued:
+        if not issued or _is_renewed_cheque(exp):
             continue
         m = row_month(issued)
         if month and m != month:
@@ -8620,7 +8625,7 @@ async def _compute_withholding_account(org_id: str, year: int, month: int, deduc
     debit_rows = []
     for exp in expenses:
         issued = exp.get("issued_at")
-        if not issued:
+        if not issued or _is_renewed_cheque(exp):
             continue
         m = row_month(issued)
         if month and m != month:
@@ -8686,7 +8691,7 @@ async def supplier_tax_account(
     monthly_tax = {}
     for exp in expenses:
         iss = exp.get("issued_at")
-        if not iss:
+        if not iss or _is_renewed_cheque(exp):
             continue
         amt = tax_deduction_total(exp)
         if amt > 0:
@@ -8695,7 +8700,7 @@ async def supplier_tax_account(
     opening_credit = 0.0
     for exp in expenses:
         iss = exp.get("issued_at")
-        if not iss or iss >= year_start:
+        if not iss or iss >= year_start or _is_renewed_cheque(exp):
             continue
         opening_credit += tax_deduction_total(exp)
         if is_tax_payment(exp):
@@ -8709,7 +8714,7 @@ async def supplier_tax_account(
     debit_rows = []
     for exp in expenses:
         iss = exp.get("issued_at")
-        if not iss or iss[0:4] != str(year):
+        if not iss or iss[0:4] != str(year) or _is_renewed_cheque(exp):
             continue
         m = int(iss[5:7])
         if month and m != month:
@@ -8733,6 +8738,82 @@ async def supplier_tax_account(
         "debit_total": debit_total,
         "difference": round(credit_total - debit_total, 2),
     }
+
+
+@api_router.get("/creditors-debtors/legal-accountant")
+async def legal_accountant_account(
+    year: int = Query(...),
+    month: int = Query(0),
+    _: dict = Depends(require_any_permission(["manage_expenses", "view_reports"])),
+):
+    org_id = organization_id_or_default()
+    expenses = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(10000)
+
+    def is_accountant(exp) -> bool:
+        payee = _ar_norm(exp.get("payee_name"))
+        statement = _ar_norm(exp.get("gross_statement"))
+        if "احمد محمد علي بدران" in payee:
+            return True
+        return "اتعاب" in statement and ("مراجع" in statement or "ميزاني" in statement or "اعتماد" in statement)
+
+    def balance_year(exp):
+        matches = re.findall(r"(20\d{2})", exp.get("gross_statement") or "")
+        return int(matches[-1]) if matches else None
+
+    def net_amount(exp) -> float:
+        gross = float(exp.get("gross_amount") or 0)
+        deductions = sum(float(d.get("amount") or 0) for d in (exp.get("deductions") or []))
+        return round(gross - deductions, 2)
+
+    items = []
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or _is_renewed_cheque(exp) or not is_accountant(exp):
+            continue
+        items.append({"issued": iss, "net": net_amount(exp), "balance_year": balance_year(exp)})
+
+    opening_credit = 0.0
+    for it in items:
+        by = it["balance_year"]
+        iy = int(it["issued"][0:4])
+        if by is not None and by < year:
+            opening_credit += it["net"]
+        if iy < year:
+            opening_credit -= it["net"]
+    opening_credit = round(opening_credit, 2)
+
+    credit_rows = []
+    if abs(opening_credit) >= 0.005:
+        credit_rows.append({"amount": opening_credit, "month_name": "رصيد دائن أول المدة", "year": None, "date_label": "", "is_opening": True})
+    for it in items:
+        if it["balance_year"] == year and not (month and month != 12):
+            credit_rows.append({"amount": it["net"], "month_name": "ديسمبر", "year": year, "date_label": "31/12", "note": f"أتعاب عن سنة {year}"})
+
+    debit_rows = []
+    for it in items:
+        iss = it["issued"]
+        if int(iss[0:4]) != year:
+            continue
+        m = int(iss[5:7])
+        if month and m != month:
+            continue
+        note = f"أتعاب عن سنة {it['balance_year']}" if it["balance_year"] else "أتعاب"
+        debit_rows.append({"amount": it["net"], "month_name": AR_MONTHS[m - 1], "year": year, "date_label": f"{iss[8:10]}/{iss[5:7]}", "note": note})
+
+    credit_total = round(sum(r["amount"] for r in credit_rows), 2)
+    debit_total = round(sum(r["amount"] for r in debit_rows), 2)
+    return {
+        "year": year,
+        "month": month,
+        "debit": debit_rows,
+        "credit": credit_rows,
+        "opening_credit": opening_credit,
+        "has_opening": True,
+        "credit_total": credit_total,
+        "debit_total": debit_total,
+        "difference": round(credit_total - debit_total, 2),
+    }
+
 
 
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt } from "lucide-react";
+import { ArrowRight, Home, LogOut, Scale, ShieldCheck, Users, Receipt, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ const ACCOUNTS = [
   { id: "social_insurance", title: "حـ/ التامينات الاجتماعية", endpoint: "/creditors-debtors/social-insurance", icon: ShieldCheck },
   { id: "union_committee", title: "حـ/ لجنة نقابية", endpoint: "/creditors-debtors/union-committee", icon: Users },
   { id: "supplier_tax", title: "حـ/ ضرائب الموردين", endpoint: "/creditors-debtors/supplier-tax", icon: Receipt },
+  { id: "legal_accountant", title: "حـ/ المحاسب القانوني", endpoint: "/creditors-debtors/legal-accountant", icon: UserCheck },
 ];
 
 const formatAmount = (value) => {
@@ -28,10 +29,11 @@ const formatAmount = (value) => {
 const BayanCell = ({ row }) => {
   if (!row) return <TableCell className="border border-slate-200" />;
   if (row.is_opening) return <TableCell className="border border-slate-200 text-center font-extrabold text-emerald-800">{row.month_name}</TableCell>;
+  const note = row.note ? ` - ${row.note}` : "";
   return (
     <TableCell className="border border-slate-200 text-center font-bold">
-      <span className="print:hidden">{row.month_name}</span>
-      <span className="hidden print:inline">{row.month_name}{row.year ? ` ${row.year}` : ""}</span>
+      <span className="print:hidden">{row.month_name}{note}</span>
+      <span className="hidden print:inline">{row.month_name}{row.year ? ` ${row.year}` : ""}{note}</span>
     </TableCell>
   );
 };
