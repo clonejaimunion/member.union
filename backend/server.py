@@ -4725,6 +4725,34 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
 
     from_iso = period_from.isoformat()
     to_iso = period_to.isoformat()
+
+    # خرائط لتقسيم الودائع حسب البنك وتسمية بنود النشاط مثل نماذج الإكسل
+    deposit_docs = await db.deposits.find(with_organization({}, organization_id), {"_id": 0, "deposit_number": 1, "bank_id": 1, "bank_name": 1}).to_list(100000)
+    bank_docs = await db.banks.find(with_organization({}, organization_id), {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    bank_name_by_id = {b.get("id"): b.get("name") for b in bank_docs}
+    deposit_bank_by_ref = {}
+    for d in deposit_docs:
+        bname = d.get("bank_name") or bank_name_by_id.get(d.get("bank_id"))
+        if d.get("deposit_number") is not None and bname:
+            deposit_bank_by_ref[str(d.get("deposit_number"))] = bname
+
+    rp_receipt_labels = {
+        "إيرادات اشتراكات العضوية": "اشتراكات",
+        "إيرادات فوائد ودائع": "فوائد الودائع",
+        "عوائد ودائع مستحقة": "فوائد الودائع",
+        "إيرادات أوامر الدفع": "مقبوضات أخرى",
+        "دائنون متنوعون": "حسابات دائنة ومدينة",
+    }
+
+    def _rp_label(cl: dict) -> str:
+        name = str(cl.get("account_name") or "")
+        notes = str(cl.get("notes") or "")
+        if name == "المصروفات":
+            return "إعانات" if "إعانات" in notes else "مصروفات إدارية"
+        if name == "المصروفات البنكية":
+            return "مصروفات بنكية"
+        return rp_receipt_labels.get(name, name)
+
     opening_by_bank: Dict[str, float] = {}
     closing_by_bank: Dict[str, float] = {}
     receipts_by_cat: Dict[str, float] = {}
@@ -4734,11 +4762,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         in_period = from_iso <= edate <= to_iso
         lines = entry.get("lines", [])
         contra_lines = [ln for ln in lines if not _is_bank_line(ln)]
-        contra_name = contra_lines[0].get("account_name") if contra_lines else (entry.get("description") or "حركة نقدية")
+        contra_name = _rp_label(contra_lines[0]) if contra_lines else (entry.get("description") or "حركة نقدية")
+        dep_bank = deposit_bank_by_ref.get(str(entry.get("reference"))) if entry.get("reference") is not None else None
         for line in lines:
             if not _is_bank_line(line):
                 continue
-            bank_name = str(line.get("account_name") or "البنك")
+            if "ودائع لأجل" in str(line.get("account_name") or ""):
+                bank_name = f"{dep_bank} - ودائع" if dep_bank else "ودائع لأجل"
+            else:
+                bank_name = str(line.get("account_name") or "البنك")
             debit = round(float(line.get("debit") or 0), 2)
             credit = round(float(line.get("credit") or 0), 2)
             closing_by_bank[bank_name] = round(closing_by_bank.get(bank_name, 0) + debit - credit, 2)
