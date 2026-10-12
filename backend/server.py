@@ -10537,7 +10537,61 @@ async def get_financial_statements(
     return await calculate_financial_statements_report(organization_id=organization_id, from_date=from_date, to_date=to_date)
 
 
-@api_router.get("/electronic-invoice/settings", response_model=ElectronicInvoiceSettingsResponse)
+@api_router.get("/financial-statements/line-detail")
+async def get_financial_statement_line_detail(
+    match_by: str = Query(...),
+    value: str = Query(...),
+    scope: str = Query("period"),
+    from_date: Optional[str] = Query(default=None),
+    to_date: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    organization_id = organization_id_or_default()
+    query = with_organization({"status": "approved"}, organization_id)
+    entries = await db.journal_entries.find(query, {"_id": 0}).sort("entry_date", 1).to_list(20000)
+
+    def in_scope(edate: str) -> bool:
+        edate = str(edate or "")
+        if scope == "cumulative_to":
+            return bool(to_date) and edate <= to_date
+        if scope == "cumulative_before":
+            return bool(from_date) and edate < from_date
+        return bool(from_date) and bool(to_date) and from_date <= edate <= to_date
+
+    rows = []
+    total_debit = 0.0
+    total_credit = 0.0
+    for entry in entries:
+        if entry.get("is_reversal"):
+            continue
+        if not in_scope(entry.get("entry_date")):
+            continue
+        for line in entry.get("lines", []):
+            matched = (str(line.get("account_code") or "") == value) if match_by == "code" else (str(line.get("account_name") or "") == value)
+            if not matched:
+                continue
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            total_debit = round(total_debit + debit, 2)
+            total_credit = round(total_credit + credit, 2)
+            rows.append({
+                "entry_date": entry.get("entry_date"),
+                "entry_number": entry.get("entry_number") or entry.get("id", "")[:8],
+                "description": line.get("statement") or entry.get("description") or "",
+                "debit": debit,
+                "credit": credit,
+            })
+
+    return {
+        "match_by": match_by,
+        "value": value,
+        "scope": scope,
+        "count": len(rows),
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+        "net": round(total_debit - total_credit, 2),
+        "rows": rows,
+    }
 async def get_electronic_invoice_settings(_: dict = Depends(require_einvoice_enabled)):
     return ElectronicInvoiceSettingsResponse(**hydrate_einvoice_document(await get_einvoice_settings_document()))
 

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ExportReportButtons } from "@/components/ExportReportButtons";
 import { CreditLine } from "@/components/CreditLine";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +33,42 @@ const officialEmailOrEmpty = (email) => {
 
 // خريطة مقارنة بالسنة السابقة بالاسم
 const buildPrevMap = (lines = []) => Object.fromEntries((lines || []).map((line) => [line.name, Number(line.amount || 0)]));
+
+// وصف مصدر الرقم والأساس المحاسبي الذي وُضع عليه
+const buildBasisText = (kind, periodText, dateLabel) => {
+  switch (kind) {
+    case "fixed_asset":
+      return `قيمة شراء الأصل الثابت (التكلفة التاريخية) بالرصيد المدين المتراكم ${dateLabel}. مصدرها قيود بوابة الأصول الثابتة المرحّلة تلقائياً.`;
+    case "bank":
+      return `رصيد الحساب (البنك/النقدية/الوديعة) = صافي الإيداعات والسحوبات المتراكمة ${dateLabel}. مصدرها قيود الخزينة والبنوك والودائع.`;
+    case "asset_cumulative":
+      return `رصيد هذا الأصل (مدين) متراكم ${dateLabel}. مصدره قيود اليومية المرحّلة تلقائياً من بوابات البرنامج.`;
+    case "provision":
+      return `مجمع إهلاك الأصل (رصيد دائن متراكم) محسوب بطريقة القسط الثابت من بوابة الأصول الثابتة ${dateLabel}.`;
+    case "liability":
+      return `رصيد دائن (التزام على الصندوق) متراكم ${dateLabel}، من قيود المستحقات/السداد المرحّلة.`;
+    case "equity":
+      return `حقوق ملكية / رصيد مرحّل متراكم ${dateLabel}. يشمل الأرصدة الافتتاحية ونتائج الفترات السابقة.`;
+    case "surplus":
+      return `هذا الرقم ناتج الفترة = إجمالي الإيرادات − إجمالي المصروفات خلال ${periodText}. وهو سطر محسوب وليس حساباً مستقلاً.`;
+    case "revenue":
+      return `إجمالي ما تم تسجيله لهذا الحساب من إيراد خلال ${periodText}، من بوابة الإيرادات.`;
+    case "expense":
+      return `إجمالي ما تم صرفه على هذا الحساب خلال ${periodText}، من بوابة المصروفات.`;
+    case "depreciation_expense":
+      return `مصروف إهلاك الفترة لهذه الفئة محسوب بطريقة القسط الثابت، خلال ${periodText}.`;
+    case "receipt_opening":
+      return `رصيد البنك/الوديعة أول المدة (المتراكم قبل بداية الفترة).`;
+    case "receipt_closing":
+      return `رصيد البنك/الوديعة آخر المدة (المتراكم حتى نهاية الفترة).`;
+    case "receipt_activity":
+      return `إجمالي المقبوضات النقدية المرتبطة بهذا الحساب خلال ${periodText}.`;
+    case "payment_activity":
+      return `إجمالي المدفوعات النقدية المرتبطة بهذا الحساب خلال ${periodText}.`;
+    default:
+      return `تفاصيل مصدر الرقم خلال ${periodText}.`;
+  }
+};
 
 // تحويل سطور الإيرادات حسب طلب المستخدم: تجميع كل ما يحتوي "اشتراك" في سطر واحد، وإخفاء دفع الكتروني/أوامر الدفع
 const linesTotal = (lines = []) => Math.round((lines || []).reduce((sum, line) => sum + Number(line.amount || 0), 0) * 100) / 100;
@@ -74,7 +111,7 @@ const prevHasData = (p) => !!p && (
 );
 
 // جدول جانب واحد (مدين أو دائن) مقسّم إلى مجموعات بعناوين فرعية مثل نماذج الإكسل
-function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, prevMap = {}, prevTotal = 0, testId }) {
+function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, prevMap = {}, prevTotal = 0, testId, onAmountClick }) {
   const cols = showPrev ? 3 : 2;
   const prevOf = (name) => Number(prevMap[name] ?? 0);
   let rowIndex = -1;
@@ -103,7 +140,11 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
                 return (
                   <TableRow key={`${line.code || ""}-${line.name}-${rowIndex}`} data-testid={`${testId}-row-${rowIndex}`}>
                     <TableCell className="border border-slate-300 pr-6 font-bold" data-testid={`${testId}-row-${rowIndex}-name`}>{line.name}</TableCell>
-                    <TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${rowIndex}-amount`}>{formatCurrency(Number(line.amount || 0))}</TableCell>
+                    <TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${rowIndex}-amount`}>
+                      {onAmountClick ? (
+                        <button type="button" onClick={() => onAmountClick(group, line)} className="w-full cursor-pointer text-center font-extrabold text-slate-900 underline decoration-dotted decoration-slate-400 underline-offset-4 transition-colors hover:text-emerald-700 print:no-underline" data-testid={`${testId}-row-${rowIndex}-amount-button`}>{formatCurrency(Number(line.amount || 0))}</button>
+                      ) : formatCurrency(Number(line.amount || 0))}
+                    </TableCell>
                     {showPrev && <TableCell className="border border-slate-300 text-center font-bold text-slate-600" data-testid={`${testId}-row-${rowIndex}-prev-amount`}>{formatCurrency(prevOf(line.name))}</TableCell>}
                   </TableRow>
                 );
@@ -121,7 +162,7 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
   );
 }
 
-function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
+function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, projectName, email, onAmountClick }) {
   const prevYear = Number(year) - 1;
   const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const assetLines = report?.balance_sheet?.assets?.lines || [];
@@ -139,18 +180,19 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
   const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isInventoryCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAdvancesCode(l.code) && !isAccumDepCode(l.code));
   const provisionRows = pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
 
+  const assetDetail = { matchBy: "code", scope: "cumulative_to", kind: "asset_cumulative" };
   const assetGroups = [
-    { title: "أصول ثابتة", rows: fixedAssetRows },
-    { title: "المخزون", rows: inventoryRows },
-    { title: "نقدية وبنوك", rows: bankRows },
-    { title: "فوائد ودائع مستحقة", rows: accruedRows },
-    { title: "حسابات مدينة", rows: debtorRows },
-    { title: "السلف", rows: advanceRows },
+    { title: "أصول ثابتة", rows: fixedAssetRows, detail: { ...assetDetail, kind: "fixed_asset" } },
+    { title: "المخزون", rows: inventoryRows, detail: assetDetail },
+    { title: "نقدية وبنوك", rows: bankRows, detail: { ...assetDetail, kind: "bank" } },
+    { title: "فوائد ودائع مستحقة", rows: accruedRows, detail: assetDetail },
+    { title: "حسابات مدينة", rows: debtorRows, detail: assetDetail },
+    { title: "السلف", rows: advanceRows, detail: assetDetail },
   ];
   const creditGroups = [
-    { title: "المخصصات", rows: provisionRows },
-    { title: "حسابات دائنة", rows: liabilityLines },
-    { title: "الفائض", rows: equityLines },
+    { title: "المخصصات", rows: provisionRows, detail: { matchBy: "code", scope: "cumulative_to", kind: "provision" } },
+    { title: "حسابات دائنة", rows: liabilityLines, detail: { matchBy: "code", scope: "cumulative_to", kind: "liability" } },
+    { title: "الفائض", rows: equityLines, detail: { matchBy: "code", scope: "cumulative_to", kind: "equity" } },
   ];
 
   const assetsTotal = sumAmt([...fixedAssetRows, ...inventoryRows, ...bankRows, ...accruedRows, ...debtorRows, ...advanceRows]);
@@ -168,8 +210,8 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
     <section className="financial-print-sheet" data-testid="balance-sheet-print-section">
       <ReportHeader title="الميزانية" year={year} dateLabel={dateLabel || `في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="balance-sheet-print-grid">
-        <GroupedSideTable sideTitle="الأصول" groups={assetGroups} total={assetsTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevAssetsTotal} testId="balance-sheet-print-assets-table" />
-        <GroupedSideTable sideTitle="المخصصات والالتزامات والفائض" groups={creditGroups} total={creditTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevCreditTotal} testId="balance-sheet-print-liabilities-equity-table" />
+        <GroupedSideTable sideTitle="الأصول" groups={assetGroups} total={assetsTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevAssetsTotal} testId="balance-sheet-print-assets-table" onAmountClick={onAmountClick} />
+        <GroupedSideTable sideTitle="المخصصات والالتزامات والفائض" groups={creditGroups} total={creditTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevCreditTotal} testId="balance-sheet-print-liabilities-equity-table" onAmountClick={onAmountClick} />
       </div>
       <div className={`mt-5 border-2 p-3 text-center text-xl font-extrabold ${diff === 0 ? "border-slate-400" : "border-red-600 text-red-700"}`} data-testid="balance-sheet-print-check">فرق اتزان الميزانية: {formatCurrency(diff)}</div>
       <SignatureStrip testId="balance-sheet-print-signatures" />
@@ -177,7 +219,7 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
   );
 }
 
-function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
+function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, projectName, email, onAmountClick }) {
   const prevYear = Number(year) - 1;
   const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const expenseLines = report?.revenues_expenses?.expenses?.lines || [];
@@ -192,12 +234,12 @@ function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, pr
   const revenueSideTotal = Math.round((revenueTotal + Math.max(-result, 0)) * 100) / 100;
 
   const expenseGroups = [
-    { title: "مصروفات النشاط", rows: opExpenseRows },
-    { title: "إهلاك الأصول الثابتة", rows: depRows },
-    ...(result >= 0 ? [{ title: "الفائض", rows: [{ name: "الفائض", amount: result }] }] : []),
+    { title: "مصروفات النشاط", rows: opExpenseRows, detail: { matchBy: "code", scope: "period", kind: "expense" } },
+    { title: "إهلاك الأصول الثابتة", rows: depRows, detail: { matchBy: "code", scope: "period", kind: "depreciation_expense" } },
+    ...(result >= 0 ? [{ title: "الفائض", rows: [{ name: "الفائض", amount: result }], detail: { kind: "surplus" } }] : []),
   ];
   const revenueGroups = [
-    { title: "إيرادات النشاط", rows: result < 0 ? [...revenueLines, { name: "العجز", amount: Math.abs(result) }] : revenueLines },
+    { title: "إيرادات النشاط", rows: result < 0 ? [...revenueLines, { name: "العجز", amount: Math.abs(result) }] : revenueLines, detail: { matchBy: "code", scope: "period", kind: "revenue" } },
   ];
 
   const prevMap = { ...buildPrevMap(prevReport?.revenues_expenses?.revenues?.lines), ...buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines) };
@@ -211,8 +253,8 @@ function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, pr
     <section className="financial-print-sheet" data-testid="income-expense-print-section">
       <ReportHeader title="حساب الإيرادات والمصروفات" year={year} dateLabel={dateLabel || `عن السنة المنتهية في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="income-expense-print-grid">
-        <GroupedSideTable sideTitle="المصروفات" groups={expenseGroups} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" />
-        <GroupedSideTable sideTitle="إيرادات النشاط" groups={revenueGroups} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" />
+        <GroupedSideTable sideTitle="المصروفات" groups={expenseGroups} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" onAmountClick={onAmountClick} />
+        <GroupedSideTable sideTitle="إيرادات النشاط" groups={revenueGroups} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" onAmountClick={onAmountClick} />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="income-expense-print-result">{result >= 0 ? "الفائض" : "العجز"}: {formatCurrency(Math.abs(result))}</div>
       <SignatureStrip testId="income-expense-print-signatures" />
@@ -220,7 +262,7 @@ function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, pr
   );
 }
 
-function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
+function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName, projectName, email, onAmountClick }) {
   const prevYear = Number(year) - 1;
   const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const receiptLines = report?.receipts_payments?.receipts?.lines || [];
@@ -230,12 +272,12 @@ function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName,
   const stripBank = (rows) => rows.map((l) => ({ ...l, name: String(l.name || "").replace(/^رصيد (أول|اول|آخر|اخر) المدة\s*-\s*/, "") }));
 
   const receiptGroups = [
-    { title: "رصيد أول المدة", rows: stripBank(receiptLines.filter((l) => isOpening(l.name))) },
-    { title: "مقبوضات النشاط", rows: receiptLines.filter((l) => !isOpening(l.name)) },
+    { title: "رصيد أول المدة", rows: stripBank(receiptLines.filter((l) => isOpening(l.name))), detail: { matchBy: "name", scope: "cumulative_before", kind: "receipt_opening" } },
+    { title: "مقبوضات النشاط", rows: receiptLines.filter((l) => !isOpening(l.name)), detail: { matchBy: "name", scope: "period", kind: "receipt_activity" } },
   ];
   const paymentGroups = [
-    { title: "مصروفات النشاط", rows: paymentLines.filter((l) => !isClosing(l.name)) },
-    { title: "رصيد آخر المدة", rows: stripBank(paymentLines.filter((l) => isClosing(l.name))) },
+    { title: "مصروفات النشاط", rows: paymentLines.filter((l) => !isClosing(l.name)), detail: { matchBy: "name", scope: "period", kind: "payment_activity" } },
+    { title: "رصيد آخر المدة", rows: stripBank(paymentLines.filter((l) => isClosing(l.name))), detail: { matchBy: "name", scope: "cumulative_to", kind: "receipt_closing" } },
   ];
 
   const prevMap = { ...buildPrevMap(stripBank(prevReport?.receipts_payments?.receipts?.lines || [])), ...buildPrevMap(stripBank(prevReport?.receipts_payments?.payments?.lines || [])) };
@@ -243,8 +285,8 @@ function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName,
     <section className="financial-print-sheet" data-testid="receipts-payments-print-section">
       <ReportHeader title="حساب المقبوضات والمدفوعات" year={year} dateLabel={dateLabel || `في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="receipts-payments-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="receipts-payments-print-grid">
-        <GroupedSideTable sideTitle="المقبوضات" groups={receiptGroups} total={sectionTotal(report?.receipts_payments?.receipts)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.receipts)} testId="receipts-print-table" />
-        <GroupedSideTable sideTitle="المدفوعات" groups={paymentGroups} total={sectionTotal(report?.receipts_payments?.payments)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.payments)} testId="payments-print-table" />
+        <GroupedSideTable sideTitle="المقبوضات" groups={receiptGroups} total={sectionTotal(report?.receipts_payments?.receipts)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.receipts)} testId="receipts-print-table" onAmountClick={onAmountClick} />
+        <GroupedSideTable sideTitle="المدفوعات" groups={paymentGroups} total={sectionTotal(report?.receipts_payments?.payments)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.payments)} testId="payments-print-table" onAmountClick={onAmountClick} />
       </div>
       <div className="mt-5 border border-slate-400 bg-slate-100 p-3 text-center text-xl font-extrabold" data-testid="receipts-payments-print-net">صافي المقبوضات والمدفوعات: {formatCurrency(report?.receipts_payments?.net_cash_flow?.total || 0)}</div>
       <SignatureStrip testId="receipts-payments-print-signatures" />
@@ -299,6 +341,8 @@ export default function FinancialStatementsPage() {
   const [report, setReport] = useState(null);
   const [prevReport, setPrevReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -332,6 +376,27 @@ export default function FinancialStatementsPage() {
   const incomeDateLabel = isFullYear ? `عن السنة المنتهية في 31 ديسمبر ${year}` : `عن ${periodText}`;
   const receiptsDateLabel = isFullYear ? `في 31 ديسمبر ${year}` : `عن ${periodText}`;
 
+  const handleAmountClick = useCallback(async (group, line) => {
+    const cfg = group?.detail || {};
+    const scopeLabel = cfg.scope === "period" ? periodText : (cfg.scope === "cumulative_before" ? `أول المدة (قبل ${AR_MONTHS[fromM - 1]} ${year})` : `حتى ${isFullYear ? `31 ديسمبر ${year}` : `نهاية ${AR_MONTHS[toM - 1]} ${year}`}`);
+    const basis = buildBasisText(cfg.kind, periodText, scopeLabel);
+    const matchValue = cfg.matchBy === "code" ? line.code : line.name;
+    const base = { name: line.name, amount: Number(line.amount || 0), basis, rows: [], total: 0, hasLedger: false };
+    if (!cfg.matchBy || !matchValue) { setDetail(base); return; }
+    setDetail({ ...base, hasLedger: true });
+    setDetailLoading(true);
+    try {
+      const range = monthRange(Number(year), fromM, toM);
+      const params = new URLSearchParams({ match_by: cfg.matchBy, value: String(matchValue), scope: cfg.scope || "period", from_date: range.from_date, to_date: range.to_date });
+      const response = await api.get(`/financial-statements/line-detail?${params.toString()}`);
+      setDetail({ ...base, hasLedger: true, rows: response.data.rows || [], total: response.data.net ?? 0 });
+    } catch (error) {
+      setDetail({ ...base, hasLedger: true, rows: [], total: 0, error: true });
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [year, fromM, toM, isFullYear, periodText]);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="financial-statements-page">
       <style>{`@media print {@page{size:A4 portrait;margin:8mm}.print\\:hidden{display:none!important}.financial-print-sheet{break-after:page;box-shadow:none!important;border:0!important;margin:0!important;padding:0!important;width:100%!important}.financial-print-sheet:last-child{break-after:auto}body{background:white!important}.financial-report-actions{display:none!important}.financial-print-sheet th,.financial-print-sheet td{font-size:14px!important;padding:5px 8px!important}.financial-print-sheet h2{font-size:24px!important}.signature-strip{margin-top:28px!important}} .financial-print-sheet{background:white;border:1px solid #d6d3d1;border-radius:10px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.04)} .financial-print-sheet table{border-collapse:collapse!important} .financial-print-sheet th,.financial-print-sheet td{font-size:13px}`}</style>
@@ -340,12 +405,58 @@ export default function FinancialStatementsPage() {
         <section className="financial-report-actions rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="financial-statements-year-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-2xl font-extrabold" data-testid="financial-statements-year-title">القوائم المالية — تحديد الفترة</h2><p className="text-sm font-bold text-slate-500" data-testid="financial-statements-year-subtitle">اختر السنة وفترة الطباعة (من شهر إلى شهر). افتراضياً من يناير إلى ديسمبر = السنة كاملة.</p></div><ExportReportButtons title={`الحسابات الختامية — ${periodText}`} fileName={`الحسابات-الختامية-${year}-${String(fromM).padStart(2, "0")}-${String(toM).padStart(2, "0")}`} selectors={["[data-testid='balance-sheet-print-section']", "[data-testid='income-expense-print-section']", "[data-testid='receipts-payments-print-section']", "[data-testid='accounting-errors-print-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-financial-statements-button" excelTestId="export-financial-statements-excel-button" wordTestId="export-financial-statements-word-button" /></div><div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1fr_auto_auto]" data-testid="financial-statements-year-controls"><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">السنة<select value={year} onChange={(event) => setYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-year-select">{years.map((item) => <option key={item} value={item} label={String(item)} />)}</select></label><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">من شهر<select value={fromMonth} onChange={(event) => setFromMonth(Number(event.target.value))} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-from-month-select">{AR_MONTHS.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">إلى شهر<select value={toMonth} onChange={(event) => setToMonth(Number(event.target.value))} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-to-month-select">{AR_MONTHS.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><Button type="button" onClick={loadReports} className="h-11 self-end bg-slate-950 text-white" data-testid="generate-financial-statements-button"><FileSpreadsheet className="h-4 w-4" /> توليد</Button><Button type="button" onClick={() => printNow()} variant="outline" className="h-11 self-end bg-white" data-testid="print-annual-financial-statements-button"><Printer className="h-4 w-4" /> طباعة</Button></div></section>
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4 print:hidden" data-testid="financial-statements-kpi-grid"><div className="rounded-xl bg-slate-950 p-4 text-white"><p className="text-xs font-bold text-slate-300">حالة القوائم</p><p className="text-xl font-extrabold" data-testid="financial-statements-valid-value">{report?.is_accounting_valid ? "سليمة" : "بها أخطاء"}</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs font-bold text-emerald-700">إجمالي الأصول</p><p className="text-xl font-extrabold" data-testid="financial-statements-assets-value">{formatCurrency(report?.balance_sheet?.assets?.total || 0)}</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs font-bold text-amber-700">نتيجة السنة</p><p className="text-xl font-extrabold" data-testid="financial-statements-result-value">{formatCurrency(report?.revenues_expenses?.result?.total || 0)}</p></div><div className="rounded-xl bg-red-50 p-4"><p className="text-xs font-bold text-red-700">الأخطاء المكتشفة</p><p className="text-xl font-extrabold" data-testid="financial-statements-errors-value">{report?.accounting_errors?.length || 0}</p></div></section>
         <AccountingCorrectionsReview corrections={report?.accounting_corrections || []} />
-        <BalanceSheetPrint report={report} prevReport={prevReport} year={year} dateLabel={balanceDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <IncomeExpensePrint report={report} prevReport={prevReport} year={year} dateLabel={incomeDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <ReceiptsPaymentsPrint report={report} prevReport={prevReport} year={year} dateLabel={receiptsDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <BalanceSheetPrint report={report} prevReport={prevReport} year={year} dateLabel={balanceDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} onAmountClick={handleAmountClick} />
+        <IncomeExpensePrint report={report} prevReport={prevReport} year={year} dateLabel={incomeDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} onAmountClick={handleAmountClick} />
+        <ReceiptsPaymentsPrint report={report} prevReport={prevReport} year={year} dateLabel={receiptsDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} onAmountClick={handleAmountClick} />
         <AccountingErrorsPrint report={report} />
       </section>
       <footer className="px-4 pb-5 print:hidden"><CreditLine testId="financial-statements-creator-credit" /></footer>
+
+      <Dialog open={!!detail} onOpenChange={(open) => { if (!open) setDetail(null); }}>
+        <DialogContent className="max-w-2xl" data-testid="line-detail-dialog">
+          <DialogHeader>
+            <DialogTitle data-testid="line-detail-dialog-title">تفاصيل: {detail?.name}</DialogTitle>
+            <DialogDescription data-testid="line-detail-dialog-amount">المبلغ: {formatCurrency(detail?.amount || 0)}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900" data-testid="line-detail-basis">
+              <p className="mb-1 text-xs font-extrabold text-emerald-700">مصدر الرقم والأساس المحاسبي</p>
+              {detail?.basis}
+            </div>
+            {detail?.hasLedger && (
+              <div data-testid="line-detail-ledger">
+                <p className="mb-2 text-sm font-extrabold text-slate-700">الحركات المكوِّنة للرقم</p>
+                {detailLoading ? (
+                  <p className="py-6 text-center font-bold text-slate-500" data-testid="line-detail-loading">جارٍ التحميل…</p>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200">
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-slate-900">
+                        <TableRow className="hover:bg-slate-900"><TableHead className="text-right text-white">التاريخ</TableHead><TableHead className="text-right text-white">رقم القيد</TableHead><TableHead className="text-right text-white">البيان</TableHead><TableHead className="text-center text-white">مدين</TableHead><TableHead className="text-center text-white">دائن</TableHead></TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(detail?.rows || []).length === 0 && <TableRow><TableCell colSpan={5} className="py-6 text-center font-bold text-slate-400" data-testid="line-detail-empty">لا توجد حركات مطابقة لهذا الرقم في الفترة</TableCell></TableRow>}
+                        {(detail?.rows || []).map((row, index) => (
+                          <TableRow key={`${row.entry_number}-${index}`} data-testid={`line-detail-row-${index}`}>
+                            <TableCell className="font-bold">{row.entry_date}</TableCell>
+                            <TableCell className="font-bold">{row.entry_number}</TableCell>
+                            <TableCell>{row.description}</TableCell>
+                            <TableCell className="text-center font-bold tabular-nums">{row.debit ? formatCurrency(row.debit) : "-"}</TableCell>
+                            <TableCell className="text-center font-bold tabular-nums">{row.credit ? formatCurrency(row.credit) : "-"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+                {!detailLoading && (detail?.rows || []).length > 0 && (
+                  <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-100 px-4 py-2 font-extrabold" data-testid="line-detail-total"><span>صافي الإجمالي</span><span className="tabular-nums">{formatCurrency(Math.abs(detail?.total || 0))}</span></div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
