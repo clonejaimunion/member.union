@@ -16,7 +16,13 @@ import { printNow } from "@/lib/printOrientation";
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 16 }, (_, index) => currentYear - 10 + index);
 
-const yearRange = (year) => ({ from_date: `${year}-01-01`, to_date: `${year}-12-31` });
+const AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+const monthRange = (year, fromMonth, toMonth) => {
+  const from = `${year}-${String(fromMonth).padStart(2, "0")}-01`;
+  const lastDay = new Date(Number(year), Number(toMonth), 0).getDate();
+  const to = `${year}-${String(toMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { from_date: from, to_date: to };
+};
 const sectionTotal = (section) => Number(section?.total || 0);
 const officialEmailOrEmpty = (email) => {
   const value = (email || "").trim();
@@ -116,7 +122,7 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
   );
 }
 
-function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, email }) {
+function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
   const showPrev = prevHasData(prevReport);
   const assetLines = report?.balance_sheet?.assets?.lines || [];
@@ -161,7 +167,7 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
   const diff = Math.round((assetsTotal - creditTotal) * 100) / 100;
   return (
     <section className="financial-print-sheet" data-testid="balance-sheet-print-section">
-      <ReportHeader title="الميزانية" year={year} dateLabel={`في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
+      <ReportHeader title="الميزانية" year={year} dateLabel={dateLabel || `في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="balance-sheet-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="balance-sheet-print-grid">
         <GroupedSideTable sideTitle="الأصول" groups={assetGroups} total={assetsTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevAssetsTotal} testId="balance-sheet-print-assets-table" />
         <GroupedSideTable sideTitle="المخصصات والالتزامات والفائض" groups={creditGroups} total={creditTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevCreditTotal} testId="balance-sheet-print-liabilities-equity-table" />
@@ -172,7 +178,7 @@ function BalanceSheetPrint({ report, prevReport, year, unionName, projectName, e
   );
 }
 
-function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, email }) {
+function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
   const showPrev = prevHasData(prevReport);
   const expenseLines = report?.revenues_expenses?.expenses?.lines || [];
@@ -204,7 +210,7 @@ function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, 
 
   return (
     <section className="financial-print-sheet" data-testid="income-expense-print-section">
-      <ReportHeader title="حساب الإيرادات والمصروفات" year={year} dateLabel={`عن السنة المنتهية في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
+      <ReportHeader title="حساب الإيرادات والمصروفات" year={year} dateLabel={dateLabel || `عن السنة المنتهية في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="income-expense-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="income-expense-print-grid">
         <GroupedSideTable sideTitle="المصروفات" groups={expenseGroups} total={expenseSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevExpenseSideTotal} testId="income-print-expenses-table" />
         <GroupedSideTable sideTitle="إيرادات النشاط" groups={revenueGroups} total={revenueSideTotal} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={prevRevenueSideTotal} testId="income-print-revenues-table" />
@@ -215,7 +221,7 @@ function IncomeExpensePrint({ report, prevReport, year, unionName, projectName, 
   );
 }
 
-function ReceiptsPaymentsPrint({ report, prevReport, year, unionName, projectName, email }) {
+function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
   const showPrev = prevHasData(prevReport);
   const receiptLines = report?.receipts_payments?.receipts?.lines || [];
@@ -236,7 +242,7 @@ function ReceiptsPaymentsPrint({ report, prevReport, year, unionName, projectNam
   const prevMap = { ...buildPrevMap(stripBank(prevReport?.receipts_payments?.receipts?.lines || [])), ...buildPrevMap(stripBank(prevReport?.receipts_payments?.payments?.lines || [])) };
   return (
     <section className="financial-print-sheet" data-testid="receipts-payments-print-section">
-      <ReportHeader title="حساب المقبوضات والمدفوعات" year={year} dateLabel={`في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="receipts-payments-print-header" />
+      <ReportHeader title="حساب المقبوضات والمدفوعات" year={year} dateLabel={dateLabel || `في 31 ديسمبر ${year}`} unionName={unionName} projectName={projectName} email={email} testId="receipts-payments-print-header" />
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 print:grid-cols-2" data-testid="receipts-payments-print-grid">
         <GroupedSideTable sideTitle="المقبوضات" groups={receiptGroups} total={sectionTotal(report?.receipts_payments?.receipts)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.receipts)} testId="receipts-print-table" />
         <GroupedSideTable sideTitle="المدفوعات" groups={paymentGroups} total={sectionTotal(report?.receipts_payments?.payments)} year={year} prevYear={prevYear} showPrev={showPrev} prevMap={prevMap} prevTotal={sectionTotal(prevReport?.receipts_payments?.payments)} testId="payments-print-table" />
@@ -289,6 +295,8 @@ export default function FinancialStatementsPage() {
   const projectName = settings.organizations?.["social-solidarity"]?.login_label || settings.organizations?.["social-solidarity"]?.name || "مشروع التكافل الاجتماعي";
   const reportEmail = officialEmailOrEmpty(settings.organizations?.[user?.organization_id]?.email);
   const [year, setYear] = useState(String(currentYear));
+  const [fromMonth, setFromMonth] = useState(1);
+  const [toMonth, setToMonth] = useState(12);
   const [report, setReport] = useState(null);
   const [prevReport, setPrevReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -297,8 +305,10 @@ export default function FinancialStatementsPage() {
     setLoading(true);
     try {
       const selectedYear = Number(year);
-      const currentRange = yearRange(selectedYear);
-      const prevRange = yearRange(selectedYear - 1);
+      const fromM = Number(fromMonth);
+      const toM = Math.max(Number(toMonth), fromM);
+      const currentRange = monthRange(selectedYear, fromM, toM);
+      const prevRange = monthRange(selectedYear - 1, fromM, toM);
       const [currentResponse, prevResponse] = await Promise.all([
         api.get(`/financial-statements?from_date=${currentRange.from_date}&to_date=${currentRange.to_date}`),
         api.get(`/financial-statements?from_date=${prevRange.from_date}&to_date=${prevRange.to_date}`).catch(() => ({ data: null })),
@@ -311,21 +321,29 @@ export default function FinancialStatementsPage() {
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, [year, fromMonth, toMonth]);
 
   useEffect(() => { loadReports(); }, [loadReports]);
+
+  const fromM = Number(fromMonth);
+  const toM = Math.max(Number(toMonth), fromM);
+  const isFullYear = fromM === 1 && toM === 12;
+  const periodText = isFullYear ? `سنة ${year}` : `الفترة من ${AR_MONTHS[fromM - 1]} إلى ${AR_MONTHS[toM - 1]} ${year}`;
+  const balanceDateLabel = isFullYear ? `في 31 ديسمبر ${year}` : `كما في نهاية ${AR_MONTHS[toM - 1]} ${year}`;
+  const incomeDateLabel = isFullYear ? `عن السنة المنتهية في 31 ديسمبر ${year}` : `عن ${periodText}`;
+  const receiptsDateLabel = isFullYear ? `في 31 ديسمبر ${year}` : `عن ${periodText}`;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="financial-statements-page">
       <style>{`@media print {.print\\:hidden{display:none!important}.financial-print-sheet{break-after:page;box-shadow:none!important;border:0!important;margin:0!important;padding:12mm!important}.financial-print-sheet:last-child{break-after:auto}body{background:white!important}.financial-report-actions{display:none!important}} .financial-print-sheet{background:white;border:1px solid #d6d3d1;border-radius:10px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.04)} .financial-print-sheet table{border-collapse:collapse!important} .financial-print-sheet th,.financial-print-sheet td{font-size:13px}`}</style>
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl print:hidden" data-testid="financial-statements-header"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8"><div className="flex items-center gap-3" data-testid="financial-statements-brand"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-950 text-white"><Scale className="h-5 w-5" /></div><div><p className="text-xs font-extrabold text-emerald-700">القوائم المالية السنوية</p><h1 className="text-2xl font-extrabold" data-testid="financial-statements-title">الميزانية والحسابات الختامية</h1></div></div><div className="flex flex-wrap items-center gap-3" data-testid="financial-statements-actions"><Badge className="bg-white text-slate-700" data-testid="financial-statements-organization-badge">{user?.organization_name}</Badge><Button asChild variant="outline" className="h-11 bg-white" data-testid="financial-statements-home-button"><Link to="/"><Home className="h-4 w-4" /> الرئيسية</Link></Button><Button type="button" onClick={() => navigate(-1)} variant="outline" className="h-11 bg-white" data-testid="financial-statements-back-button"><ArrowRight className="h-4 w-4" /> رجوع</Button><Button type="button" onClick={logout} variant="outline" className="h-11 bg-white" data-testid="financial-statements-logout-button"><LogOut className="h-4 w-4" /> خروج</Button></div></div></header>
       <section className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8" data-testid="financial-statements-content">
-        <section className="financial-report-actions rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="financial-statements-year-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-2xl font-extrabold" data-testid="financial-statements-year-title">تقارير سنوية فقط</h2><p className="text-sm font-bold text-slate-500" data-testid="financial-statements-year-subtitle">كل الحسابات الختامية تطبع في نهاية السنة المختارة بنفس شكل النماذج.</p></div><ExportReportButtons title={`الحسابات الختامية في ${year}`} fileName={`الحسابات-الختامية-${year}`} selectors={["[data-testid='balance-sheet-print-section']", "[data-testid='income-expense-print-section']", "[data-testid='receipts-payments-print-section']", "[data-testid='accounting-errors-print-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-financial-statements-button" excelTestId="export-financial-statements-excel-button" wordTestId="export-financial-statements-word-button" /></div><div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto_auto]" data-testid="financial-statements-year-controls"><select value={year} onChange={(event) => setYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-year-select">{years.map((item) => <option key={item} value={item} label={String(item)} />)}</select><Button type="button" onClick={loadReports} className="h-11 bg-slate-950 text-white" data-testid="generate-financial-statements-button"><FileSpreadsheet className="h-4 w-4" /> توليد تلقائي</Button><Button type="button" onClick={() => printNow()} variant="outline" className="h-11 bg-white" data-testid="print-annual-financial-statements-button"><Printer className="h-4 w-4" /> طباعة الحسابات الختامية</Button></div></section>
+        <section className="financial-report-actions rounded-xl border border-slate-200 bg-white p-6 shadow-sm print:hidden" data-testid="financial-statements-year-section"><div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-2xl font-extrabold" data-testid="financial-statements-year-title">القوائم المالية — تحديد الفترة</h2><p className="text-sm font-bold text-slate-500" data-testid="financial-statements-year-subtitle">اختر السنة وفترة الطباعة (من شهر إلى شهر). افتراضياً من يناير إلى ديسمبر = السنة كاملة.</p></div><ExportReportButtons title={`الحسابات الختامية — ${periodText}`} fileName={`الحسابات-الختامية-${year}-${String(fromM).padStart(2, "0")}-${String(toM).padStart(2, "0")}`} selectors={["[data-testid='balance-sheet-print-section']", "[data-testid='income-expense-print-section']", "[data-testid='receipts-payments-print-section']", "[data-testid='accounting-errors-print-section']"]} disabled={loading || !report} pdfLabel="طباعة PDF" pdfTestId="print-financial-statements-button" excelTestId="export-financial-statements-excel-button" wordTestId="export-financial-statements-word-button" /></div><div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1fr_auto_auto]" data-testid="financial-statements-year-controls"><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">السنة<select value={year} onChange={(event) => setYear(event.target.value)} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-year-select">{years.map((item) => <option key={item} value={item} label={String(item)} />)}</select></label><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">من شهر<select value={fromMonth} onChange={(event) => setFromMonth(Number(event.target.value))} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-from-month-select">{AR_MONTHS.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><label className="flex flex-col gap-1 text-xs font-bold text-slate-600">إلى شهر<select value={toMonth} onChange={(event) => setToMonth(Number(event.target.value))} className="h-11 rounded-md border border-slate-300 bg-slate-50 px-3 font-bold" data-testid="financial-statements-to-month-select">{AR_MONTHS.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></label><Button type="button" onClick={loadReports} className="h-11 self-end bg-slate-950 text-white" data-testid="generate-financial-statements-button"><FileSpreadsheet className="h-4 w-4" /> توليد</Button><Button type="button" onClick={() => printNow()} variant="outline" className="h-11 self-end bg-white" data-testid="print-annual-financial-statements-button"><Printer className="h-4 w-4" /> طباعة</Button></div></section>
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4 print:hidden" data-testid="financial-statements-kpi-grid"><div className="rounded-xl bg-slate-950 p-4 text-white"><p className="text-xs font-bold text-slate-300">حالة القوائم</p><p className="text-xl font-extrabold" data-testid="financial-statements-valid-value">{report?.is_accounting_valid ? "سليمة" : "بها أخطاء"}</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs font-bold text-emerald-700">إجمالي الأصول</p><p className="text-xl font-extrabold" data-testid="financial-statements-assets-value">{formatCurrency(report?.balance_sheet?.assets?.total || 0)}</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs font-bold text-amber-700">نتيجة السنة</p><p className="text-xl font-extrabold" data-testid="financial-statements-result-value">{formatCurrency(report?.revenues_expenses?.result?.total || 0)}</p></div><div className="rounded-xl bg-red-50 p-4"><p className="text-xs font-bold text-red-700">الأخطاء المكتشفة</p><p className="text-xl font-extrabold" data-testid="financial-statements-errors-value">{report?.accounting_errors?.length || 0}</p></div></section>
         <AccountingCorrectionsReview corrections={report?.accounting_corrections || []} />
-        <BalanceSheetPrint report={report} prevReport={prevReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <IncomeExpensePrint report={report} prevReport={prevReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
-        <ReceiptsPaymentsPrint report={report} prevReport={prevReport} year={year} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <BalanceSheetPrint report={report} prevReport={prevReport} year={year} dateLabel={balanceDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <IncomeExpensePrint report={report} prevReport={prevReport} year={year} dateLabel={incomeDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
+        <ReceiptsPaymentsPrint report={report} prevReport={prevReport} year={year} dateLabel={receiptsDateLabel} unionName={unionName} projectName={projectName} email={reportEmail} />
         <AccountingErrorsPrint report={report} />
       </section>
       <footer className="px-4 pb-5 print:hidden"><CreditLine testId="financial-statements-creator-credit" /></footer>
