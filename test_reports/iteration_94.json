@@ -1,0 +1,26 @@
+{
+  "summary": "End-to-end verification of the new drill-down dialog on /financial-statements. Logged in as admin/Admin@123 (social-solidarity), set 2025 يناير→ديسمبر, clicked توليد, and exercised the line-detail dialog on all 3 statements. Backend endpoint GET /api/financial-statements/line-detail curl-verified (net=-160000, 2 rows for code=4106). Frontend UI: (1) Balance Sheet asset amount button for 'بنك التنمية الصناعية' → dialog opens with title 'تفاصيل: بنك التنمية الصناعية', amount 160,000.00, basis text in Arabic mentioning رصيد الحساب and ‘حتى ٣١ ديسمبر ٢٠٢٥’, ledger shows 2 journal rows (مارس 100k + مايو 60k) and net total 160,000.00. (2) Income revenues 'رسم انضمام' → dialog opens, basis mentions إجمالي ما تم تسجيله لهذا الحساب من إيراد خلال سنة ٢٠٢٥، من بوابة الإيرادات, ledger has exactly 2 rows (100k, 60k credits) with net total 160,000.00. (3) Receipts 'رسم انضمام' under مقبوضات النشاط → dialog opens with basis mentioning المقبوضات النقدية…خلال سنة ٢٠٢٥. (4) Escape closes the dialog (verified line-detail-dialog count == 0). (5) Synthetic 'الفائض' row in income-print-expenses → dialog opens with basis-only content ('= إجمالي الإيرادات − إجمالي المصروفات…سطر محسوب وليس حساباً مستقلاً.') and NO ledger section rendered (has_ledger=0, rows=0) — matches spec. No React runtime errors; no error overlay. Arabic-Indic digits as expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "line-detail-dialog", "issues": ["Inside line-detail-basis the heading <p>مصدر الرقم والأساس المحاسبي</p> and the body text are adjacent block/inline nodes; textContent extraction shows them without a separator. Visually it still renders on two lines (p is block), so this is cosmetic only."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iter94_final.jpeg"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FinancialStatementsPage.jsx remains a very long single file (462 lines, many very long inline JSX lines). Consider splitting GroupedSideTable, each *Print section and the new line-detail Dialog into their own files for maintainability.",
+    "In handleAmountClick, when the backend request fails the dialog stays open with error:true but no visible error indicator is shown to the user (no toast, no inline error inside line-detail-ledger). Minor UX: show a message when detail?.error is true.",
+    "Only one row per account appears in balance sheet / revenues / receipts for 4106 because the fixture has a single detail account; the drill-down works, but if an account aggregates multiple sub-accounts the current match_by=code|name scheme matches only the leaf label of the group — fine for current data model but worth noting for future hierarchical groups."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin / Admin@123 (organization: social-solidarity)",
+  "seed_data_creation": "None; relied on pre-seeded 2025 _tmp_fs journal entries (4106 رسم انضمام 100,000 Mar + 60,000 May = 160,000; counter side on 1101).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Drill-down dialog is now wired on all three statements via buttons with testid pattern {section-table}-row-{n}-amount-button. The dialog uses testids line-detail-dialog / line-detail-dialog-title / line-detail-dialog-amount / line-detail-basis / line-detail-ledger / line-detail-row-{i} / line-detail-total / line-detail-empty / line-detail-loading. Synthetic lines (الفائض) use basis-only (hasLedger=false, no ledger section rendered). Escape closes the dialog.",
+  "rca of the issue": "N/A — all requested drill-down behaviour verified working end-to-end against the preview URL."
+}

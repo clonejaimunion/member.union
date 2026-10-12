@@ -1449,3 +1449,8 @@
 - FinancialStatementsPage.jsx: عمود «المقارن» (السنة السابقة) لا يظهر نهائياً لأي قائمة قبل سنة 2027. القاعدة صارت showPrev = (year >= 2027) && prevHasData(prevReport). يبدأ ظهوره أوتوماتيكياً من أول 2027.
 - السبب السابق: كان يظهر لأن سنة 2025 بها بيانات فظهر «مقارن 2025» في ميزانية 2026. الآن ثابت بعتبة 2027.
 - build ناجح، ZIP بدون .exe.
+
+## خاصية توضيح مصدر الأرقام (drill-down) في الحسابات الختامية — 2026-06
+- backend: endpoint جديد GET /api/financial-statements/line-detail (match_by=code|name, value, scope=period|cumulative_to|cumulative_before, from_date,to_date) يعيد الحركات المكوّنة للرقم + الصافي.
+- frontend FinancialStatementsPage.jsx: كل مبلغ في القوائم الثلاث أصبح زر قابل للضغط؛ عند الضغط تفتح نافذة (Dialog) تعرض: وصف مصدر الرقم والأساس المحاسبي (buildBasisText حسب نوع البند) + جدول الحركات المكوّنة له مع الصافي. السطور المركّبة (الفائض) تعرض شرحاً فقط.
+- التحقق: testing_agent (frontend+backend) ناجح 100% على القوائم الثلاث. curl للـendpoint مؤكد (رسم انضمام = حركتان، صافي 160,000). تم تنظيف البيانات التجريبية. ZIP بدون .exe.
