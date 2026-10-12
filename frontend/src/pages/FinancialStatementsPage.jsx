@@ -123,7 +123,7 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
 
 function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
-  const showPrev = prevHasData(prevReport);
+  const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const assetLines = report?.balance_sheet?.assets?.lines || [];
   const liabilityLines = report?.balance_sheet?.liabilities?.lines || [];
   const equityLines = report?.balance_sheet?.equity?.lines || [];
@@ -179,7 +179,7 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
 
 function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
-  const showPrev = prevHasData(prevReport);
+  const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const expenseLines = report?.revenues_expenses?.expenses?.lines || [];
   const revenueLines = report?.revenues_expenses?.revenues?.lines || [];
   const isDepExpense = (code) => String(code || "").startsWith("52");
@@ -222,7 +222,7 @@ function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, pr
 
 function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName, projectName, email }) {
   const prevYear = Number(year) - 1;
-  const showPrev = prevHasData(prevReport);
+  const showPrev = Number(year) >= 2027 && prevHasData(prevReport);
   const receiptLines = report?.receipts_payments?.receipts?.lines || [];
   const paymentLines = report?.receipts_payments?.payments?.lines || [];
   const isOpening = (name) => String(name || "").startsWith("رصيد أول المدة");
