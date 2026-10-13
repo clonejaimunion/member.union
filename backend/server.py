@@ -3887,13 +3887,6 @@ async def rebuild_inventory_item(item_id: str, current_user: Optional[dict] = No
             or round(float(original.get("quantity_balance_after") or 0), 4) != snapshot["quantity_balance_after"]
             or round(float(original.get("value_balance_after") or 0), 2) != snapshot["value_balance_after"]
         )
-        journal_changed = snapshot_changed or (
-            str(original.get("movement_date") or "") != str(snapshot.get("movement_date") or "")
-            or (original.get("movement_type") or "") != (snapshot.get("movement_type") or "")
-            or (original.get("description") or "") != (snapshot.get("description") or "")
-            or (original.get("reference") or "") != (snapshot.get("reference") or "")
-            or not original.get("journal_entry_id")
-        )
         if snapshot_changed:
             await db.inventory_movements.update_one(with_organization({"id": snapshot["id"]}), {"$set": {
                 "unit_cost": snapshot["unit_cost"],
@@ -3902,12 +3895,13 @@ async def rebuild_inventory_item(item_id: str, current_user: Optional[dict] = No
                 "value_balance_after": snapshot["value_balance_after"],
                 "updated_at": now_iso,
             }})
-        if journal_changed:
-            await delete_journal_for_source("inventory", snapshot["id"])
-            movement_date = snapshot.get("movement_date")
-            movement_date = movement_date if isinstance(movement_date, date) else date.fromisoformat(str(movement_date))
-            journal = await journal_for_inventory_movement({**snapshot, "movement_date": movement_date}, current_user)
-            await db.inventory_movements.update_one(with_organization({"id": snapshot["id"]}), {"$set": {"journal_entry_id": journal.get("id") if journal else None, "updated_at": now_iso}})
+        # نعيد توليد القيد دائماً أثناء إعادة البناء لضمان تطابق تاريخ القيد ومبلغه ونوعه مع الحركة
+        # (تعديل تاريخ الحركة وحده كان يترك القيد بتاريخه القديم فيختفي من ميزانية الفترة).
+        await delete_journal_for_source("inventory", snapshot["id"])
+        movement_date = snapshot.get("movement_date")
+        movement_date = movement_date if isinstance(movement_date, date) else date.fromisoformat(str(movement_date))
+        journal = await journal_for_inventory_movement({**snapshot, "movement_date": movement_date}, current_user)
+        await db.inventory_movements.update_one(with_organization({"id": snapshot["id"]}), {"$set": {"journal_entry_id": journal.get("id") if journal else None, "updated_at": now_iso}})
     await db.inventory_items.update_one(with_organization({"id": item_id}), {"$set": {**balance, "updated_at": now_iso}})
 
 
@@ -11109,7 +11103,7 @@ async def create_report_approval(payload: ReportApprovalCreate, current_user: di
     return ReportApprovalResponse(**hydrate_einvoice_document(document))
 
 
-BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "tax_profiles", "tax_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
+BACKUP_COLLECTIONS = ["users", "banks", "bank_settings", "app_settings", "chart_accounts", "journal_entries", "journal_counters", "deposits", "revenues", "expenses", "inventory_items", "inventory_movements", "misc_creditors", "misc_creditor_movements", "fixed_assets", "fixed_asset_depreciations", "fixed_asset_catalog_items", "fixed_asset_catalog_hidden", "fixed_asset_category_settings", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "banking_tariffs", "electronic_invoices", "tax_profiles", "tax_invoices", "einvoice_settings", "einvoice_customers", "einvoice_service_codes", "eta_integration_settings", "financial_periods", "report_approvals", "audit_logs"]
 USER_DATA_PURGE_COLLECTIONS = ["journal_entries", "journal_counters", "deposits", "revenues", "expenses", "fixed_assets", "fixed_asset_depreciations", "custody_advances", "memberships", "membership_import_previews", "membership_batch_payments", "reconciliations", "banking_manual_charges", "electronic_invoices", "tax_profiles", "tax_invoices", "einvoice_customers", "einvoice_service_codes", "financial_periods", "report_approvals"]
 TRAINING_DIR = ROOT_DIR.parent / "training_exports"
 TRAINING_DIR.mkdir(parents=True, exist_ok=True)
