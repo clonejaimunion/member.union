@@ -3905,6 +3905,26 @@ async def rebuild_inventory_item(item_id: str, current_user: Optional[dict] = No
     await db.inventory_items.update_one(with_organization({"id": item_id}), {"$set": {**balance, "updated_at": now_iso}})
 
 
+async def sync_inventory_journal_dates(organization_id: str, current_user: Optional[dict] = None) -> int:
+    """تصحيح ذاتي: أي قيد مخزون تاريخه لا يطابق تاريخ حركته يُعاد توليده ليطابق الحركة.
+    يعالج الحالات القديمة التي تغيّر فيها تاريخ الحركة دون تحديث تاريخ القيد."""
+    movements = await db.inventory_movements.find(with_organization({}, organization_id), {"_id": 0}).to_list(50000)
+    fixed = 0
+    for movement in movements:
+        mv_date = str(movement.get("movement_date") or "")[:10]
+        if not mv_date:
+            continue
+        journal = await db.journal_entries.find_one(with_organization({"source_type": "inventory", "source_id": movement.get("id")}, organization_id), {"_id": 0})
+        if not journal or str(journal.get("entry_date") or "")[:10] == mv_date:
+            continue
+        await delete_journal_for_source("inventory", movement.get("id"))
+        new_journal = await journal_for_inventory_movement({**movement, "movement_date": date.fromisoformat(mv_date)}, current_user)
+        await db.inventory_movements.update_one(with_organization({"id": movement.get("id")}, organization_id), {"$set": {"journal_entry_id": new_journal.get("id") if new_journal else None}})
+        fixed += 1
+    return fixed
+
+
+
 
 async def ensure_misc_creditor_from_payload(payload: MiscCreditorMovementCreate) -> dict:
     if payload.creditor_id:
@@ -4696,6 +4716,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             start_year = period_to.year
     for dep_year in range(start_year, period_to.year + 1):
         await auto_run_annual_depreciation_for_year(organization_id, dep_year, None)
+    await sync_inventory_journal_dates(organization_id, None)
     balance_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     asset_lines = []
