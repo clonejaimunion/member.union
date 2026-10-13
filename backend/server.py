@@ -8520,9 +8520,12 @@ async def build_annual_depreciation_record(asset: dict, year: int, current_user:
     # المجمع السابق يُحسب نظرياً حسب عمر الأصل من تاريخ الشراء حتى نهاية السنة السابقة (مع سقف التكلفة)،
     # حتى لا تُنزَّل أقساط إهلاك لأصل انتهى عمره الإنتاجي واستُهلك بالكامل (مثل أصول قديمة من 2001).
     monthly_amount = fixed_asset_monthly_depreciation(asset.get("purchase_cost"), annual_rate)
-    accumulated_before = _asset_accumulated_as_of(float(asset.get("purchase_cost") or 0), monthly_amount, purchase_date_value, date(year - 1, 12, 31))
-    remaining = round(float(asset.get("purchase_cost") or 0) - accumulated_before, 2)
-    amount = round(min(annual_amount, remaining), 2)
+    cost_value = float(asset.get("purchase_cost") or 0)
+    accumulated_before = _asset_accumulated_as_of(cost_value, monthly_amount, purchase_date_value, date(year - 1, 12, 31))
+    # قسط السنة = الزيادة النظرية في مجمع الإهلaك خلال السنة (مع تناسب أشهر سنة الشراء وسقف التكلفة)
+    # ليتطابق تماماً مع تقرير إهلاك الأصول الثابتة ولا يتجاوز إجمالي الأقساط تكلفة الأصل.
+    accumulated_after_theoretical = _asset_accumulated_as_of(cost_value, monthly_amount, purchase_date_value, date(year, 12, 31))
+    amount = round(accumulated_after_theoretical - accumulated_before, 2)
     if amount <= 0:
         await db.fixed_asset_depreciations.delete_one(with_organization({"id": record_id}))
         await delete_journal_for_source("asset_depreciation", record_id)
@@ -8557,7 +8560,7 @@ async def auto_run_annual_depreciation_for_year(organization_id: str, year: int,
     token = CURRENT_ORGANIZATION_ID.set(organization_id)
     try:
         await sync_chart_accounts_for_organization(organization_id)
-        assets = await db.fixed_assets.find(with_organization({"is_active": True}, organization_id), {"_id": 0}).sort("asset_code", 1).to_list(5000)
+        assets = await db.fixed_assets.find(with_organization({"is_active": {"$ne": False}}, organization_id), {"_id": 0}).sort("asset_code", 1).to_list(5000)
         generated = []
         for asset in assets:
             document = await build_annual_depreciation_record(asset, year, current_user)
