@@ -178,7 +178,9 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
   const accruedRows = pick(assetLines, isAccruedInterestCode);
   const advanceRows = pick(assetLines, isAdvancesCode);
   const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isInventoryCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAdvancesCode(l.code) && !isAccumDepCode(l.code));
-  const provisionRows = pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
+  const creditorLines = liabilityLines.filter((l) => l.name !== "مخصصات الاهلاك");
+  const backendProvisionRows = liabilityLines.filter((l) => l.name === "مخصصات الاهلاك").map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
+  const provisionRows = [...pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) })), ...backendProvisionRows];
 
   const assetDetail = { matchBy: "code", scope: "cumulative_to", kind: "asset_cumulative" };
   const assetGroups = [
@@ -191,12 +193,12 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
   ];
   const creditGroups = [
     { title: "المخصصات", rows: provisionRows, detail: { matchBy: "code", scope: "cumulative_to", kind: "provision" } },
-    { title: "حسابات دائنة", rows: liabilityLines, detail: { matchBy: "code", scope: "cumulative_to", kind: "liability" } },
+    { title: "حسابات دائنة", rows: creditorLines, detail: { matchBy: "code", scope: "cumulative_to", kind: "liability" } },
     { title: "الفائض", rows: equityLines, detail: { matchBy: "code", scope: "cumulative_to", kind: "equity" } },
   ];
 
   const assetsTotal = sumAmt([...fixedAssetRows, ...inventoryRows, ...bankRows, ...accruedRows, ...debtorRows, ...advanceRows]);
-  const creditTotal = Math.round((sumAmt(provisionRows) + sumAmt(liabilityLines) + sumAmt(equityLines)) * 100) / 100;
+  const creditTotal = Math.round((sumAmt(provisionRows) + sumAmt(creditorLines) + sumAmt(equityLines)) * 100) / 100;
 
   const prevMap = {};
   (prevReport?.balance_sheet?.assets?.lines || []).forEach((l) => { prevMap[l.name] = isAccumDepCode(l.code) ? Math.abs(Number(l.amount || 0)) : Number(l.amount || 0); });

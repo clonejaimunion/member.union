@@ -4693,7 +4693,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
-    await auto_run_annual_depreciation_for_year(organization_id, period_to.year, None)
+    earliest_asset = await db.fixed_assets.find_one(with_organization({}, organization_id), {"_id": 0, "purchase_date": 1}, sort=[("purchase_date", 1)])
+    start_year = period_to.year
+    if earliest_asset and earliest_asset.get("purchase_date"):
+        try:
+            start_year = date.fromisoformat(str(earliest_asset["purchase_date"])[:10]).year
+        except Exception:
+            start_year = period_to.year
+    for dep_year in range(start_year, period_to.year + 1):
+        await auto_run_annual_depreciation_for_year(organization_id, dep_year, None)
     balance_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     asset_lines = []
