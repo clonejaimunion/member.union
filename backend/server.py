@@ -1282,7 +1282,7 @@ class JournalEntryResponse(BaseModel):
     entry_date: date
     description: str
     reference: Optional[str] = None
-    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor", "tax_invoice"] = "manual"
+    source_type: Literal["manual", "revenue", "expense", "banking_expense", "deposit", "deposit_interest", "deposit_maturity_principal", "reconciliation", "fixed_asset", "asset_depreciation", "custody_advance", "custody_advance_settlement", "opening_balance", "membership_batch_payment", "inventory", "misc_creditor", "tax_invoice"] = "manual"
     source_id: Optional[str] = None
     status: Literal["approved"] = "approved"
     is_auto: bool = False
@@ -3682,6 +3682,24 @@ async def journal_for_deposit_principal(deposit: dict, current_user: Optional[di
         current_user=current_user,
         lines=lines,
     )
+    # قيد استحقاق الوديعة: عند حلول تاريخ الاستحقاق يُرَدّ أصل الوديعة من «ودائع لأجل» إلى رصيد البنك الجاري
+    # (أصل الوديعة ليس فائدة؛ الفائدة الشهرية فقط هي الإيراد). القيد مؤجَّل بتاريخ الاستحقاق فلا يؤثر قبله.
+    maturity_value = deposit.get("maturity_datetime")
+    if maturity_value:
+        maturity_date = maturity_value.date() if isinstance(maturity_value, datetime) else datetime.fromisoformat(str(maturity_value)).date()
+        await save_journal_entry_document(
+            entry_date=maturity_date,
+            description=f"قيد تلقائي لاستحقاق وديعة رقم {deposit.get('deposit_number')}: رد أصل الوديعة إلى رصيد البنك",
+            reference=deposit.get("deposit_number"),
+            source_type="deposit_maturity_principal",
+            source_id=deposit.get("id"),
+            is_auto=True,
+            current_user=current_user,
+            lines=[
+                {"account_name": "البنك", "bank_id": deposit.get("bank_id"), "debit": amount, "credit": 0, "notes": "رد أصل الوديعة إلى الحساب الجاري عند الاستحقاق"},
+                {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": 0, "credit": amount, "notes": "تصفية أصل الوديعة لأجل عند الاستحقاق"},
+            ],
+        )
 
 
 async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None):
@@ -4673,8 +4691,40 @@ async def build_accounting_errors(organization_id: str, balance_report: TrialBal
     return errors
 
 
+async def ensure_deposit_maturity_journals(organization_id: str, current_user: Optional[dict] = None):
+    # Backfill idempotent: يضمن وجود قيد استحقاق (رد الأصل للبنك) لكل وديعة قائمة.
+    # يُنشأ فقط عند غيابه حتى لا يُعاد ترحيل قيد الربط الأصلي.
+    deposits = await db.deposits.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
+    for document in deposits:
+        amount = round(float(document.get("amount") or 0), 2)
+        maturity_value = document.get("maturity_datetime")
+        if amount <= 0 or not maturity_value:
+            continue
+        existing = await db.journal_entries.find_one(with_organization({"source_type": "deposit_maturity_principal", "source_id": document.get("id"), "is_reversal": {"$ne": True}}, organization_id), {"_id": 0, "id": 1})
+        if existing:
+            continue
+        maturity_date = maturity_value.date() if isinstance(maturity_value, datetime) else datetime.fromisoformat(str(maturity_value)).date()
+        try:
+            await save_journal_entry_document(
+                entry_date=maturity_date,
+                description=f"قيد تلقائي لاستحقاق وديعة رقم {document.get('deposit_number')}: رد أصل الوديعة إلى رصيد البنك",
+                reference=document.get("deposit_number"),
+                source_type="deposit_maturity_principal",
+                source_id=document.get("id"),
+                is_auto=True,
+                current_user=current_user,
+                lines=[
+                    {"account_name": "البنك", "bank_id": document.get("bank_id"), "debit": amount, "credit": 0, "notes": "رد أصل الوديعة إلى الحساب الجاري عند الاستحقاق"},
+                    {"account_name": "ودائع لأجل", "system_key": "term_deposits", "debit": 0, "credit": amount, "notes": "تصفية أصل الوديعة لأجل عند الاستحقاق"},
+                ],
+            )
+        except HTTPException:
+            continue
+
+
 async def calculate_financial_statements_report(organization_id: str, from_date: Optional[date] = None, to_date: Optional[date] = None) -> FinancialStatementsReport:
     repair_details = await repair_journal_account_links_for_organization(organization_id, return_details=True)
+    await ensure_deposit_maturity_journals(organization_id)
     today_value = date.today()
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
@@ -6668,7 +6718,7 @@ async def should_show_term_deposits_in_trial_balance(organization_id: str, repor
 
 
 def entry_has_term_deposit_principal(entry: dict) -> bool:
-    if entry.get("source_type") == "deposit":
+    if entry.get("source_type") in ("deposit", "deposit_maturity_principal"):
         return True
     for line in entry.get("lines", []):
         if str(line.get("account_code") or "") == "1250" or str(line.get("account_name") or "") == "ودائع لأجل":
@@ -7689,6 +7739,7 @@ async def delete_deposit(
     for chain_id in chain_ids:
         await db.deposits.delete_one(with_organization({"id": chain_id, "bank_id": bank_id}))
         await delete_journal_for_source("deposit", chain_id)
+        await delete_journal_for_source("deposit_maturity_principal", chain_id)
         await delete_journal_for_source("deposit_interest", chain_id)
 
     return {"message": "تم حذف الوديعة وكل تجديداتها نهائياً", "deleted_deposit_id": deposit_id, "deleted_chain_ids": sorted(chain_ids)}
@@ -9463,7 +9514,7 @@ async def list_journal_entries(
         "fixed_assets": ["fixed_asset", "asset_depreciation"],
         "revenues": ["revenue", "membership_batch_payment"],
         "expenses": ["expense"],
-        "deposits": ["deposit", "deposit_interest"],
+        "deposits": ["deposit", "deposit_interest", "deposit_maturity_principal"],
         "banking_expenses": ["banking_expense"],
         "custody_advances": ["custody_advance", "custody_advance_settlement"],
         "membership": ["membership_batch_payment"],
