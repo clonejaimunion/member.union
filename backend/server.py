@@ -4728,12 +4728,31 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         if code.endswith("-م") and row.account_type == "asset":
             accumulated_by_cat[code[:-2]] = round(accumulated_by_cat.get(code[:-2], 0.0) - normal_amount(row), 2)
     accumulated_depreciation_total = round(sum(accumulated_by_cat.values()), 2)
+    # أرصدة البنوك في الميزانية تُؤخذ من «رصيد التسوية البنكية التلقائي قبل تسويات الشيكات»
+    # لشهر نهاية الفترة المحددة، وتُسمّى «{اسم البنك} - جاري».
+    bank_accounts_docs = await db.chart_accounts.find(with_organization({"system_key": {"$regex": "^bank:"}}, organization_id), {"_id": 0, "code": 1, "bank_id": 1, "system_key": 1}).to_list(1000)
+    bank_code_to_recon = {}
+    for acc in bank_accounts_docs:
+        bid = acc.get("bank_id") or (str(acc.get("system_key") or "").split(":", 1)[1] if str(acc.get("system_key") or "").startswith("bank:") else None)
+        if not acc.get("code") or not bid:
+            continue
+        try:
+            breakdown = await calculate_bank_reconciliation_balance_breakdown(bid, year=period_to.year, month=period_to.month)
+            bank_code_to_recon[str(acc["code"])] = round(breakdown.book_balance, 2)
+        except Exception:
+            continue
     for row in balance_report.rows:
         if row.account_type != "asset" or normal_amount(row) == 0:
             continue
         code = str(row.account_code or "")
         if code.endswith("-م"):
             continue  # مجمع الإهلاك يُعرض مجمّعاً في بند «مخصصات الاهلاك» ضمن المخصصات
+        if code in bank_code_to_recon:
+            # رصيد البنك = رصيد التسوية البنكية قبل الشيكات للفترة المحددة
+            bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
+            bank_line.name = f"{row.account_name} - جاري"
+            asset_lines.append(bank_line)
+            continue
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
             continue
