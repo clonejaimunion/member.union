@@ -4732,6 +4732,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     # لشهر نهاية الفترة المحددة، وتُسمّى «{اسم البنك} - جاري».
     bank_accounts_docs = await db.chart_accounts.find(with_organization({"system_key": {"$regex": "^bank:"}}, organization_id), {"_id": 0, "code": 1, "bank_id": 1, "system_key": 1}).to_list(1000)
     bank_code_to_recon = {}
+    bank_code_to_deposits = {}
     for acc in bank_accounts_docs:
         bid = acc.get("bank_id") or (str(acc.get("system_key") or "").split(":", 1)[1] if str(acc.get("system_key") or "").startswith("bank:") else None)
         if not acc.get("code") or not bid:
@@ -4741,6 +4742,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             bank_code_to_recon[str(acc["code"])] = round(breakdown.book_balance, 2)
         except Exception:
             continue
+        # أصل الودائع النشطة في البنك كما في نهاية الفترة (الودائع اللي فوائدها مستمرة داخل الفترة)
+        bank_code_to_deposits[str(acc["code"])] = await active_deposit_principal_total(organization_id, period_to, bid)
+    bank_deposit_lines = []
     for row in balance_report.rows:
         if row.account_type != "asset" or normal_amount(row) == 0:
             continue
@@ -4752,6 +4756,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
             bank_line.name = f"{row.account_name} - جاري"
             asset_lines.append(bank_line)
+            dep_amount = round(bank_code_to_deposits.get(code, 0.0), 2)
+            if dep_amount != 0:
+                bank_deposit_lines.append(FinancialStatementLine(code=code, name=f"{row.account_name} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة"))
             continue
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
@@ -4761,6 +4768,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             asset_lines.append(financial_line_from_trial(row, amount=round(accumulated_by_cat.get(code, 0.0), 2)))
             continue
         asset_lines.append(financial_line_from_trial(row))
+    # بنود الودائع تظهر تحت بنود الجاري مباشرة ضمن «نقدية وبنوك»
+    asset_lines.extend(bank_deposit_lines)
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
     if round(accumulated_depreciation_total, 2) != 0:
         liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
