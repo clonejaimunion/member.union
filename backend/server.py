@@ -4475,12 +4475,23 @@ def normal_amount(row: TrialBalanceRow) -> float:
     return round(float(row.balance_credit or 0) - float(row.balance_debit or 0), 2)
 
 
+def entry_credits_deposit_interest_revenue(entry: dict) -> bool:
+    # قيد إيراد يدوي بطريقة «استحقاق وديعة» (مدين البنك / دائن إيرادات فوائد ودائع) = أصل الوديعة المفكوكة.
+    # يُستبعد من الحسابات الختامية حتى تبقى «فوائد الودائع» = الفائدة الشهرية المحتسبة تلقائياً فقط.
+    for line in entry.get("lines", []):
+        is_interest_acct = line.get("system_key") == "deposit_interest_revenue" or str(line.get("account_name") or "") == "إيرادات فوائد ودائع"
+        if is_interest_acct and round(float(line.get("credit") or 0), 2) > 0:
+            return True
+    return False
+
+
 async def calculate_trial_balance_report(
     organization_id: str,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
     account_type: Optional[str] = None,
     non_zero_only: bool = False,
+    exclude_deposit_maturity_revenue: bool = False,
 ) -> TrialBalanceReport:
     await sync_chart_accounts_for_organization(organization_id)
     await reclassify_revenue_journal_lines_for_organization(organization_id)
@@ -4516,12 +4527,16 @@ async def calculate_trial_balance_report(
     entries = await db.journal_entries.find(entry_query, {"_id": 0, "lines": 1, "source_type": 1}).to_list(100000)
     if not show_term_deposit_principal:
         entries = [entry for entry in entries if not entry_has_term_deposit_principal(entry)]
+    if exclude_deposit_maturity_revenue:
+        entries = [entry for entry in entries if not entry_credits_deposit_interest_revenue(entry)]
     account_by_code = {account.get("code"): account for account in accounts if account.get("code")}
     account_by_name = {account.get("name"): account for account in accounts if account.get("name")}
     if from_date:
         prior_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}, "entry_date": {"$lt": from_date.isoformat()}}, organization_id), {"_id": 0, "lines": 1, "source_type": 1}).to_list(100000)
         if not show_term_deposit_principal:
             prior_entries = [entry for entry in prior_entries if not entry_has_term_deposit_principal(entry)]
+        if exclude_deposit_maturity_revenue:
+            prior_entries = [entry for entry in prior_entries if not entry_credits_deposit_interest_revenue(entry)]
         for entry in prior_entries:
             for line in entry.get("lines", []):
                 account = None
@@ -4679,8 +4694,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     period_from = from_date or date(today_value.year, 1, 1)
     period_to = to_date or today_value
     await auto_run_annual_depreciation_for_year(organization_id, period_to.year, None)
-    balance_report = await calculate_trial_balance_report(organization_id=organization_id, to_date=period_to, non_zero_only=True)
-    income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True)
+    balance_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
+    income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     asset_lines = []
     reclassified_bank_credit_lines = []
     for row in balance_report.rows:
@@ -4717,6 +4732,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     # المقبوضات = رصيد أول المدة (أرصدة البنوك) + مقبوضات النشاط (مبوّبة حسب الحساب المقابل)
     # المدفوعات = مصروفات النشاط (مبوّبة حسب الحساب المقابل) + رصيد آخر المدة (أرصدة البنوك)
     all_entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lte": period_to.isoformat()}}, organization_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
+    # استبعاد قيود «استحقاق وديعة» اليدوية (أصل الوديعة المفكوكة) من حساب المقبوضات والمدفوعات
+    all_entries = [entry for entry in all_entries if not entry_credits_deposit_interest_revenue(entry)]
 
     def _is_bank_line(line: dict) -> bool:
         code = str(line.get("account_code") or "")
@@ -8476,8 +8493,10 @@ async def build_annual_depreciation_record(asset: dict, year: int, current_user:
     for old_record in old_year_records:
         await delete_journal_for_source("asset_depreciation", old_record["id"])
         await db.fixed_asset_depreciations.delete_one(with_organization({"id": old_record["id"]}))
-    previous_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset["id"], "id": {"$ne": record_id}}), {"_id": 0, "amount": 1}).to_list(1000)
-    accumulated_before = round(sum(float(item.get("amount") or 0) for item in previous_records), 2)
+    # المجمع السابق يُحسب نظرياً حسب عمر الأصل من تاريخ الشراء حتى نهاية السنة السابقة (مع سقف التكلفة)،
+    # حتى لا تُنزَّل أقساط إهلاك لأصل انتهى عمره الإنتاجي واستُهلك بالكامل (مثل أصول قديمة من 2001).
+    monthly_amount = fixed_asset_monthly_depreciation(asset.get("purchase_cost"), annual_rate)
+    accumulated_before = _asset_accumulated_as_of(float(asset.get("purchase_cost") or 0), monthly_amount, purchase_date_value, date(year - 1, 12, 31))
     remaining = round(float(asset.get("purchase_cost") or 0) - accumulated_before, 2)
     amount = round(min(annual_amount, remaining), 2)
     if amount <= 0:
@@ -9837,6 +9856,14 @@ async def list_inventory_items(_: dict = Depends(require_any_permission(["enter_
     await sync_chart_accounts_for_organization(organization_id_or_default())
     documents = await db.inventory_items.find(with_organization({}), {"_id": 0}).sort("item_name", 1).to_list(5000)
     return [InventoryItemResponse(**hydrate_inventory_item(document)) for document in documents]
+
+
+@api_router.post("/inventory/rebuild")
+async def rebuild_all_inventory_items(current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
+    items = await db.inventory_items.find(with_organization({}), {"_id": 0, "id": 1}).to_list(5000)
+    for item in items:
+        await rebuild_inventory_item(item["id"], current_user)
+    return {"message": "تمت إعادة بناء المخزون وتصحيح أرصدته وقيوده", "rebuilt_items": len(items)}
 
 
 @api_router.post("/inventory/items", response_model=InventoryItemResponse)
