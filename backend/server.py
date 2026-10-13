@@ -4698,14 +4698,21 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     income_report = await calculate_trial_balance_report(organization_id=organization_id, from_date=period_from, to_date=period_to, non_zero_only=True, exclude_deposit_maturity_revenue=True)
     asset_lines = []
     reclassified_bank_credit_lines = []
+    accumulated_depreciation_total = 0.0
     for row in balance_report.rows:
         if row.account_type != "asset" or normal_amount(row) == 0:
             continue
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
             continue
+        if str(row.account_name or "").startswith("مجمع إهلاك") or str(row.account_name or "") == "مجمع إهلاك الأصول الثابتة":
+            # تُجمَّع كل مجمعات إهلاك التصنيفات في بند واحد «مخصصات الاهلاك» ضمن المخصصات
+            accumulated_depreciation_total = round(accumulated_depreciation_total + normal_amount(row), 2)
+            continue
         asset_lines.append(financial_line_from_trial(row))
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
+    if round(accumulated_depreciation_total, 2) != 0:
+        liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(-accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
     revenue_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "revenue" and normal_amount(row) != 0]
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
