@@ -8404,6 +8404,21 @@ async def delete_fixed_asset(asset_id: str, _: dict = Depends(require_admin)):
     return {"message": "تم حذف الأصل الثابت وقيوده التلقائية", "deleted_asset_id": asset_id}
 
 
+@api_router.post("/fixed-assets/{asset_id}/deliver-to-store")
+async def deliver_fixed_asset_to_store(asset_id: str, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses"]))):
+    existing = await db.fixed_assets.find_one(with_organization({"id": asset_id}), {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="الأصل الثابت غير موجود")
+    await ensure_period_is_open(date.fromisoformat(existing["purchase_date"]))
+    depreciation_records = await db.fixed_asset_depreciations.find(with_organization({"asset_id": asset_id}), {"_id": 0, "id": 1}).to_list(1000)
+    for record in depreciation_records:
+        await delete_journal_for_source("asset_depreciation", record["id"])
+    await db.fixed_asset_depreciations.delete_many(with_organization({"asset_id": asset_id}))
+    await db.fixed_assets.delete_one(with_organization({"id": asset_id}))
+    await delete_journal_for_source("fixed_asset", asset_id)
+    return {"message": "تم تسليم الأصل للمخازن وإزالة قيمته وقيوده من جميع الحسابات", "delivered_asset_id": asset_id}
+
+
 async def build_depreciation_record(asset: dict, year: int, month: int, current_user: dict) -> Optional[dict]:
     purchase_date_value = asset.get("purchase_date") if isinstance(asset.get("purchase_date"), date) else date.fromisoformat(str(asset.get("purchase_date")))
     depreciation_date = month_end_date(year, month)
