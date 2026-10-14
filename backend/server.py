@@ -9085,6 +9085,55 @@ async def supplier_tax_credit_balance_for_period(org_id: str, period_from: Optio
     return round(credit_total - debit_total, 2)
 
 
+async def supplier_tax_line_detail(org_id: str, to_date: Optional[str]):
+    """تفصيل حركات «ضرائب الموردين» المكوّنة لرصيد بند دائنون متنوعون حتى نهاية الفترة."""
+    deduction_keywords = ["ضرايب", "تحت حساب"]
+    payment_keywords = ["ضريب", "ضرايب"]
+    expenses = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(100000)
+
+    def deduction_total(exp) -> float:
+        total = 0.0
+        for ded in exp.get("deductions") or []:
+            if any(kw in _ar_norm(ded.get("statement")) for kw in deduction_keywords):
+                total += float(ded.get("amount") or 0)
+        return round(total, 2)
+
+    def is_payment(exp) -> bool:
+        statement = _ar_norm(exp.get("gross_statement"))
+        payee = _ar_norm(exp.get("payee_name"))
+        return any(kw in statement for kw in payment_keywords) and "النقابه العامه" not in payee
+
+    monthly_amount = {}
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or _is_renewed_cheque(exp):
+            continue
+        amt = deduction_total(exp)
+        if amt > 0:
+            monthly_amount[iss[0:7]] = round(monthly_amount.get(iss[0:7], 0.0) + amt, 2)
+
+    rows = []
+    total_debit = 0.0
+    total_credit = 0.0
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or (to_date and iss > to_date) or _is_renewed_cheque(exp):
+            continue
+        amt = deduction_total(exp)
+        if amt > 0:
+            total_credit = round(total_credit + amt, 2)
+            rows.append({"entry_date": iss, "entry_number": exp.get("expense_number") or "", "description": f"ضريبة مخصومة - {exp.get('payee_name') or exp.get('gross_statement') or ''}", "debit": 0, "credit": amt})
+        if is_payment(exp):
+            pay = round(monthly_amount.get(iss[0:7], 0.0), 2)
+            if pay > 0:
+                total_debit = round(total_debit + pay, 2)
+                rows.append({"entry_date": iss, "entry_number": exp.get("expense_number") or "", "description": f"توريد ضريبة لمصلحة الضرائب - {exp.get('payee_name') or ''}", "debit": pay, "credit": 0})
+    rows.sort(key=lambda r: str(r.get("entry_date") or ""))
+    return {"match_by": "code", "value": "2200", "scope": "cumulative_to", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
+
+
+
+
 
 
 
@@ -10802,6 +10851,9 @@ async def get_financial_statement_line_detail(
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
     organization_id = organization_id_or_default()
+    # بند «دائنون متنوعون» يُحسب من ضرائب الموردين، فنعرض تفصيله من نفس مصدر البوابة
+    if (match_by == "code" and value == "2200") or (match_by == "name" and value == "دائنون متنوعون"):
+        return await supplier_tax_line_detail(organization_id, to_date)
     query = with_organization({"status": "approved"}, organization_id)
     entries = await db.journal_entries.find(query, {"_id": 0}).sort("entry_date", 1).to_list(20000)
 
