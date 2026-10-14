@@ -4745,12 +4745,18 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         # أصل الودائع النشطة في البنك كما في نهاية الفترة (الودائع اللي فوائدها مستمرة داخل الفترة)
         bank_code_to_deposits[str(acc["code"])] = await active_deposit_principal_total(organization_id, period_to, bid)
     bank_deposit_lines = []
+    # عوائد ودائع مستحقة = فائدة الشهر السابق للودائع النشطة فقط (فائدة شهر واحد مؤخرة)
+    accrued_interest_value = await accrued_deposit_interest_prev_month(organization_id, period_to)
     for row in balance_report.rows:
         if row.account_type != "asset" or normal_amount(row) == 0:
             continue
         code = str(row.account_code or "")
         if code.endswith("-م"):
             continue  # مجمع الإهلاك يُعرض مجمّعاً في بند «مخصصات الاهلاك» ضمن المخصصات
+        if code == "1300":
+            # عوائد ودائع مستحقة = فائدة الشهر السابق للودائع النشطة فقط
+            asset_lines.append(financial_line_from_trial(row, amount=accrued_interest_value))
+            continue
         if code in bank_code_to_recon:
             # رصيد البنك = رصيد التسوية البنكية قبل الشيكات للفترة المحددة
             bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
@@ -6897,6 +6903,29 @@ async def reconciliation_deposit_interest_for_period(organization_id: str, perio
             continue
         total = round(total + await deposit_interest_report_total_chain(deposit, period_from, period_to, bank_id=bank_id), 2)
     return total
+
+
+async def accrued_deposit_interest_prev_month(organization_id: str, period_to: Optional[date]) -> float:
+    """عوائد ودائع مستحقة = إجمالي فائدة الشهر السابق لشهر نهاية الفترة، للودائع النشطة فقط
+    (القائمة فعلاً كما في نهاية الفترة). لأن الفائدة شهرية مؤخرة فالمستحق = فائدة شهر واحد."""
+    if not period_to:
+        return 0.0
+    first_of_month = date(period_to.year, period_to.month, 1)
+    prev_end = first_of_month - timedelta(days=1)
+    prev_start = date(prev_end.year, prev_end.month, 1)
+    cutoff_iso = datetime.combine(period_to, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    documents = await db.deposits.find(with_organization({}, organization_id), {"_id": 0}).to_list(100000)
+    total = 0.0
+    for document in documents:
+        maturity = str(document.get("maturity_datetime") or "")
+        if not maturity or maturity <= cutoff_iso:
+            continue  # الوديعة لم تعد نشطة في نهاية الفترة
+        if document.get("status") in ("renewed", "closed"):
+            continue
+        deposit = Deposit(**hydrate_deposit(document))
+        total += await deposit_interest_report_total_chain(deposit, prev_start, prev_end, bank_id=document.get("bank_id"))
+    return round(total, 2)
+
 
 
 
