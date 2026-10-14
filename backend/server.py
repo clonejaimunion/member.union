@@ -4782,6 +4782,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     if employee_advances_value != 0:
         asset_lines.append(FinancialStatementLine(code="1500", name="سلف العاملين", amount=employee_advances_value, details="الرصيد المتبقي لحساب سلف العاملين خلال الفترة المحددة"))
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
+    # بند «شيكات صادرة» لا يظهر مستقلاً؛ يندمج ضمن بند «حسابات دائنة» الموحّد
+    liability_lines = [line for line in liability_lines if line.name != "شيكات صادرة"]
     # بند «دائنون متنوعون» = الرصيد الدائن المتبقي لحساب ضرائب الموردين حتى نهاية الفترة المحددة
     misc_creditors_value = await supplier_tax_credit_balance_for_period(organization_id, period_from, period_to)
     misc_creditor_line = next((line for line in liability_lines if line.name == "دائنون متنوعون"), None)
@@ -4791,7 +4793,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     elif round(misc_creditors_value, 2) != 0:
         liability_lines.append(FinancialStatementLine(code="2200", name="دائنون متنوعون", amount=misc_creditors_value, details="الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"))
     liability_lines = [line for line in liability_lines if line.name != "دائنون متنوعون" or round(line.amount, 2) != 0]
-    # بند «حسابات دائنة» = إجمالي (صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة) حتى نهاية الفترة
+    # بند «حسابات دائنة» الموحّد = الشيكات الصادرة المعلّقة + صندوق الجزاءات + لجنة نقابية حتى نهاية الفترة
     credit_accounts_total, _credit_accounts_rows = await aggregate_credit_accounts_for_period(organization_id, period_to.isoformat() if period_to else None)
     if round(credit_accounts_total, 2) != 0:
         insert_at = len(liability_lines)
@@ -4799,7 +4801,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             if line.name == "دائنون متنوعون":
                 insert_at = idx + 1
                 break
-        liability_lines.insert(insert_at, FinancialStatementLine(code="2300", name="حسابات دائنة", amount=round(credit_accounts_total, 2), details="إجمالي: صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة غير مصروفة خلال الفترة"))
+        liability_lines.insert(insert_at, FinancialStatementLine(code="2300", name="حسابات دائنة", amount=round(credit_accounts_total, 2), details="إجمالي: الشيكات الصادرة المعلّقة + صندوق الجزاءات + لجنة نقابية خلال الفترة"))
     if round(accumulated_depreciation_total, 2) != 0:
         liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
@@ -9142,9 +9144,9 @@ async def supplier_tax_line_detail(org_id: str, to_date: Optional[str]):
 
 
 async def aggregate_credit_accounts_for_period(org_id: str, to_date: Optional[str]):
-    """بند «حسابات دائنة» = الرصيد الدائن المتبقي حتى نهاية الفترة لمجموع:
-    صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة غير مصروفة (شيكات معلّقة).
-    يرجع (الإجمالي، صفوف التفصيل)."""
+    """بند «حسابات دائنة» الموحّد = الرصيد الدائن المتبقي حتى نهاية الفترة لمجموع:
+    الشيكات الصادرة المعلّقة (لم تُصرف) + صندوق الجزاءات + لجنة نقابية.
+    إعانات الوفاة المعلّقة تندرج ضمن الشيكات الصادرة فلا تُكرّر. يرجع (الإجمالي، صفوف التفصيل)."""
     if not to_date:
         return 0.0, []
     penalties_kw = ["غياب", "جزاءات", "جزاء"]
@@ -9174,7 +9176,6 @@ async def aggregate_credit_accounts_for_period(org_id: str, to_date: Optional[st
     rows = []
     penalties_credit = penalties_debit = 0.0
     union_credit = union_debit = 0.0
-    death_pending = 0.0
     for exp in expenses:
         iss = exp.get("issued_at")
         if not iss or iss > to_date or _is_renewed_cheque(exp):
@@ -9202,14 +9203,25 @@ async def aggregate_credit_accounts_for_period(org_id: str, to_date: Optional[st
             if pay > 0:
                 union_debit = round(union_debit + pay, 2)
                 rows.append({"entry_date": iss, "entry_number": num, "description": "لجنة نقابية - سداد للنقابة العامة", "debit": pay, "credit": 0})
-        # إعانات وفاة مستحقة غير مصروفة (شيكات معلّقة)
-        if exp.get("expense_category") == "death_benefits" and (exp.get("bank_payment_status") or "not_presented") != "paid":
-            net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
-            if net != 0:
-                death_pending = round(death_pending + net, 2)
-                rows.append({"entry_date": iss, "entry_number": num, "description": f"إعانة وفاة مستحقة غير مصروفة - {exp.get('payee_name') or ''}", "debit": 0, "credit": net})
 
-    total = round((penalties_credit - penalties_debit) + (union_credit - union_debit) + death_pending, 2)
+    # الشيكات الصادرة المعلّقة (لم تُصرف بعد) من قيود اليومية الحقيقية - يطابق ميزان المراجعة
+    checks_credit = checks_debit = 0.0
+    entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(20000)
+    for entry in entries:
+        if entry.get("is_reversal"):
+            continue
+        edate = str(entry.get("entry_date") or "")
+        if not edate or edate > to_date:
+            continue
+        for line in entry.get("lines", []):
+            if str(line.get("account_code") or "") == "2100" or str(line.get("account_name") or "") == "شيكات صادرة":
+                debit = round(float(line.get("debit") or 0), 2)
+                credit = round(float(line.get("credit") or 0), 2)
+                checks_credit = round(checks_credit + credit, 2)
+                checks_debit = round(checks_debit + debit, 2)
+                rows.append({"entry_date": entry.get("entry_date"), "entry_number": entry.get("entry_number") or str(entry.get("id", ""))[:8], "description": "شيك صادر معلّق - " + str(line.get("statement") or entry.get("description") or ""), "debit": debit, "credit": credit})
+
+    total = round((penalties_credit - penalties_debit) + (union_credit - union_debit) + (checks_credit - checks_debit), 2)
     rows.sort(key=lambda r: str(r.get("entry_date") or ""))
     return total, rows
 
