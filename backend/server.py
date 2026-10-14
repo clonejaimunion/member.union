@@ -4782,6 +4782,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     if employee_advances_value != 0:
         asset_lines.append(FinancialStatementLine(code="1500", name="سلف العاملين", amount=employee_advances_value, details="الرصيد المتبقي لحساب سلف العاملين خلال الفترة المحددة"))
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
+    # بند «دائنون متنوعون» = الرصيد الدائن المتبقي لحساب ضرائب الموردين حتى نهاية الفترة المحددة
+    misc_creditors_value = await supplier_tax_credit_balance_for_period(organization_id, period_from, period_to)
+    misc_creditor_line = next((line for line in liability_lines if line.name == "دائنون متنوعون"), None)
+    if misc_creditor_line is not None:
+        misc_creditor_line.amount = misc_creditors_value
+        misc_creditor_line.details = "الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"
+    elif round(misc_creditors_value, 2) != 0:
+        liability_lines.append(FinancialStatementLine(code="2200", name="دائنون متنوعون", amount=misc_creditors_value, details="الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"))
+    liability_lines = [line for line in liability_lines if line.name != "دائنون متنوعون" or round(line.amount, 2) != 0]
     if round(accumulated_depreciation_total, 2) != 0:
         liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
@@ -9030,6 +9039,51 @@ async def employee_advances_balance_for_period(org_id: str, period_from: Optiona
             if "سلف عاملين" in _ar_norm(deduction.get("statement")):
                 credit_total += float(deduction.get("amount") or 0)
     return round(debit_total - credit_total, 2)
+
+
+async def supplier_tax_credit_balance_for_period(org_id: str, period_from: Optional[date], period_to: Optional[date]) -> float:
+    """الرصيد الدائن المتبقي لحساب «ضرائب الموردين» تراكمياً حتى نهاية الفترة المحددة،
+    بنفس منطق بوابة الدائنون والمدينون: (الضرائب المخصومة) − (الضرائب المورّدة فعلاً)."""
+    if not period_to:
+        return 0.0
+    to_iso = period_to.isoformat()
+    deduction_keywords = ["ضرايب", "تحت حساب"]
+    payment_keywords = ["ضريب", "ضرايب"]
+    expenses = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(100000)
+
+    def deduction_total(exp) -> float:
+        total = 0.0
+        for ded in exp.get("deductions") or []:
+            statement = _ar_norm(ded.get("statement"))
+            if any(kw in statement for kw in deduction_keywords):
+                total += float(ded.get("amount") or 0)
+        return round(total, 2)
+
+    def is_payment(exp) -> bool:
+        statement = _ar_norm(exp.get("gross_statement"))
+        payee = _ar_norm(exp.get("payee_name"))
+        return any(kw in statement for kw in payment_keywords) and "النقابه العامه" not in payee
+
+    monthly_amount = {}
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or _is_renewed_cheque(exp):
+            continue
+        amt = deduction_total(exp)
+        if amt > 0:
+            monthly_amount[iss[0:7]] = round(monthly_amount.get(iss[0:7], 0.0) + amt, 2)
+
+    credit_total = 0.0
+    debit_total = 0.0
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or iss > to_iso or _is_renewed_cheque(exp):
+            continue
+        credit_total += deduction_total(exp)
+        if is_payment(exp):
+            debit_total += monthly_amount.get(iss[0:7], 0.0)
+    return round(credit_total - debit_total, 2)
+
 
 
 
