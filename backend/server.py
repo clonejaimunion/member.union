@@ -4747,6 +4747,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     bank_deposit_lines = []
     # عوائد ودائع مستحقة = فائدة الشهر السابق للودائع النشطة فقط (فائدة شهر واحد مؤخرة)
     accrued_interest_value = await accrued_deposit_interest_prev_month(organization_id, period_to)
+    # السلف = الرصيد المتبقي لحساب سلف العاملين خلال الفترة (من بوابة الدائنون والمدينون)
+    employee_advances_value = await employee_advances_balance_for_period(organization_id, period_from, period_to)
     for row in balance_report.rows:
         if row.account_type != "asset" or normal_amount(row) == 0:
             continue
@@ -4776,6 +4778,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         asset_lines.append(financial_line_from_trial(row))
     # بنود الودائع تظهر تحت بنود الجاري مباشرة ضمن «نقدية وبنوك»
     asset_lines.extend(bank_deposit_lines)
+    # بند «سلف العاملين» ضمن مجموعة «السلف»
+    if employee_advances_value != 0:
+        asset_lines.append(FinancialStatementLine(code="1500", name="سلف العاملين", amount=employee_advances_value, details="الرصيد المتبقي لحساب سلف العاملين خلال الفترة المحددة"))
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
     if round(accumulated_depreciation_total, 2) != 0:
         liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
@@ -9004,6 +9009,29 @@ async def _compute_employee_advances_account(org_id: str, year: int, month: int)
         "difference_label": f"المبلغ المتبقي على الدائن في 31/12 سنة {year}",
         "warning_note": "يجب تحصيل المبالغ المستحقة قبل نهاية السنة المالية (آخر يوم من ديسمبر) من كل سنة.",
     }
+
+
+async def employee_advances_balance_for_period(org_id: str, period_from: Optional[date], period_to: Optional[date]) -> float:
+    """الرصيد المتبقي لحساب «سلف العاملين» خلال الفترة = (السلف الممنوحة) − (الأقساط المحصّلة)،
+    بنفس منطق بوابة الدائنون والمدينون، لكن حسب فترة من/إلى التي يحددها المستخدم."""
+    if not period_from or not period_to:
+        return 0.0
+    query = with_organization({"issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat()}}, org_id)
+    expenses = await db.expenses.find(query, {"_id": 0}).to_list(50000)
+    debit_total = 0.0
+    credit_total = 0.0
+    for exp in expenses:
+        if not exp.get("issued_at") or _is_renewed_cheque(exp):
+            continue
+        if "سلفه شخصيه" in _ar_norm(exp.get("gross_statement")):
+            net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
+            debit_total += net
+        for deduction in exp.get("deductions") or []:
+            if "سلف عاملين" in _ar_norm(deduction.get("statement")):
+                credit_total += float(deduction.get("amount") or 0)
+    return round(debit_total - credit_total, 2)
+
+
 
 
 @api_router.get("/creditors-debtors/employee-advances")
