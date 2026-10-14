@@ -4811,21 +4811,20 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     expense_total = round(sum(line.amount for line in expense_lines), 2)
     period_result = round(revenue_total - expense_total, 2)
     result_line = FinancialStatementLine(code=None, name="فائض / عجز الفترة", amount=period_result, details="محسوب تلقائياً من الإيرادات والمصروفات")
-    equity_with_result = equity_lines + [result_line]
     assets_total = round(sum(line.amount for line in asset_lines), 2)
     liabilities_total = round(sum(line.amount for line in liability_lines), 2)
-    equity_total = round(sum(line.amount for line in equity_with_result), 2)
+    # الفائض في الميزانية = بندان فقط: فائض مرحّل (المتراكم قبل الفترة) + فائض عام (نتيجة الفترة الحالية)
+    general_surplus = period_result
+    if balance_report.is_balanced:
+        carried_surplus = round((assets_total - liabilities_total) - general_surplus, 2)
+    else:
+        carried_surplus = round(sum(line.amount for line in equity_lines), 2)
+    equity_with_result = [
+        FinancialStatementLine(code=None, name="فائض مرحّل", amount=carried_surplus, details="الرصيد المرحّل من الفترات/السنوات السابقة قبل بداية الفترة الحالية"),
+        FinancialStatementLine(code=None, name="فائض عام", amount=general_surplus, details="فائض الفترة الحالية = إجمالي إيرادات الفترة − إجمالي مصروفاتها"),
+    ]
+    equity_total = round(carried_surplus + general_surplus, 2)
     liability_equity_total = round(liabilities_total + equity_total, 2)
-    opening_balance_difference = round(assets_total - liability_equity_total, 2)
-    if balance_report.is_balanced and opening_balance_difference != 0:
-        equity_with_result.append(FinancialStatementLine(
-            code=None,
-            name="رصيد افتتاحي مرحل / صافي الأصول",
-            amount=opening_balance_difference,
-            details="تمت إضافته تلقائياً لمعادلة الميزانية عند وجود أرصدة افتتاحية أصول/بنوك بدون حساب حقوق ملكية مقابل.",
-        ))
-        equity_total = round(sum(line.amount for line in equity_with_result), 2)
-        liability_equity_total = round(liabilities_total + equity_total, 2)
     # حساب المقبوضات والمدفوعات على شكل حساب نقدي متوازن:
     # المقبوضات = رصيد أول المدة (أرصدة البنوك) + مقبوضات النشاط (مبوّبة حسب الحساب المقابل)
     # المدفوعات = مصروفات النشاط (مبوّبة حسب الحساب المقابل) + رصيد آخر المدة (أرصدة البنوك)
