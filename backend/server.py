@@ -4791,6 +4791,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     elif round(misc_creditors_value, 2) != 0:
         liability_lines.append(FinancialStatementLine(code="2200", name="دائنون متنوعون", amount=misc_creditors_value, details="الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"))
     liability_lines = [line for line in liability_lines if line.name != "دائنون متنوعون" or round(line.amount, 2) != 0]
+    # بند «حسابات دائنة» = إجمالي (صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة) حتى نهاية الفترة
+    credit_accounts_total, _credit_accounts_rows = await aggregate_credit_accounts_for_period(organization_id, period_to.isoformat() if period_to else None)
+    if round(credit_accounts_total, 2) != 0:
+        insert_at = len(liability_lines)
+        for idx, line in enumerate(liability_lines):
+            if line.name == "دائنون متنوعون":
+                insert_at = idx + 1
+                break
+        liability_lines.insert(insert_at, FinancialStatementLine(code="2300", name="حسابات دائنة", amount=round(credit_accounts_total, 2), details="إجمالي: صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة غير مصروفة خلال الفترة"))
     if round(accumulated_depreciation_total, 2) != 0:
         liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
@@ -9132,6 +9141,88 @@ async def supplier_tax_line_detail(org_id: str, to_date: Optional[str]):
     return {"match_by": "code", "value": "2200", "scope": "cumulative_to", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
 
 
+async def aggregate_credit_accounts_for_period(org_id: str, to_date: Optional[str]):
+    """بند «حسابات دائنة» = الرصيد الدائن المتبقي حتى نهاية الفترة لمجموع:
+    صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة غير مصروفة (شيكات معلّقة).
+    يرجع (الإجمالي، صفوف التفصيل)."""
+    if not to_date:
+        return 0.0, []
+    penalties_kw = ["غياب", "جزاءات", "جزاء"]
+    union_kw = ["لجنه نقابيه"]
+    expenses = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(100000)
+
+    def ded_sum(exp, keywords) -> float:
+        total = 0.0
+        for ded in exp.get("deductions") or []:
+            if any(kw in _ar_norm(ded.get("statement")) for kw in keywords):
+                total += float(ded.get("amount") or 0)
+        return round(total, 2)
+
+    penalties_monthly = {}
+    union_monthly = {}
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or _is_renewed_cheque(exp):
+            continue
+        p = ded_sum(exp, penalties_kw)
+        if p > 0:
+            penalties_monthly[iss[0:7]] = round(penalties_monthly.get(iss[0:7], 0.0) + p, 2)
+        u = ded_sum(exp, union_kw)
+        if u > 0:
+            union_monthly[iss[0:7]] = round(union_monthly.get(iss[0:7], 0.0) + u, 2)
+
+    rows = []
+    penalties_credit = penalties_debit = 0.0
+    union_credit = union_debit = 0.0
+    death_pending = 0.0
+    for exp in expenses:
+        iss = exp.get("issued_at")
+        if not iss or iss > to_date or _is_renewed_cheque(exp):
+            continue
+        payee = _ar_norm(exp.get("payee_name"))
+        gross = _ar_norm(exp.get("gross_statement"))
+        num = exp.get("expense_number") or ""
+        # صندوق الجزاءات
+        p = ded_sum(exp, penalties_kw)
+        if p > 0:
+            penalties_credit = round(penalties_credit + p, 2)
+            rows.append({"entry_date": iss, "entry_number": num, "description": f"صندوق الجزاءات - خصم ({exp.get('payee_name') or ''})", "debit": 0, "credit": p})
+        if ("صندوق الجزاءات" in gross or "جزاءات" in gross) and "النقابه العامه" not in payee:
+            pay = round(penalties_monthly.get(iss[0:7], 0.0), 2)
+            if pay > 0:
+                penalties_debit = round(penalties_debit + pay, 2)
+                rows.append({"entry_date": iss, "entry_number": num, "description": "صندوق الجزاءات - سداد", "debit": pay, "credit": 0})
+        # لجنة نقابية
+        u = ded_sum(exp, union_kw)
+        if u > 0:
+            union_credit = round(union_credit + u, 2)
+            rows.append({"entry_date": iss, "entry_number": num, "description": f"لجنة نقابية - خصم ({exp.get('payee_name') or ''})", "debit": 0, "credit": u})
+        if "النقابه العامه" in payee:
+            pay = round(union_monthly.get(iss[0:7], 0.0), 2)
+            if pay > 0:
+                union_debit = round(union_debit + pay, 2)
+                rows.append({"entry_date": iss, "entry_number": num, "description": "لجنة نقابية - سداد للنقابة العامة", "debit": pay, "credit": 0})
+        # إعانات وفاة مستحقة غير مصروفة (شيكات معلّقة)
+        if exp.get("expense_category") == "death_benefits" and (exp.get("bank_payment_status") or "not_presented") != "paid":
+            net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
+            if net != 0:
+                death_pending = round(death_pending + net, 2)
+                rows.append({"entry_date": iss, "entry_number": num, "description": f"إعانة وفاة مستحقة غير مصروفة - {exp.get('payee_name') or ''}", "debit": 0, "credit": net})
+
+    total = round((penalties_credit - penalties_debit) + (union_credit - union_debit) + death_pending, 2)
+    rows.sort(key=lambda r: str(r.get("entry_date") or ""))
+    return total, rows
+
+
+async def credit_accounts_line_detail(org_id: str, match_by: str, value: str, to_date: Optional[str]):
+    _total, rows = await aggregate_credit_accounts_for_period(org_id, to_date)
+    total_credit = round(sum(float(r.get("credit") or 0) for r in rows), 2)
+    total_debit = round(sum(float(r.get("debit") or 0) for r in rows), 2)
+    return {"match_by": match_by, "value": value, "scope": "cumulative_to", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
+
+
+
+
 
 
 
@@ -10854,6 +10945,9 @@ async def get_financial_statement_line_detail(
     # بند «دائنون متنوعون» يُحسب من ضرائب الموردين، فنعرض تفصيله من نفس مصدر البوابة
     if (match_by == "code" and value == "2200") or (match_by == "name" and value == "دائنون متنوعون"):
         return await supplier_tax_line_detail(organization_id, to_date)
+    # بند «حسابات دائنة» = إجمالي صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة
+    if (match_by == "code" and value == "2300") or (match_by == "name" and value == "حسابات دائنة"):
+        return await credit_accounts_line_detail(organization_id, match_by, value, to_date)
     query = with_organization({"status": "approved"}, organization_id)
     entries = await db.journal_entries.find(query, {"_id": 0}).sort("entry_date", 1).to_list(20000)
 
