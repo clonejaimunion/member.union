@@ -188,8 +188,7 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
     { title: "المخزون", rows: inventoryRows, detail: assetDetail },
     { title: "نقدية وبنوك", rows: bankRows, detail: { ...assetDetail, kind: "bank" } },
     { title: "فوائد ودائع مستحقة", rows: accruedRows, detail: assetDetail },
-    { title: "حسابات مدينة", rows: debtorRows, detail: assetDetail },
-    { title: "السلف", rows: advanceRows, detail: assetDetail },
+    { title: "حسابات مدينة", rows: [...debtorRows, ...advanceRows], detail: assetDetail },
   ];
   const creditGroups = [
     { title: "المخصصات", rows: provisionRows, detail: { matchBy: "code", scope: "cumulative_to", kind: "provision" } },
