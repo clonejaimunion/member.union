@@ -3688,6 +3688,10 @@ async def journal_for_revenue(revenue: dict, current_user: Optional[dict] = None
     amount = round(float(revenue.get("amount") or 0), 2)
     if amount <= 0:
         return
+    # استحقاق الوديعة ليس إيراداً؛ رد الأصل يتم عبر آلية فك الوديعة (DepositEvent/maturity)
+    if (revenue.get("collection_method") or "") == "deposit_maturity":
+        await delete_journal_for_source("revenue", revenue.get("id"))
+        return
     debit_account = "البنك" if (revenue.get("bank_collection_status") or "under_collection") == "collected" else "شيكات تحت التحصيل"
     revenue_rule = REVENUE_RULE_ACCOUNT_MAP.get(revenue.get("collection_method") or "", {"account_name": "الإيرادات", "system_key": "revenue_general", "analysis_type": "إيراد عام"})
     await save_journal_entry_document(
@@ -3981,6 +3985,10 @@ async def journal_for_misc_creditor_movement(movement: dict, current_user: Optio
 async def journal_for_expense(expense: dict, current_user: Optional[dict] = None):
     amount = round(float(expense.get("net_amount") or expense.get("total_amount") or 0), 2)
     if amount <= 0:
+        return
+    # ربط الوديعة يُدار حصراً عبر DepositEvent؛ منع ازدواج القيد من مصروف deposit_link
+    if (expense.get("expense_category") or "") == "deposit_link":
+        await delete_journal_for_source("expense", expense.get("id"))
         return
     credit_account = "البنك" if (expense.get("bank_payment_status") or "not_presented") == "paid" else "شيكات صادرة"
     expense_rule = EXPENSE_RULE_ACCOUNT_MAP.get(expense.get("expense_category") or "general_expenses", EXPENSE_RULE_ACCOUNT_MAP["general_expenses"])
