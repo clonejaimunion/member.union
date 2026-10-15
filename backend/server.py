@@ -4605,7 +4605,7 @@ async def calculate_trial_balance_report(
             rows_by_key[key]["total_debit"] = round(rows_by_key[key]["total_debit"] + float(line.get("debit") or 0), 2)
             rows_by_key[key]["total_credit"] = round(rows_by_key[key]["total_credit"] + float(line.get("credit") or 0), 2)
     if from_date and to_date:
-        deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, from_date, to_date)
+        deposit_period_interest = await reconciliation_deposit_interest_for_period(organization_id, from_date, to_date)
         if deposit_period_interest > 0:
             for system_key, side in [("accrued_deposit_interest", "debit"), ("deposit_interest_revenue", "credit")]:
                 account = accounts_by_system_key.get(system_key)
@@ -4967,7 +4967,7 @@ async def validate_accounting_data_flow(organization_id: str) -> dict:
             ledger_totals[key]["debit"] = round(ledger_totals[key]["debit"] + float(line.get("debit") or 0), 2)
             ledger_totals[key]["credit"] = round(ledger_totals[key]["credit"] + float(line.get("credit") or 0), 2)
     accounts_by_system_key = {item.get("system_key"): item for item in accounts if item.get("system_key")}
-    deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, period_from, period_to)
+    deposit_period_interest = await reconciliation_deposit_interest_for_period(organization_id, period_from, period_to)
     if deposit_period_interest > 0:
         for system_key, side in [("accrued_deposit_interest", "debit"), ("deposit_interest_revenue", "credit")]:
             account = accounts_by_system_key.get(system_key)
@@ -10628,7 +10628,7 @@ async def get_general_ledger(
     def is_opening_deposit_entry(entry: dict) -> bool:
         return entry.get("source_type") == "deposit" and (entry.get("source_id") in opening_deposit_source_ids or "رصيد افتتاحي وديعة قائمة" in str(entry.get("description") or ""))
 
-    deposit_period_interest = await calculate_total_deposit_interest_for_period(organization_id, from_date, to_date)
+    deposit_period_interest = await reconciliation_deposit_interest_for_period(organization_id, from_date, to_date)
     period_entry_query = {"is_reversal": {"$ne": True}, "status": "approved", "source_type": {"$nin": REPORT_EXCLUDED_SOURCE_TYPES}}
     if from_date or to_date:
         date_query = {}
