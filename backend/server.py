@@ -819,6 +819,7 @@ class FinancialStatementLine(BaseModel):
     entry_number: Optional[int] = None
     entry_date: Optional[date] = None
     details: Optional[str] = None
+    detail_source: Optional[str] = None
 
 
 class FinancialStatementSection(BaseModel):
@@ -4741,6 +4742,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     bank_accounts_docs = await db.chart_accounts.find(with_organization({"system_key": {"$regex": "^bank:"}}, organization_id), {"_id": 0, "code": 1, "bank_id": 1, "system_key": 1}).to_list(1000)
     bank_code_to_recon = {}
     bank_code_to_deposits = {}
+    bank_code_to_bid = {}
     for acc in bank_accounts_docs:
         bid = acc.get("bank_id") or (str(acc.get("system_key") or "").split(":", 1)[1] if str(acc.get("system_key") or "").startswith("bank:") else None)
         if not acc.get("code") or not bid:
@@ -4750,6 +4752,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             bank_code_to_recon[str(acc["code"])] = round(breakdown.book_balance, 2)
         except Exception:
             continue
+        bank_code_to_bid[str(acc["code"])] = bid
         # أصل الودائع النشطة في البنك كما في نهاية الفترة (الودائع اللي فوائدها مستمرة داخل الفترة)
         bank_code_to_deposits[str(acc["code"])] = await active_deposit_principal_total(organization_id, period_to, bid)
     bank_deposit_lines = []
@@ -4765,30 +4768,38 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             continue  # مجمع الإهلاك يُعرض مجمّعاً في بند «مخصصات الاهلاك» ضمن المخصصات
         if code == "1300":
             # عوائد ودائع مستحقة = فائدة الشهر السابق للودائع النشطة فقط
-            asset_lines.append(financial_line_from_trial(row, amount=accrued_interest_value))
+            line_1300 = financial_line_from_trial(row, amount=accrued_interest_value)
+            line_1300.details = "فائدة الشهر السابق لنهاية الفترة للودائع النشطة (فائدة شهر واحد مؤخرة)"
+            line_1300.detail_source = "accrued_deposit_interest"
+            asset_lines.append(line_1300)
             continue
         if code in bank_code_to_recon:
             # رصيد البنك = رصيد التسوية البنكية قبل الشيكات للفترة المحددة
             bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
             bank_line.name = f"{row.account_name} - جاري"
+            bank_line.details = "رصيد التسوية البنكية الدفتري قبل تسويات الشيكات لشهر نهاية الفترة"
+            bank_line.detail_source = f"bank_recon:{bank_code_to_bid.get(code, '')}"
             asset_lines.append(bank_line)
             dep_amount = round(bank_code_to_deposits.get(code, 0.0), 2)
             if dep_amount != 0:
-                bank_deposit_lines.append(FinancialStatementLine(code=code, name=f"{row.account_name} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة"))
+                bank_deposit_lines.append(FinancialStatementLine(code=code, name=f"{row.account_name} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة", detail_source=f"bank_deposits:{bank_code_to_bid.get(code, '')}"))
             continue
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
             continue
         if code in fixed_asset_category_codes:
             # يُعرض الأصل الثابت بقيمة مخصص إهلاك تصنيفه (مجمع الإهلاك) حسب تقرير إهلاك الأصول الثابتة
-            asset_lines.append(financial_line_from_trial(row, amount=round(accumulated_by_cat.get(code, 0.0), 2)))
+            fa_line = financial_line_from_trial(row, amount=round(accumulated_by_cat.get(code, 0.0), 2))
+            fa_line.details = "قيمة الأصل الثابت لهذا التصنيف (التكلفة ومجمع الإهلاك) من بوابة الأصول الثابتة"
+            fa_line.detail_source = f"fixed_asset:{code}"
+            asset_lines.append(fa_line)
             continue
         asset_lines.append(financial_line_from_trial(row))
     # بنود الودائع تظهر تحت بنود الجاري مباشرة ضمن «نقدية وبنوك»
     asset_lines.extend(bank_deposit_lines)
     # بند «سلف العاملين» ضمن مجموعة «السلف»
     if employee_advances_value != 0:
-        asset_lines.append(FinancialStatementLine(code="1500", name="سلف العاملين", amount=employee_advances_value, details="الرصيد المتبقي لحساب سلف العاملين خلال الفترة المحددة"))
+        asset_lines.append(FinancialStatementLine(code="1500", name="سلف العاملين", amount=employee_advances_value, details="الرصيد المتبقي لحساب سلف العاملين خلال الفترة المحددة", detail_source="employee_advances"))
     liability_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "liability" and normal_amount(row) != 0] + reclassified_bank_credit_lines
     # بند «شيكات صادرة» لا يظهر مستقلاً؛ يندمج ضمن بند «حسابات دائنة» الموحّد
     liability_lines = [line for line in liability_lines if line.name != "شيكات صادرة"]
@@ -4798,8 +4809,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     if misc_creditor_line is not None:
         misc_creditor_line.amount = misc_creditors_value
         misc_creditor_line.details = "الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"
+        misc_creditor_line.detail_source = "supplier_tax"
     elif round(misc_creditors_value, 2) != 0:
-        liability_lines.append(FinancialStatementLine(code="2200", name="دائنون متنوعون", amount=misc_creditors_value, details="الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة"))
+        liability_lines.append(FinancialStatementLine(code="2200", name="دائنون متنوعون", amount=misc_creditors_value, details="الرصيد الدائن المتبقي لحساب ضرائب الموردين خلال الفترة المحددة", detail_source="supplier_tax"))
     liability_lines = [line for line in liability_lines if line.name != "دائنون متنوعون" or round(line.amount, 2) != 0]
     # بند «حسابات دائنة» الموحّد = الشيكات الصادرة المعلّقة + صندوق الجزاءات + لجنة نقابية حتى نهاية الفترة
     credit_accounts_total, _credit_accounts_rows = await aggregate_credit_accounts_for_period(organization_id, period_to.isoformat() if period_to else None)
@@ -4809,11 +4821,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             if line.name == "دائنون متنوعون":
                 insert_at = idx + 1
                 break
-        liability_lines.insert(insert_at, FinancialStatementLine(code="2300", name="حسابات دائنة", amount=round(credit_accounts_total, 2), details="إجمالي: الشيكات الصادرة المعلّقة + صندوق الجزاءات + لجنة نقابية خلال الفترة"))
+        liability_lines.insert(insert_at, FinancialStatementLine(code="2300", name="حسابات دائنة", amount=round(credit_accounts_total, 2), details="إجمالي: الشيكات الصادرة المعلّقة + صندوق الجزاءات + لجنة نقابية خلال الفترة", detail_source="credit_accounts"))
     if round(accumulated_depreciation_total, 2) != 0:
-        liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)")] + liability_lines
+        liability_lines = [FinancialStatementLine(code=None, name="مخصصات الاهلاك", amount=round(accumulated_depreciation_total, 2), details="إجمالي مخصصات إهلاك الأصول الثابتة (مجمع الإهلاك)", detail_source="accum_depreciation")] + liability_lines
     equity_lines = [financial_line_from_trial(row) for row in balance_report.rows if row.account_type == "equity" and normal_amount(row) != 0]
     revenue_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "revenue" and normal_amount(row) != 0]
+    for _rev_line in revenue_lines:
+        if str(_rev_line.code or "") == "4102" or _rev_line.name == "إيرادات فوائد ودائع":
+            _rev_line.details = "إجمالي فائدة الودائع بطريقة كشف العوائد البنكي خلال الفترة المحددة"
+            _rev_line.detail_source = "deposit_interest"
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
@@ -4828,8 +4844,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     else:
         carried_surplus = round(sum(line.amount for line in equity_lines), 2)
     equity_with_result = [
-        FinancialStatementLine(code=None, name="فائض مرحّل", amount=carried_surplus, details="الرصيد المرحّل من الفترات/السنوات السابقة قبل بداية الفترة الحالية"),
-        FinancialStatementLine(code=None, name="فائض عام", amount=general_surplus, details="فائض الفترة الحالية = إجمالي إيرادات الفترة − إجمالي مصروفاتها"),
+        FinancialStatementLine(code=None, name="فائض مرحّل", amount=carried_surplus, details="الرصيد المرحّل من الفترات/السنوات السابقة قبل بداية الفترة الحالية", detail_source="carried_surplus"),
+        FinancialStatementLine(code=None, name="فائض عام", amount=general_surplus, details="فائض الفترة الحالية = إجمالي إيرادات الفترة − إجمالي مصروفاتها", detail_source="general_surplus"),
     ]
     equity_total = round(carried_surplus + general_surplus, 2)
     liability_equity_total = round(liabilities_total + equity_total, 2)
@@ -9240,6 +9256,177 @@ async def credit_accounts_line_detail(org_id: str, match_by: str, value: str, to
     return {"match_by": match_by, "value": value, "scope": "cumulative_to", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
 
 
+def _parse_date_opt(value: Optional[str]) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except Exception:
+        return None
+
+
+async def _bank_name_map(org_id: str) -> dict:
+    """خريطة معرّف البنك → اسمه العربي من شجرة الحسابات (حسابات البنوك system_key=bank:<id>)."""
+    docs = await db.chart_accounts.find(with_organization({"system_key": {"$regex": "^bank:"}}, org_id), {"_id": 0, "name": 1, "system_key": 1, "bank_id": 1}).to_list(1000)
+    result = {}
+    for d in docs:
+        bid = d.get("bank_id") or str(d.get("system_key") or "").split(":", 1)[-1]
+        if bid and d.get("name"):
+            result[bid] = d.get("name")
+    return result
+
+
+def _line_detail_result(value: str, scope: str, rows: list) -> dict:
+    total_debit = round(sum(float(r.get("debit") or 0) for r in rows), 2)
+    total_credit = round(sum(float(r.get("credit") or 0) for r in rows), 2)
+    return {"match_by": "source", "value": value, "scope": scope, "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
+
+
+async def deposit_interest_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «إيرادات فوائد ودائع» = فائدة كل وديعة بطريقة كشف العوائد خلال الفترة (تطابق إجمالي القائمة)."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pf and pt:
+        period_start_iso = datetime.combine(pf, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        period_end_iso = datetime.combine(pt + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        query_body = {"maturity_datetime": {"$gte": period_start_iso}, "status": {"$ne": "closed"}, "$or": [{"accounting_start_datetime": {"$lt": period_end_iso}}, {"creation_datetime": {"$lt": period_end_iso}}]}
+        documents = await db.deposits.find(with_organization(query_body, org_id), {"_id": 0}).to_list(100000)
+        deposits = [(doc, Deposit(**hydrate_deposit(doc))) for doc in documents]
+        predecessor_ids = {d.renewed_from_deposit_id for _, d in deposits if d.renewed_from_deposit_id}
+        name_map = await _bank_name_map(org_id)
+        for doc, deposit in deposits:
+            if deposit.id in predecessor_ids:
+                continue
+            amt = round(await deposit_interest_report_total_chain(deposit, pf, pt, bank_id=deposit.bank_id), 2)
+            if amt == 0:
+                continue
+            bname = name_map.get(deposit.bank_id) or doc.get("bank_name") or deposit.bank_id
+            rows.append({"entry_date": pt.isoformat(), "entry_number": deposit.deposit_number or "", "description": f"فائدة وديعة {deposit.deposit_number or ''} - {bname} (معدل {round(float(deposit.monthly_interest_rate), 4)}%)", "debit": 0, "credit": amt})
+    rows.sort(key=lambda r: str(r.get("description") or ""))
+    return _line_detail_result("deposit_interest", "period", rows)
+
+
+async def accrued_deposit_interest_line_detail(org_id: str, to_date: Optional[str]):
+    """تفصيل «عوائد ودائع مستحقة» = فائدة الشهر السابق لنهاية الفترة لكل وديعة نشطة."""
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pt:
+        first_of_month = date(pt.year, pt.month, 1)
+        prev_end = first_of_month - timedelta(days=1)
+        prev_start = date(prev_end.year, prev_end.month, 1)
+        cutoff_iso = datetime.combine(pt, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        documents = await db.deposits.find(with_organization({}, org_id), {"_id": 0}).to_list(100000)
+        name_map = await _bank_name_map(org_id)
+        for doc in documents:
+            maturity = str(doc.get("maturity_datetime") or "")
+            if not maturity or maturity <= cutoff_iso or doc.get("status") in ("renewed", "closed"):
+                continue
+            deposit = Deposit(**hydrate_deposit(doc))
+            amt = round(await deposit_interest_report_total_chain(deposit, prev_start, prev_end, bank_id=doc.get("bank_id")), 2)
+            if amt == 0:
+                continue
+            bname = name_map.get(doc.get("bank_id")) or doc.get("bank_name") or doc.get("bank_id")
+            rows.append({"entry_date": prev_end.isoformat(), "entry_number": doc.get("deposit_number") or "", "description": f"فائدة شهر {prev_start.strftime('%Y-%m')} (مستحقة غير محصّلة) - وديعة {doc.get('deposit_number') or ''} - {bname}", "debit": amt, "credit": 0})
+    return _line_detail_result("accrued_deposit_interest", "cumulative_to", rows)
+
+
+async def bank_recon_line_detail(bank_id: str, to_date: Optional[str]):
+    """تفصيل رصيد البنك «- جاري» = رصيد التسوية البنكية الدفتري المُرحّل قبل الشيكات لشهر نهاية الفترة."""
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pt:
+        try:
+            b = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=pt.year, month=pt.month)
+            rows.append({"entry_date": date(pt.year, pt.month, 1).isoformat(), "entry_number": "", "description": f"الرصيد الدفتري المُرحّل (رصيد التسوية البنكية قبل الشيكات) أول شهر {pt.strftime('%Y-%m')}", "debit": round(b.book_balance, 2), "credit": 0})
+        except Exception:
+            pass
+    return _line_detail_result(f"bank_recon:{bank_id}", "cumulative_to", rows)
+
+
+async def bank_deposits_line_detail(org_id: str, to_date: Optional[str], bank_id: str):
+    """تفصيل بند «- ودائع» = قائمة الودائع النشطة في البنك كما في نهاية الفترة (أصل الوديعة)."""
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pt:
+        as_of_start = datetime.combine(pt, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        as_of_end = datetime.combine(pt + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        q = {"creation_datetime": {"$lt": as_of_end}, "maturity_datetime": {"$gt": as_of_start}, "status": {"$ne": "closed"}, "bank_id": bank_id}
+        docs = await db.deposits.find(with_organization(q, org_id), {"_id": 0}).sort("creation_datetime", 1).to_list(100000)
+        for doc in docs:
+            amt = round(float(doc.get("amount") or 0), 2)
+            mat = str(doc.get("maturity_datetime") or "")[:10]
+            rows.append({"entry_date": str(doc.get("creation_datetime") or "")[:10], "entry_number": doc.get("deposit_number") or "", "description": f"وديعة نشطة {doc.get('deposit_number') or ''} - تستحق {mat} - معدل {round(float(doc.get('monthly_interest_rate') or 0), 4)}%", "debit": amt, "credit": 0})
+    return _line_detail_result(f"bank_deposits:{bank_id}", "cumulative_to", rows)
+
+
+async def employee_advances_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «سلف العاملين» = السلف الشخصية الممنوحة (مدين) ناقص الأقساط المحصّلة (دائن) خلال الفترة."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pf and pt:
+        query = with_organization({"issued_at": {"$gte": pf.isoformat(), "$lte": pt.isoformat()}}, org_id)
+        expenses = await db.expenses.find(query, {"_id": 0}).sort("issued_at", 1).to_list(50000)
+        for exp in expenses:
+            if not exp.get("issued_at") or _is_renewed_cheque(exp):
+                continue
+            if "سلفه شخصيه" in _ar_norm(exp.get("gross_statement")):
+                net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
+                if net:
+                    rows.append({"entry_date": exp.get("issued_at"), "entry_number": exp.get("expense_number") or "", "description": f"سلفة شخصية ممنوحة - {exp.get('payee_name') or ''}", "debit": net, "credit": 0})
+            for deduction in exp.get("deductions") or []:
+                if "سلف عاملين" in _ar_norm(deduction.get("statement")):
+                    amt = round(float(deduction.get("amount") or 0), 2)
+                    if amt:
+                        rows.append({"entry_date": exp.get("issued_at"), "entry_number": exp.get("expense_number") or "", "description": f"قسط سلفة محصّل - {exp.get('payee_name') or ''}", "debit": 0, "credit": amt})
+    rows.sort(key=lambda r: str(r.get("entry_date") or ""))
+    return _line_detail_result("employee_advances", "period", rows)
+
+
+async def accum_depreciation_line_detail(org_id: str):
+    """تفصيل «مخصصات الاهلاك» = مجمع إهلاك كل أصل ثابت."""
+    assets = await db.fixed_assets.find(with_organization({}, org_id), {"_id": 0}).to_list(10000)
+    rows = []
+    for a in assets:
+        acc = await depreciation_total_for_asset(a.get("id"))
+        if round(acc, 2) == 0:
+            continue
+        rows.append({"entry_date": str(a.get("purchase_date") or "")[:10], "entry_number": a.get("asset_code") or "", "description": f"مجمع إهلاك: {a.get('asset_name') or ''} ({a.get('category_name') or a.get('category_code') or ''})", "debit": 0, "credit": round(acc, 2)})
+    return _line_detail_result("accum_depreciation", "cumulative_to", rows)
+
+
+async def fixed_asset_line_detail(org_id: str, code: str):
+    """تفصيل بند الأصل الثابت = أصول التصنيف مع التكلفة ومجمع الإهلاك والقيمة الدفترية."""
+    assets = await db.fixed_assets.find(with_organization({"category_code": code}, org_id), {"_id": 0}).to_list(10000)
+    rows = []
+    for a in assets:
+        acc = await depreciation_total_for_asset(a.get("id"))
+        cost = round(float(a.get("purchase_cost") or 0), 2)
+        rows.append({"entry_date": str(a.get("purchase_date") or "")[:10], "entry_number": a.get("asset_code") or "", "description": f"{a.get('asset_name') or ''} — التكلفة {cost} / مجمع الإهلاك {round(acc, 2)} / القيمة الدفترية {round(max(cost - acc, 0), 2)}", "debit": round(acc, 2), "credit": 0})
+    return _line_detail_result(f"fixed_asset:{code}", "cumulative_to", rows)
+
+
+async def surplus_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], which: str):
+    """تفصيل بندَي الفائض: «فائض عام» = إيرادات الفترة − مصروفاتها، و«فائض مرحّل» = الرصيد المتراكم قبل الفترة."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if which == "general_surplus" and pf and pt:
+        tb = await calculate_trial_balance_report(organization_id=org_id, from_date=pf, to_date=pt, non_zero_only=True, exclude_deposit_maturity_revenue=True)
+        rev = round(sum(normal_amount(r) for r in tb.rows if r.account_type == "revenue"), 2)
+        exp = round(sum(normal_amount(r) for r in tb.rows if r.account_type == "expense"), 2)
+        rows.append({"entry_date": pt.isoformat(), "entry_number": "", "description": "إجمالي إيرادات الفترة", "debit": 0, "credit": rev})
+        rows.append({"entry_date": pt.isoformat(), "entry_number": "", "description": "إجمالي مصروفات الفترة", "debit": exp, "credit": 0})
+        return {"match_by": "source", "value": "general_surplus", "scope": "period", "count": len(rows), "total_debit": exp, "total_credit": rev, "net": round(rev - exp, 2), "rows": rows}
+    # فائض مرحّل: نقرأ القيمة من القوائم المالية المحسوبة (رصيد متراكم قبل الفترة)
+    try:
+        report = await calculate_financial_statements_report(org_id, pf, pt)
+        carried = next((l.amount for l in report.balance_sheet.get("equity").lines if l.name == "فائض مرحّل"), 0.0)
+    except Exception:
+        carried = 0.0
+    rows.append({"entry_date": (pf.isoformat() if pf else ""), "entry_number": "", "description": "الرصيد المرحّل المتراكم من الفترات/السنوات السابقة قبل بداية الفترة (صافي الأصول السابقة)", "debit": 0, "credit": round(carried, 2)})
+    return {"match_by": "source", "value": "carried_surplus", "scope": "cumulative_before", "count": len(rows), "total_debit": 0.0, "total_credit": round(carried, 2), "net": round(carried, 2), "rows": rows}
+
+
 
 
 
@@ -10953,20 +11140,45 @@ async def get_financial_statements(
 
 @api_router.get("/financial-statements/line-detail")
 async def get_financial_statement_line_detail(
-    match_by: str = Query(...),
-    value: str = Query(...),
+    match_by: str = Query(default=""),
+    value: str = Query(default=""),
+    source: Optional[str] = Query(default=None),
     scope: str = Query("period"),
     from_date: Optional[str] = Query(default=None),
     to_date: Optional[str] = Query(default=None),
     _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
 ):
     organization_id = organization_id_or_default()
+    # توجيه دقيق لكل بند محسوب عبر مفتاح المصدر المرفق من الخادم (يطابق الرقم المعروض تماماً)
+    if source:
+        if source == "deposit_interest":
+            return await deposit_interest_line_detail(organization_id, from_date, to_date)
+        if source == "accrued_deposit_interest":
+            return await accrued_deposit_interest_line_detail(organization_id, to_date)
+        if source == "employee_advances":
+            return await employee_advances_line_detail(organization_id, from_date, to_date)
+        if source == "supplier_tax":
+            return await supplier_tax_line_detail(organization_id, to_date)
+        if source == "credit_accounts":
+            return await credit_accounts_line_detail(organization_id, "code", "2300", to_date)
+        if source == "accum_depreciation":
+            return await accum_depreciation_line_detail(organization_id)
+        if source in ("general_surplus", "carried_surplus"):
+            return await surplus_line_detail(organization_id, from_date, to_date, source)
+        if source.startswith("bank_recon:"):
+            return await bank_recon_line_detail(source.split(":", 1)[1], to_date)
+        if source.startswith("bank_deposits:"):
+            return await bank_deposits_line_detail(organization_id, to_date, source.split(":", 1)[1])
+        if source.startswith("fixed_asset:"):
+            return await fixed_asset_line_detail(organization_id, source.split(":", 1)[1])
     # بند «دائنون متنوعون» يُحسب من ضرائب الموردين، فنعرض تفصيله من نفس مصدر البوابة
     if (match_by == "code" and value == "2200") or (match_by == "name" and value == "دائنون متنوعون"):
         return await supplier_tax_line_detail(organization_id, to_date)
     # بند «حسابات دائنة» = إجمالي صندوق الجزاءات + لجنة نقابية + إعانات وفاة مستحقة
     if (match_by == "code" and value == "2300") or (match_by == "name" and value == "حسابات دائنة"):
         return await credit_accounts_line_detail(organization_id, match_by, value, to_date)
+    if not match_by or not value:
+        return {"match_by": match_by, "value": value, "scope": scope, "count": 0, "total_debit": 0.0, "total_credit": 0.0, "net": 0.0, "rows": []}
     query = with_organization({"status": "approved"}, organization_id)
     entries = await db.journal_entries.find(query, {"_id": 0}).sort("entry_date", 1).to_list(20000)
 

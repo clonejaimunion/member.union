@@ -179,8 +179,8 @@ function BalanceSheetPrint({ report, prevReport, year, dateLabel, unionName, pro
   const advanceRows = pick(assetLines, isAdvancesCode);
   const debtorRows = assetLines.filter((l) => !isFixedAssetCode(l.code) && !isInventoryCode(l.code) && !isBankCashCode(l.code) && !isAccruedInterestCode(l.code) && !isAdvancesCode(l.code) && !isAccumDepCode(l.code));
   const creditorLines = liabilityLines.filter((l) => l.name !== "مخصصات الاهلاك");
-  const backendProvisionRows = liabilityLines.filter((l) => l.name === "مخصصات الاهلاك").map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) }));
-  const provisionRows = [...pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)) })), ...backendProvisionRows];
+  const backendProvisionRows = liabilityLines.filter((l) => l.name === "مخصصات الاهلاك").map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)), detail_source: l.detail_source, details: l.details }));
+  const provisionRows = [...pick(assetLines, isAccumDepCode).map((l) => ({ code: l.code, name: l.name, amount: Math.abs(Number(l.amount || 0)), detail_source: l.detail_source, details: l.details })), ...backendProvisionRows];
 
   const assetDetail = { matchBy: "code", scope: "cumulative_to", kind: "asset_cumulative" };
   const assetGroups = [
@@ -380,15 +380,18 @@ export default function FinancialStatementsPage() {
   const handleAmountClick = useCallback(async (group, line) => {
     const cfg = group?.detail || {};
     const scopeLabel = cfg.scope === "period" ? periodText : (cfg.scope === "cumulative_before" ? `أول المدة (قبل ${AR_MONTHS[fromM - 1]} ${year})` : `حتى ${isFullYear ? `31 ديسمبر ${year}` : `نهاية ${AR_MONTHS[toM - 1]} ${year}`}`);
-    const basis = buildBasisText(cfg.kind, periodText, scopeLabel);
+    const src = line?.detail_source;
+    const basis = line?.details || buildBasisText(cfg.kind, periodText, scopeLabel);
     const matchValue = cfg.matchBy === "code" ? line.code : line.name;
     const base = { name: line.name, amount: Number(line.amount || 0), basis, rows: [], total: 0, hasLedger: false };
-    if (!cfg.matchBy || !matchValue) { setDetail(base); return; }
+    if (!src && (!cfg.matchBy || !matchValue)) { setDetail(base); return; }
     setDetail({ ...base, hasLedger: true });
     setDetailLoading(true);
     try {
       const range = monthRange(Number(year), fromM, toM);
-      const params = new URLSearchParams({ match_by: cfg.matchBy, value: String(matchValue), scope: cfg.scope || "period", from_date: range.from_date, to_date: range.to_date });
+      const params = new URLSearchParams(src
+        ? { source: src, scope: cfg.scope || "cumulative_to", from_date: range.from_date, to_date: range.to_date }
+        : { match_by: cfg.matchBy, value: String(matchValue), scope: cfg.scope || "period", from_date: range.from_date, to_date: range.to_date });
       const response = await api.get(`/financial-statements/line-detail?${params.toString()}`);
       setDetail({ ...base, hasLedger: true, rows: response.data.rows || [], total: response.data.net ?? 0 });
     } catch (error) {
@@ -397,6 +400,17 @@ export default function FinancialStatementsPage() {
       setDetailLoading(false);
     }
   }, [year, fromM, toM, isFullYear, periodText]);
+
+  const printDetail = useCallback(() => {
+    if (!detail) return;
+    const rowsHtml = (detail.rows || []).map((r) => `<tr><td>${r.entry_date || ""}</td><td>${r.entry_number || ""}</td><td style="text-align:right">${r.description || ""}</td><td style="text-align:center">${r.debit ? formatCurrency(r.debit) : "-"}</td><td style="text-align:center">${r.credit ? formatCurrency(r.credit) : "-"}</td></tr>`).join("");
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return;
+    win.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>مصدر الرقم - ${detail.name}</title><style>body{font-family:'Tahoma',Arial,sans-serif;padding:24px;color:#0f172a}h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;color:#047857;margin:0 0 16px}.basis{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:12px;font-weight:bold;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#0f172a;color:#fff}.total{margin-top:12px;background:#f1f5f9;padding:10px;font-weight:800;display:flex;justify-content:space-between;border-radius:8px}</style></head><body><h1>تفاصيل: ${detail.name}</h1><h2>المبلغ: ${formatCurrency(detail.amount || 0)}</h2><div class="basis"><div style="font-size:12px;color:#047857;margin-bottom:4px">مصدر الرقم والأساس المحاسبي</div>${detail.basis || ""}</div>${(detail.rows || []).length ? `<table><thead><tr><th>التاريخ</th><th>رقم القيد</th><th>البيان</th><th>مدين</th><th>دائن</th></tr></thead><tbody>${rowsHtml}</tbody></table><div class="total"><span>صافي الإجمالي</span><span>${formatCurrency(Math.abs(detail.total || 0))}</span></div>` : ""}</body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 300);
+  }, [detail]);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950" data-testid="financial-statements-page">
@@ -418,6 +432,9 @@ export default function FinancialStatementsPage() {
           <DialogHeader>
             <DialogTitle data-testid="line-detail-dialog-title">تفاصيل: {detail?.name}</DialogTitle>
             <DialogDescription data-testid="line-detail-dialog-amount">المبلغ: {formatCurrency(detail?.amount || 0)}</DialogDescription>
+            <div className="pt-2">
+              <Button type="button" variant="outline" size="sm" className="h-9 bg-white" onClick={printDetail} data-testid="line-detail-print-button"><Printer className="h-4 w-4" /> طباعة مصدر الرقم</Button>
+            </div>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-900" data-testid="line-detail-basis">
