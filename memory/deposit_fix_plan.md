@@ -66,6 +66,21 @@
 12. إعادة تغليف /app/frontend/public/downloads/BankDepositSystemUpdate.zip
     (frontend/ من build + backend/server.py، بدون أي .exe، استبعاد frontend/downloads).
 
+## 🔴 اكتشاف حاسم (تحديث): البيانات متناقضة — يلزم إعادة بناء كاملة
+- الفك يحدث عبر آليتين متضاربتين: قيود revenue (3 ودائع) + deposit_maturity_principal (الباقي).
+- قيود deposit_maturity_principal موجودة حتى للودائع النشطة (استحقاق 2027) => قيود فك خاطئة لودائع لسه نشطة (مش مجرد تكرار).
+- الحذف الجزئي يُنتج «ودائع لأجل» = -2,050,000 (غلط). الصحيح = الودائع النشطة = 3,300,000.
+- **الحل الصحيح الوحيد: إعادة بناء كل قيود الودائع من db.deposits (9 سجلات موثوقة):**
+  1. أخذ نسخة احتياطية كاملة للداتابيز.
+  2. حذف كل قيود: source_type in [deposit, deposit_maturity_principal] + revenue(collection_method=deposit_maturity) + expense(expense_category=deposit_link).
+  3. لكل وديعة: توليد قيد ربط (مدين ودائع لأجل / دائن البنك أو رصيد افتتاحي للافتتاحية).
+  4. لكل وديعة استحقت فعلياً (maturity <= الآن أو status matured/renewed): توليد قيد فك واحد (مدين البنك / دائن ودائع لأجل).
+  5. الفائدة تبقى عبر آلية الحقن الحالية (لا تُمسّ في هذه المرحلة).
+  6. إصلاح المصدر: journal_for_expense لا يولّد قيد لـ deposit_link (سطر ~3986)؛ journal_for_revenue لا يسجّل deposit_maturity كإيراد (سطر ~3692).
+  7. تحقق: ودائع لأجل = 3,300,000 (النشطة) / إيراد فوائد من الاستحقاق = 0 / البنك صحيح / الميزانية متزنة.
+  8. اختبار testing_agent + مراجعة المستخدم قبل الإقفال.
+- EXPENSE_RULE_ACCOUNT_MAP["deposit_link"] = ودائع لأجل (term_deposits) => مطابق لقيد deposit => ازدواج مؤكد.
+
 ## ملاحظات أمان حرجة
 - أخذ نسخة احتياطية قبل أي حذف بيانات.
 - تنفيذ خطوة بخطوة مع تحقق بعد كل بند — عدم تجميع الحذف.
