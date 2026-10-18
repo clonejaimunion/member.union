@@ -4852,6 +4852,21 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
                 continue
             _new_lines.append(l)
         revenue_lines = _new_lines
+    # دمج «إيرادات فوائد ودائع» (4102) + «إيرادات فوائد الحساب الجاري» (4104) في بند «فوائد الودائع» (العرض فقط)
+    _int_codes = {"4102", "4104"}
+    if any(str(l.code or "") in _int_codes for l in revenue_lines):
+        _int_amount = round(sum(l.amount for l in revenue_lines if str(l.code or "") in _int_codes), 2)
+        _int_line = FinancialStatementLine(code="4102", name="فوائد الودائع", amount=_int_amount, details="إجمالي فوائد الودائع + فوائد الحساب الجاري خلال الفترة (منها مستحق غير محصّل يظهر بالميزانية - للعلم)", detail_source="deposit_interest_combined")
+        _new_int = []
+        _ins_int = False
+        for l in revenue_lines:
+            if str(l.code or "") in _int_codes:
+                if not _ins_int:
+                    _new_int.append(_int_line)
+                    _ins_int = True
+                continue
+            _new_int.append(l)
+        revenue_lines = _new_int
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
@@ -9476,6 +9491,36 @@ async def subscription_category_amount(org_id: str, period_from, period_to, keyw
     return res["net"]
 
 
+async def deposit_interest_combined_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «فوائد الودائع» = فائدة كل وديعة + فوائد الحساب الجاري، مع صفوف تذكيرية للمستحقة (ضمن الإيراد - للعلم)."""
+    di = await deposit_interest_line_detail(org_id, from_date, to_date)
+    rows = list(di["rows"])
+    total_credit = round(float(di.get("total_credit") or 0), 2)
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    if pf and pt:
+        entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(20000)
+        for entry in entries:
+            if entry.get("is_reversal"):
+                continue
+            ed = str(entry.get("entry_date") or "")
+            if not (from_date <= ed <= to_date):
+                continue
+            for line in entry.get("lines", []):
+                if str(line.get("account_code") or "") == "4104":
+                    amt = round(float(line.get("credit") or 0) - float(line.get("debit") or 0), 2)
+                    if amt == 0:
+                        continue
+                    total_credit = round(total_credit + amt, 2)
+                    rows.append({"entry_date": entry.get("entry_date"), "entry_number": entry.get("entry_number") or "", "description": "فائدة الحساب الجاري - " + (line.get("statement") or entry.get("description") or ""), "debit": 0, "credit": amt})
+    # صفوف تذكيرية: فوائد ودائع مستحقة (ضمن الإيراد أعلاه، للعلم فقط - لا تُضاف للإجمالي)
+    acc = await accrued_deposit_interest_line_detail(org_id, to_date)
+    for ar in acc["rows"]:
+        memo_amt = round(float(ar.get("debit") or 0), 2)
+        rows.append({"entry_date": ar.get("entry_date"), "entry_number": ar.get("entry_number"), "description": f"◇ مستحقة غير محصّلة (ضمن الإيراد أعلاه، للعلم): {ar.get('description') or ''} = {memo_amt}", "debit": 0, "credit": 0})
+    return {"match_by": "source", "value": "deposit_interest_combined", "scope": "period", "count": len(rows), "total_debit": 0.0, "total_credit": round(total_credit, 2), "net": round(total_credit, 2), "rows": rows}
+
+
 async def subscriptions_phase1_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
     """تفصيل «اشتراكات مرحلة اولي» = قيود حسابَي الإيرادات (4101) + إيرادات أوامر الدفع (4105) معاً خلال الفترة."""
     codes = {"4101", "4105"}
@@ -11227,6 +11272,8 @@ async def get_financial_statement_line_detail(
     if source:
         if source == "deposit_interest":
             return await deposit_interest_line_detail(organization_id, from_date, to_date)
+        if source == "deposit_interest_combined":
+            return await deposit_interest_combined_line_detail(organization_id, from_date, to_date)
         if source == "accrued_deposit_interest":
             return await accrued_deposit_interest_line_detail(organization_id, to_date)
         if source == "employee_advances":
