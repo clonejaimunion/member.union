@@ -239,8 +239,12 @@ function IncomeExpensePrint({ report, prevReport, year, dateLabel, unionName, pr
     { title: "إهلاك الأصول الثابتة", rows: depRows, detail: { matchBy: "code", scope: "period", kind: "depreciation_expense" } },
     ...(result >= 0 ? [{ title: "الفائض", rows: [{ name: "الفائض", amount: result }], detail: { kind: "surplus" } }] : []),
   ];
+  const OTHER_REV_SOURCES = new Set(["rev_dev_fee", "rev_publications", "rev_other"]);
+  const mainRevenueLines = revenueLines.filter((l) => !OTHER_REV_SOURCES.has(l.detail_source));
+  const otherRevenueLines = revenueLines.filter((l) => OTHER_REV_SOURCES.has(l.detail_source));
   const revenueGroups = [
-    { title: "إيرادات النشاط", rows: result < 0 ? [...revenueLines, { name: "العجز", amount: Math.abs(result) }] : revenueLines, detail: { matchBy: "code", scope: "period", kind: "revenue" } },
+    { title: "إيرادات النشاط", rows: result < 0 ? [...mainRevenueLines, { name: "العجز", amount: Math.abs(result) }] : mainRevenueLines, detail: { matchBy: "code", scope: "period", kind: "revenue" } },
+    ...(otherRevenueLines.length ? [{ title: "(ايرادات اخري)", rows: otherRevenueLines, detail: { matchBy: "code", scope: "period", kind: "revenue" } }] : []),
   ];
 
   const prevMap = { ...buildPrevMap(prevReport?.revenues_expenses?.revenues?.lines), ...buildPrevMap(prevReport?.revenues_expenses?.expenses?.lines) };
