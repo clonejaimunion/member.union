@@ -4830,17 +4830,24 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         if str(_rev_line.code or "") == "4102" or _rev_line.name == "إيرادات فوائد ودائع":
             _rev_line.details = "إجمالي فائدة الودائع بطريقة كشف العوائد البنكي خلال الفترة المحددة"
             _rev_line.detail_source = "deposit_interest"
-    # دمج «الإيرادات» (4101) + «إيرادات أوامر الدفع» (4105) في بند عرضي واحد «اشتراكات مرحلة اولي» (العرض فقط)
+    # دمج «الإيرادات» (4101) + «إيرادات أوامر الدفع» (4105) ثم إعادة تصنيف مرحلة ثانية ورسم الانضمام (العرض فقط)
     _merge_codes = {"4101", "4105"}
     if any(str(l.code or "") in _merge_codes for l in revenue_lines):
         _merged_amount = round(sum(l.amount for l in revenue_lines if str(l.code or "") in _merge_codes), 2)
-        _merged_line = FinancialStatementLine(code="4101", name="اشتراكات مرحلة اولي", amount=_merged_amount, details="إجمالي: الإيرادات (4101) + إيرادات أوامر الدفع (4105) خلال الفترة المحددة", detail_source="subscriptions_phase1")
+        _phase2 = await subscription_category_amount(organization_id, period_from, period_to, _ar_norm("مرحلة ثانية"))
+        _joinfee = await subscription_category_amount(organization_id, period_from, period_to, _ar_norm("رسم انضمام"))
+        _phase1 = round(_merged_amount - _phase2 - _joinfee, 2)
+        _subs_lines = [
+            FinancialStatementLine(code="4101", name="اشتراكات مرحلة اولي", amount=_phase1, details="إجمالي الإيرادات (4101) + أوامر الدفع (4105) بعد استبعاد مرحلة ثانية ورسم الانضمام خلال الفترة", detail_source="subscriptions_phase1"),
+            FinancialStatementLine(code=None, name="اشتراكات مرحلة ثانية", amount=_phase2, details="مجموع الإيرادات التي يحتوي بيانها على «مرحلة ثانية» خلال الفترة المحددة", detail_source="subscriptions_phase2"),
+            FinancialStatementLine(code=None, name="رسم إنضمام", amount=_joinfee, details="مجموع الإيرادات التي يحتوي بيانها على «رسم انضمام» خلال الفترة المحددة", detail_source="subscriptions_joinfee"),
+        ]
         _new_lines = []
         _inserted = False
         for l in revenue_lines:
             if str(l.code or "") in _merge_codes:
                 if not _inserted:
-                    _new_lines.append(_merged_line)
+                    _new_lines.extend(_subs_lines)
                     _inserted = True
                 continue
             _new_lines.append(l)
@@ -9442,6 +9449,33 @@ async def surplus_line_detail(org_id: str, from_date: Optional[str], to_date: Op
     return {"match_by": "source", "value": "carried_surplus", "scope": "cumulative_before", "count": len(rows), "total_debit": 0.0, "total_credit": round(carried, 2), "net": round(carried, 2), "rows": rows}
 
 
+async def subscription_category_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], keyword_norm: str, value_key: str):
+    """تفصيل بنود الاشتراكات حسب بيان الإيراد (إعادة تصنيف من بوابة الإيرادات)."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    total = 0.0
+    if pf and pt:
+        revs = await db.revenues.find(with_organization({}, org_id), {"_id": 0}).to_list(100000)
+        for r in revs:
+            d = str(r.get("dated") or r.get("issued_at") or "")[:10]
+            if not (pf.isoformat() <= d <= pt.isoformat()):
+                continue
+            if r.get("collection_method") in ("deposit_maturity", "current_account_interest"):
+                continue
+            if keyword_norm and keyword_norm in _ar_norm(r.get("value")):
+                amt = round(float(r.get("amount") or 0), 2)
+                total = round(total + amt, 2)
+                rows.append({"entry_date": d, "entry_number": r.get("receipt_number") or r.get("payment_order_number") or r.get("check_number") or "", "description": r.get("value") or "", "debit": 0, "credit": amt})
+    rows.sort(key=lambda x: str(x.get("entry_date") or ""))
+    return {"match_by": "source", "value": value_key, "scope": "period", "count": len(rows), "total_debit": 0.0, "total_credit": total, "net": total, "rows": rows}
+
+
+async def subscription_category_amount(org_id: str, period_from, period_to, keyword_norm: str) -> float:
+    res = await subscription_category_line_detail(org_id, period_from.isoformat() if period_from else None, period_to.isoformat() if period_to else None, keyword_norm, "x")
+    return res["net"]
+
+
 async def subscriptions_phase1_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
     """تفصيل «اشتراكات مرحلة اولي» = قيود حسابَي الإيرادات (4101) + إيرادات أوامر الدفع (4105) معاً خلال الفترة."""
     codes = {"4101", "4105"}
@@ -11213,6 +11247,10 @@ async def get_financial_statement_line_detail(
             return await fixed_asset_line_detail(organization_id, source.split(":", 1)[1])
         if source == "subscriptions_phase1":
             return await subscriptions_phase1_line_detail(organization_id, from_date, to_date)
+        if source == "subscriptions_phase2":
+            return await subscription_category_line_detail(organization_id, from_date, to_date, _ar_norm("مرحلة ثانية"), "subscriptions_phase2")
+        if source == "subscriptions_joinfee":
+            return await subscription_category_line_detail(organization_id, from_date, to_date, _ar_norm("رسم انضمام"), "subscriptions_joinfee")
     # بند «دائنون متنوعون» يُحسب من ضرائب الموردين، فنعرض تفصيله من نفس مصدر البوابة
     if (match_by == "code" and value == "2200") or (match_by == "name" and value == "دائنون متنوعون"):
         return await supplier_tax_line_detail(organization_id, to_date)
