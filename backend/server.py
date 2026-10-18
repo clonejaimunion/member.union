@@ -4882,7 +4882,13 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
     # إعادة هيكلة «مصروفات النشاط» (غير الإهلاك) إلى: مصروفات ادارية + إعانات + السلف (العرض فقط)
     _op_exp_lines = [l for l in expense_lines if not str(l.code or "").startswith("52")]
-    _dep_exp_lines = [l for l in expense_lines if str(l.code or "").startswith("52")]
+    # بنود الإهلاك تُبنى من تقرير إهلاك الأصول الثابتة (إجمالي الإهلاك خلال الفترة لكل تصنيف)
+    _dep_by_cat = await depreciation_period_by_category(organization_id, period_from, period_to)
+    _dep_order = ["101", "151", "155", "5"]  # آلات مكتبية، الخزائن، الأجهزة الكهربائية، الأثاث
+    _dep_exp_lines = []
+    for _c in _dep_order:
+        _info = _dep_by_cat.get(_c) or {"name": fixed_asset_category(_c)["name"], "amount": 0.0}
+        _dep_exp_lines.append(FinancialStatementLine(code=f"52{_c}", name=f"إهلاك {_info['name']}", amount=round(_info["amount"], 2), details="إجمالي الإهلاك خلال الفترة لهذا التصنيف من تقرير إهلاك الأصول الثابتة", detail_source=f"depreciation_cat:{_c}"))
     if _op_exp_lines:
         _op_total = round(sum(l.amount for l in _op_exp_lines), 2)
         _subsidies_exp = await expense_subsidies_amount(organization_id, period_from, period_to)
@@ -4890,15 +4896,14 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         _bank_inv_other = round(_op_total - _general_5101, 2)
         _analysis_admin = await expense_analysis_admin_amount(organization_id, period_from, period_to)
         _admin_exp = round(_analysis_admin + _bank_inv_other, 2)
-        _other_uncat = round(_general_5101 - _subsidies_exp - _analysis_admin, 2)
         _exp_restructured = [
             FinancialStatementLine(code=None, name="مصروفات ادارية", amount=_admin_exp, details="المصروفات الإدارية (من تقرير تحليل المصروفات) + المصروفات البنكية + المستخدم من المخزون خلال الفترة", detail_source="expense_admin"),
             FinancialStatementLine(code=None, name="إعانات", amount=_subsidies_exp, details="الإعانات المنصرفة ضمن المصروفات خلال الفترة المحددة", detail_source="expense_subsidies"),
+            FinancialStatementLine(code=None, name="السلف", amount=0.0, details="بند ثابت = صفر", detail_source="expense_advances"),
         ]
-        if round(_other_uncat, 2) != 0:
-            _exp_restructured.append(FinancialStatementLine(code=None, name="مصروفات أخرى", amount=_other_uncat, details="مصروفات عمومية مسجّلة بحساب المصروفات لكنها غير مطابقة لأي فئة في تقرير تحليل المصروفات", detail_source="expense_other"))
-        _exp_restructured.append(FinancialStatementLine(code=None, name="السلف", amount=0.0, details="بند ثابت = صفر", detail_source="expense_advances"))
         expense_lines = _exp_restructured + _dep_exp_lines
+    else:
+        expense_lines = _dep_exp_lines
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
     period_result = round(revenue_total - expense_total, 2)
@@ -8781,6 +8786,70 @@ async def list_fixed_asset_depreciations(
     return [FixedAssetDepreciationResponse(**hydrate_fixed_asset_depreciation(document)) for document in documents]
 
 
+
+
+async def depreciation_period_by_category(org_id: str, from_date: date, to_date: date) -> dict:
+    """إجمالي الإهلاك خلال الفترة لكل تصنيف أصل ثابت (مطابق لتقرير إهلاك الأصول الثابتة)."""
+    documents = await db.fixed_assets.find(with_organization({}, org_id), {"_id": 0}).to_list(5000)
+    categories = await fixed_asset_categories_with_rates(org_id)
+    opening_as_of = from_date - timedelta(days=1)
+    result = {}
+    for category in categories:
+        code = str(category["code"])
+        rate = float(category["annual_depreciation_rate"])
+        cat_year = 0.0
+        for doc in documents:
+            if str(doc.get("category_code")) != code:
+                continue
+            if doc.get("is_active") is False:
+                continue
+            pd = doc.get("purchase_date")
+            pd = date.fromisoformat(pd) if isinstance(pd, str) else pd
+            if pd > to_date:
+                continue
+            cost = float(doc.get("purchase_cost") or 0)
+            asset_rate = float(doc.get("annual_depreciation_rate") or rate)
+            monthly = fixed_asset_monthly_depreciation(cost, asset_rate)
+            opening = _asset_accumulated_as_of(cost, monthly, pd, opening_as_of)
+            closing = _asset_accumulated_as_of(cost, monthly, pd, to_date)
+            cat_year = round(cat_year + round(closing - opening, 2), 2)
+        result[code] = {"name": category["name"], "amount": round(cat_year, 2)}
+    return result
+
+
+async def depreciation_cat_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], cat_code: str):
+    """تفصيل بند الإهلاك لتصنيف واحد = الأصول وإهلاك الفترة لكل منها (من تقرير إهلاك الأصول الثابتة)."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    net = 0.0
+    if pf and pt:
+        documents = await db.fixed_assets.find(with_organization({}, org_id), {"_id": 0}).sort("purchase_date", 1).to_list(5000)
+        category = await fixed_asset_category_with_rate(cat_code, org_id)
+        rate = float(category["annual_depreciation_rate"])
+        opening_as_of = pf - timedelta(days=1)
+        for doc in documents:
+            if str(doc.get("category_code")) != str(cat_code):
+                continue
+            if doc.get("is_active") is False:
+                continue
+            pd = doc.get("purchase_date")
+            pd = date.fromisoformat(pd) if isinstance(pd, str) else pd
+            if pd > pt:
+                continue
+            cost = float(doc.get("purchase_cost") or 0)
+            asset_rate = float(doc.get("annual_depreciation_rate") or rate)
+            monthly = fixed_asset_monthly_depreciation(cost, asset_rate)
+            opening = _asset_accumulated_as_of(cost, monthly, pd, opening_as_of)
+            closing = _asset_accumulated_as_of(cost, monthly, pd, pt)
+            year_dep = round(closing - opening, 2)
+            if year_dep == 0:
+                continue
+            net = round(net + year_dep, 2)
+            rows.append({"entry_date": pd.isoformat(), "entry_number": doc.get("asset_code") or "", "description": f"{doc.get('asset_name')} — التكلفة {round(cost, 2)} | مجمع افتتاحي {opening} | إهلاك الفترة {year_dep} | مجمع ختامي {closing}", "debit": year_dep, "credit": 0})
+    return {"match_by": "source", "value": f"depreciation_cat:{cat_code}", "scope": "period", "count": len(rows), "total_debit": round(sum(r["debit"] for r in rows), 2), "total_credit": 0.0, "net": net, "rows": rows}
+
+
 def _asset_accumulated_as_of(cost: float, monthly: float, purchase_date: date, as_of: date) -> float:
     if monthly <= 0 or as_of < date(purchase_date.year, purchase_date.month, 1):
         return 0.0
@@ -11507,6 +11576,8 @@ async def get_financial_statement_line_detail(
             return await bank_deposits_line_detail(organization_id, to_date, source.split(":", 1)[1])
         if source.startswith("fixed_asset:"):
             return await fixed_asset_line_detail(organization_id, source.split(":", 1)[1])
+        if source.startswith("depreciation_cat:"):
+            return await depreciation_cat_line_detail(organization_id, from_date, to_date, source.split(":", 1)[1])
         if source == "subscriptions_phase1":
             return await subscriptions_phase1_line_detail(organization_id, from_date, to_date)
         if source == "expense_admin":
