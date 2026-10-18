@@ -4886,12 +4886,19 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     if _op_exp_lines:
         _op_total = round(sum(l.amount for l in _op_exp_lines), 2)
         _subsidies_exp = await expense_subsidies_amount(organization_id, period_from, period_to)
-        _admin_exp = round(_op_total - _subsidies_exp, 2)
-        expense_lines = [
-            FinancialStatementLine(code=None, name="مصروفات ادارية", amount=_admin_exp, details="المصروفات الإدارية (من تحليل المصروفات) + المصروفات البنكية + المستخدم من المخزون خلال الفترة", detail_source="expense_admin"),
+        _general_5101 = round(sum(l.amount for l in _op_exp_lines if str(l.code or "") == "5101" or l.name == "المصروفات"), 2)
+        _bank_inv_other = round(_op_total - _general_5101, 2)
+        _analysis_admin = await expense_analysis_admin_amount(organization_id, period_from, period_to)
+        _admin_exp = round(_analysis_admin + _bank_inv_other, 2)
+        _other_uncat = round(_general_5101 - _subsidies_exp - _analysis_admin, 2)
+        _exp_restructured = [
+            FinancialStatementLine(code=None, name="مصروفات ادارية", amount=_admin_exp, details="المصروفات الإدارية (من تقرير تحليل المصروفات) + المصروفات البنكية + المستخدم من المخزون خلال الفترة", detail_source="expense_admin"),
             FinancialStatementLine(code=None, name="إعانات", amount=_subsidies_exp, details="الإعانات المنصرفة ضمن المصروفات خلال الفترة المحددة", detail_source="expense_subsidies"),
-            FinancialStatementLine(code=None, name="السلف", amount=0.0, details="بند ثابت = صفر", detail_source="expense_advances"),
-        ] + _dep_exp_lines
+        ]
+        if round(_other_uncat, 2) != 0:
+            _exp_restructured.append(FinancialStatementLine(code=None, name="مصروفات أخرى", amount=_other_uncat, details="مصروفات عمومية مسجّلة بحساب المصروفات لكنها غير مطابقة لأي فئة في تقرير تحليل المصروفات", detail_source="expense_other"))
+        _exp_restructured.append(FinancialStatementLine(code=None, name="السلف", amount=0.0, details="بند ثابت = صفر", detail_source="expense_advances"))
+        expense_lines = _exp_restructured + _dep_exp_lines
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
     period_result = round(revenue_total - expense_total, 2)
@@ -9565,6 +9572,140 @@ async def expense_subsidies_amount(org_id: str, period_from, period_to) -> float
     return res["net"]
 
 
+EXPENSE_ANALYSIS_CATEGORIES = [
+    ("wages", ["منحة", "منحه", "مرتبات عاملين", "مرتبات", "مكافاة", "مكافأة", "مكافاه"]),
+    ("board_attendance", ["مجلس الادارة", "مجلس الإدارة"]),
+    ("transportation", ["بدل انتقال"]),
+    ("effort", ["بدل اعباء", "بدل أعباء"]),
+    ("maintenance", ["قطع غيار", "صيانة", "صيانه"]),
+    ("consulting", ["اتعاب", "أتعاب", "احمد بدران", "أحمد بدران", "مراجعة ميزانية"]),
+    ("postage_stamps", ["طوابع بريد", "طوابع بريديه", "طوابع بريدية", "طوابع", "بريد"]),
+    ("office_supplies", ["ادوات مكتبيه", "ادوات مكتبية", "أدوات مكتبية", "أدوات مكتبيه", "ادوات كتابيه", "ادوات كتابية", "أدوات كتابية", "أدوات كتابيه", "قرطاسيه", "قرطاسية", "مهمات مكتبيه", "مهمات مكتبية"]),
+]
+_ORG_SCOPE_MAP = {"social-solidarity": "social_solidarity_project", "general-union": "general_union"}
+
+
+def _expense_norm(value) -> str:
+    v = str(value or "").lower()
+    v = re.sub(r"[إأآا]", "ا", v)
+    v = v.replace("ة", "ه").replace("ى", "ي")
+    v = re.sub(r"[ًٌٍَُِّْـ]", "", v)
+    v = re.sub(r"\s+", " ", v).strip()
+    return v
+
+
+def _expense_prep_amount(value) -> str:
+    v = re.sub("[٠-٩]", lambda m: str("٠١٢٣٤٥٦٧٨٩".index(m.group())), str(value or ""))
+    v = re.sub("[۰-۹]", lambda m: str("۰۱۲۳۴۵۶۷۸۹".index(m.group())), v)
+    v = re.sub(r"[ًٌٍَُِّْـ]", "", v).replace("٫", ".")
+    v = re.sub(r"[,٬]", "", v)
+    return v
+
+
+def _expense_category_amount(expense) -> float:
+    """يطابق منطق تقرير «تحليل المصروفات» في الواجهة (buildCategoryAmounts) ويعيد إجمالي الصف المصنّف."""
+    statement = str(expense.get("gross_statement") or "")
+    prepped = _expense_prep_amount(statement)
+    total = 0.0
+    if "بمبلغ" in prepped:
+        for segment in statement.split("/"):
+            m = re.search(r"بمبلغ\D*?(\d+(?:\.\d+)?)", _expense_prep_amount(segment))
+            if not m:
+                continue
+            amount = float(m.group(1))
+            seg_norm = _expense_norm(segment)
+            for _key, kws in EXPENSE_ANALYSIS_CATEGORIES:
+                if any(_expense_norm(kw) in seg_norm for kw in kws):
+                    total += amount
+        return round(total, 2)
+    search_text = _expense_norm(" ".join([statement] + [d.get("statement", "") for d in (expense.get("deductions") or [])]))
+    gross = float(expense.get("gross_amount") or 0)
+    for _key, kws in EXPENSE_ANALYSIS_CATEGORIES:
+        if any(_expense_norm(kw) in search_text for kw in kws):
+            total += gross
+    return round(total, 2)
+
+
+async def expense_analysis_admin_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «المصروفات الإدارية» من تقرير تحليل المصروفات (إجمالي الصفوف المصنّفة خلال الفترة)."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    total = 0.0
+    scope = _ORG_SCOPE_MAP.get(org_id, "social_solidarity_project")
+    if pf and pt:
+        exps = await db.expenses.find(with_organization({}, org_id), {"_id": 0}).to_list(50000)
+        for e in exps:
+            if (e.get("organization_scope") or "social_solidarity_project") != scope:
+                continue
+            ia = str(e.get("issued_at") or "")[:10]
+            if not (from_date <= ia <= to_date):
+                continue
+            amt = _expense_category_amount(e)
+            if amt == 0:
+                continue
+            total = round(total + amt, 2)
+            rows.append({"entry_date": ia, "entry_number": e.get("expense_number") or "", "description": (e.get("gross_statement") or "")[:90], "debit": amt, "credit": 0})
+    rows.sort(key=lambda x: str(x.get("entry_date") or ""))
+    return {"rows": rows, "total": round(total, 2)}
+
+
+async def expense_analysis_admin_amount(org_id: str, period_from, period_to) -> float:
+    res = await expense_analysis_admin_detail(org_id, period_from.isoformat() if period_from else None, period_to.isoformat() if period_to else None)
+    return res["total"]
+
+
+async def expense_admin_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """مصروفات ادارية = الصفوف المصنّفة في تحليل المصروفات + المصروفات البنكية + المنصرف من المخزون."""
+    analysis = await expense_analysis_admin_detail(org_id, from_date, to_date)
+    rows = list(analysis["rows"])
+    # البنكية + المخزون من قيود الحسابات 5102/5103/5104
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    if pf and pt:
+        entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(50000)
+        for entry in entries:
+            if entry.get("is_reversal"):
+                continue
+            ed = str(entry.get("entry_date") or "")
+            if not (from_date <= ed <= to_date):
+                continue
+            for line in entry.get("lines", []):
+                code = str(line.get("account_code") or "")
+                name = line.get("account_name") or ""
+                if code in ("5102", "5103", "5104") or name in ("المصروفات البنكية", "تسوية العهد والسلف", "منصرف مخزون"):
+                    amt = round(float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+                    if amt == 0:
+                        continue
+                    rows.append({"entry_date": entry.get("entry_date"), "entry_number": entry.get("entry_number") or "", "description": f"[{name}] " + (line.get("notes") or entry.get("description") or ""), "debit": round(float(line.get('debit') or 0), 2), "credit": round(float(line.get('credit') or 0), 2)})
+    total = round(sum(r["debit"] - r["credit"] for r in rows), 2)
+    return {"match_by": "source", "value": "expense_admin", "scope": "period", "count": len(rows), "total_debit": round(sum(r["debit"] for r in rows), 2), "total_credit": round(sum(r["credit"] for r in rows), 2), "net": total, "rows": rows}
+
+
+async def expense_other_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """مصروفات أخرى = مصروفات عمومية (حساب المصروفات) غير مطابقة لأي فئة في تقرير تحليل المصروفات."""
+    analysis = await expense_analysis_admin_detail(org_id, from_date, to_date)
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    general_total = 0.0
+    if pf and pt:
+        entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).to_list(50000)
+        for entry in entries:
+            if entry.get("is_reversal"):
+                continue
+            ed = str(entry.get("entry_date") or "")
+            if not (from_date <= ed <= to_date):
+                continue
+            for line in entry.get("lines", []):
+                if str(line.get("account_code") or "") == "5101" or line.get("account_name") == "المصروفات":
+                    if "اعان" in _ar_norm(line.get("notes")):
+                        continue
+                    general_total = round(general_total + float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+    other = round(general_total - analysis["total"], 2)
+    rows = [{"entry_date": (pt.isoformat() if pt else ""), "entry_number": "", "description": f"مصروفات عمومية بحساب المصروفات ({general_total}) − المصنّف في تحليل المصروفات ({analysis['total']}) = غير مصنّف", "debit": other, "credit": 0}]
+    return {"match_by": "source", "value": "expense_other", "scope": "period", "count": len(rows), "total_debit": other, "total_credit": 0.0, "net": other, "rows": rows}
+
+
 async def deposit_interest_combined_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
     """تفصيل «فوائد الودائع» = فائدة كل وديعة + فوائد الحساب الجاري، مع صفوف تذكيرية للمستحقة (ضمن الإيراد - للعلم)."""
     di = await deposit_interest_line_detail(org_id, from_date, to_date)
@@ -11369,7 +11510,9 @@ async def get_financial_statement_line_detail(
         if source == "subscriptions_phase1":
             return await subscriptions_phase1_line_detail(organization_id, from_date, to_date)
         if source == "expense_admin":
-            return await expense_operational_line_detail(organization_id, from_date, to_date, "admin", "expense_admin")
+            return await expense_admin_line_detail(organization_id, from_date, to_date)
+        if source == "expense_other":
+            return await expense_other_line_detail(organization_id, from_date, to_date)
         if source == "expense_subsidies":
             return await expense_operational_line_detail(organization_id, from_date, to_date, "subsidies", "expense_subsidies")
         if source == "expense_advances":
