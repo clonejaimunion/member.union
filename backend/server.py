@@ -4880,6 +4880,18 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     if _other_lines:
         revenue_lines.extend(_other_lines)
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
+    # إعادة هيكلة «مصروفات النشاط» (غير الإهلاك) إلى: مصروفات ادارية + إعانات + السلف (العرض فقط)
+    _op_exp_lines = [l for l in expense_lines if not str(l.code or "").startswith("52")]
+    _dep_exp_lines = [l for l in expense_lines if str(l.code or "").startswith("52")]
+    if _op_exp_lines:
+        _op_total = round(sum(l.amount for l in _op_exp_lines), 2)
+        _subsidies_exp = await expense_subsidies_amount(organization_id, period_from, period_to)
+        _admin_exp = round(_op_total - _subsidies_exp, 2)
+        expense_lines = [
+            FinancialStatementLine(code=None, name="مصروفات ادارية", amount=_admin_exp, details="المصروفات الإدارية (من تحليل المصروفات) + المصروفات البنكية + المستخدم من المخزون خلال الفترة", detail_source="expense_admin"),
+            FinancialStatementLine(code=None, name="إعانات", amount=_subsidies_exp, details="الإعانات المنصرفة ضمن المصروفات خلال الفترة المحددة", detail_source="expense_subsidies"),
+            FinancialStatementLine(code=None, name="السلف", amount=0.0, details="بند ثابت = صفر", detail_source="expense_advances"),
+        ] + _dep_exp_lines
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
     period_result = round(revenue_total - expense_total, 2)
@@ -9503,6 +9515,56 @@ async def subscription_category_amount(org_id: str, period_from, period_to, keyw
     return res["net"]
 
 
+def _extract_analysis_type(notes: Optional[str]) -> str:
+    import re
+    m = re.search(r"تحليل:\s*([^|]+)", str(notes or ""))
+    return m.group(1).strip() if m else ""
+
+
+async def expense_operational_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], mode: str, value_key: str):
+    """تفصيل بنود مصروفات النشاط المعاد هيكلتها:
+    admin = مصروفات عمومية + بنكية + مخزون (باستثناء الإعانات) | subsidies = الإعانات | advances = ثابت صفر."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if mode == "advances" or not (pf and pt):
+        return {"match_by": "source", "value": value_key, "scope": "period", "count": 0, "total_debit": 0.0, "total_credit": 0.0, "net": 0.0, "rows": []}
+    OP_ACCOUNTS = {"5101", "5102", "5103", "5104"}
+    OP_NAMES = {"المصروفات", "المصروفات البنكية", "تسوية العهد والسلف", "منصرف مخزون"}
+    entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(50000)
+    net = 0.0
+    for entry in entries:
+        if entry.get("is_reversal"):
+            continue
+        ed = str(entry.get("entry_date") or "")
+        if not (from_date <= ed <= to_date):
+            continue
+        for line in entry.get("lines", []):
+            code = str(line.get("account_code") or "")
+            name = line.get("account_name") or ""
+            if code not in OP_ACCOUNTS and name not in OP_NAMES:
+                continue
+            amt = round(float(line.get("debit") or 0) - float(line.get("credit") or 0), 2)
+            if amt == 0:
+                continue
+            is_general_expense = code == "5101" or name == "المصروفات"
+            analysis = _extract_analysis_type(line.get("notes"))
+            is_subsidy = is_general_expense and ("اعان" in _ar_norm(analysis) or "اعان" in _ar_norm(line.get("notes")))
+            if mode == "subsidies" and not is_subsidy:
+                continue
+            if mode == "admin" and is_subsidy:
+                continue
+            net = round(net + amt, 2)
+            label = analysis or line.get("notes") or entry.get("description") or ""
+            rows.append({"entry_date": entry.get("entry_date"), "entry_number": entry.get("entry_number") or "", "description": f"[{name}] {label}", "debit": round(float(line.get('debit') or 0), 2), "credit": round(float(line.get('credit') or 0), 2)})
+    return {"match_by": "source", "value": value_key, "scope": "period", "count": len(rows), "total_debit": round(sum(r["debit"] for r in rows), 2), "total_credit": round(sum(r["credit"] for r in rows), 2), "net": net, "rows": rows}
+
+
+async def expense_subsidies_amount(org_id: str, period_from, period_to) -> float:
+    res = await expense_operational_line_detail(org_id, period_from.isoformat() if period_from else None, period_to.isoformat() if period_to else None, "subsidies", "x")
+    return res["net"]
+
+
 async def deposit_interest_combined_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
     """تفصيل «فوائد الودائع» = فائدة كل وديعة + فوائد الحساب الجاري، مع صفوف تذكيرية للمستحقة (ضمن الإيراد - للعلم)."""
     di = await deposit_interest_line_detail(org_id, from_date, to_date)
@@ -11306,6 +11368,12 @@ async def get_financial_statement_line_detail(
             return await fixed_asset_line_detail(organization_id, source.split(":", 1)[1])
         if source == "subscriptions_phase1":
             return await subscriptions_phase1_line_detail(organization_id, from_date, to_date)
+        if source == "expense_admin":
+            return await expense_operational_line_detail(organization_id, from_date, to_date, "admin", "expense_admin")
+        if source == "expense_subsidies":
+            return await expense_operational_line_detail(organization_id, from_date, to_date, "subsidies", "expense_subsidies")
+        if source == "expense_advances":
+            return await expense_operational_line_detail(organization_id, from_date, to_date, "advances", "expense_advances")
         if source == "subscriptions_phase2":
             return await subscription_category_line_detail(organization_id, from_date, to_date, _ar_norm("مرحلة ثانية"), "subscriptions_phase2")
         if source == "subscriptions_joinfee":
