@@ -4830,6 +4830,21 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         if str(_rev_line.code or "") == "4102" or _rev_line.name == "إيرادات فوائد ودائع":
             _rev_line.details = "إجمالي فائدة الودائع بطريقة كشف العوائد البنكي خلال الفترة المحددة"
             _rev_line.detail_source = "deposit_interest"
+    # دمج «الإيرادات» (4101) + «إيرادات أوامر الدفع» (4105) في بند عرضي واحد «اشتراكات مرحلة اولي» (العرض فقط)
+    _merge_codes = {"4101", "4105"}
+    if any(str(l.code or "") in _merge_codes for l in revenue_lines):
+        _merged_amount = round(sum(l.amount for l in revenue_lines if str(l.code or "") in _merge_codes), 2)
+        _merged_line = FinancialStatementLine(code="4101", name="اشتراكات مرحلة اولي", amount=_merged_amount, details="إجمالي: الإيرادات (4101) + إيرادات أوامر الدفع (4105) خلال الفترة المحددة", detail_source="subscriptions_phase1")
+        _new_lines = []
+        _inserted = False
+        for l in revenue_lines:
+            if str(l.code or "") in _merge_codes:
+                if not _inserted:
+                    _new_lines.append(_merged_line)
+                    _inserted = True
+                continue
+            _new_lines.append(l)
+        revenue_lines = _new_lines
     expense_lines = [financial_line_from_trial(row) for row in income_report.rows if row.account_type == "expense" and normal_amount(row) != 0]
     revenue_total = round(sum(line.amount for line in revenue_lines), 2)
     expense_total = round(sum(line.amount for line in expense_lines), 2)
@@ -9427,6 +9442,31 @@ async def surplus_line_detail(org_id: str, from_date: Optional[str], to_date: Op
     return {"match_by": "source", "value": "carried_surplus", "scope": "cumulative_before", "count": len(rows), "total_debit": 0.0, "total_credit": round(carried, 2), "net": round(carried, 2), "rows": rows}
 
 
+async def subscriptions_phase1_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «اشتراكات مرحلة اولي» = قيود حسابَي الإيرادات (4101) + إيرادات أوامر الدفع (4105) معاً خلال الفترة."""
+    codes = {"4101", "4105"}
+    rows = []
+    total_debit = 0.0
+    total_credit = 0.0
+    if from_date and to_date:
+        entries = await db.journal_entries.find(with_organization({"status": "approved"}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(20000)
+        for entry in entries:
+            if entry.get("is_reversal"):
+                continue
+            ed = str(entry.get("entry_date") or "")
+            if not (from_date <= ed <= to_date):
+                continue
+            for line in entry.get("lines", []):
+                if str(line.get("account_code") or "") not in codes:
+                    continue
+                debit = round(float(line.get("debit") or 0), 2)
+                credit = round(float(line.get("credit") or 0), 2)
+                total_debit = round(total_debit + debit, 2)
+                total_credit = round(total_credit + credit, 2)
+                rows.append({"entry_date": entry.get("entry_date"), "entry_number": entry.get("entry_number") or entry.get("id", "")[:8], "description": f"[{line.get('account_name') or ''}] " + (line.get("statement") or entry.get("description") or ""), "debit": debit, "credit": credit})
+    return {"match_by": "source", "value": "subscriptions_phase1", "scope": "period", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_debit - total_credit, 2), "rows": rows}
+
+
 
 
 
@@ -11171,6 +11211,8 @@ async def get_financial_statement_line_detail(
             return await bank_deposits_line_detail(organization_id, to_date, source.split(":", 1)[1])
         if source.startswith("fixed_asset:"):
             return await fixed_asset_line_detail(organization_id, source.split(":", 1)[1])
+        if source == "subscriptions_phase1":
+            return await subscriptions_phase1_line_detail(organization_id, from_date, to_date)
     # بند «دائنون متنوعون» يُحسب من ضرائب الموردين، فنعرض تفصيله من نفس مصدر البوابة
     if (match_by == "code" and value == "2200") or (match_by == "name" and value == "دائنون متنوعون"):
         return await supplier_tax_line_detail(organization_id, to_date)
