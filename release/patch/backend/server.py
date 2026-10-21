@@ -7289,9 +7289,16 @@ async def ensure_organization_seed_data():
         await sync_chart_accounts_for_organization(organization_id)
 
 
+async def persist_matured_deposits():
+    """الودائع النشطة التي انتهى تاريخ استحقاقها بدون تجديد تتحول حالتها تلقائياً إلى «مستحقة» (matured)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.deposits.update_many({"status": "active", "maturity_datetime": {"$lte": now_iso}}, {"$set": {"status": "matured", "updated_at": now_iso}})
+
+
 @app.on_event("startup")
 async def startup_tasks():
     await ensure_default_admin()
+    await persist_matured_deposits()
     try:
         await db.revenues.drop_index("receipt_number_1")
     except Exception:
@@ -7881,6 +7888,7 @@ async def auto_renew_due_deposits(bank_id: str, current_user: Optional[dict] = N
 async def list_deposits(bank_id: str, _: dict = Depends(require_permission("view_reports"))):
     await ensure_bank_async(bank_id)
     await auto_renew_due_deposits(bank_id)
+    await persist_matured_deposits()
     documents = await db.deposits.find(with_organization({"bank_id": bank_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [Deposit(**hydrate_deposit(document)) for document in documents]
 
