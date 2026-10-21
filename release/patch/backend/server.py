@@ -5038,7 +5038,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     rp_admin_exclusions = await rp_admin_exclusion_rows(organization_id, from_iso, to_iso)
     rp_admin_amount = round((rp_admin_line.amount if rp_admin_line else 0) - sum(r["credit"] for r in rp_admin_exclusions), 2)
     payments = [FinancialStatementLine(name="مصروفات ادارية", amount=rp_admin_amount, details="مصروفات ادارية من حساب الإيرادات والمصروفات خلال الفترة المختارة مع عدم احتساب حـ/ صندوق الجزاءات", detail_source="rp_expense_admin")]
-    payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية", "حسابات دائنة ومدينة")]
+    rp_subsidies_line = next((l for l in expense_lines if l.detail_source == "expense_subsidies"), None)
+    payments.append(FinancialStatementLine(name="إعانات", amount=round(rp_subsidies_line.amount if rp_subsidies_line else 0, 2), details="نفس مبلغ «إعانات» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="expense_subsidies"))
+    payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية", "حسابات دائنة ومدينة", "إعانات")]
     payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
     # رصيد آخر المدة: الجاري = رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة، والودائع = أصل الودائع النشطة في نهاية الفترة
     for bank_id, bank_info in BANKS.items():
