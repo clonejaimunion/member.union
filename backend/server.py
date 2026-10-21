@@ -5013,7 +5013,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         dep_label = f"{bank_info['name']} - ودائع"
         receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {dep_label}", amount=round(opening_by_bank.pop(dep_label, 0), 2), details="أرصدة الودائع لأجل في البنك قبل بداية الفترة + قيود الرصيد الافتتاحي للودائع القائمة", detail_source=f"rp_opening:{dep_label}"))
     receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
-    receipts += [FinancialStatementLine(name=cat, amount=value, details=("اشتراكات مرحلة أولى المحصّلة فعلياً في البنوك خلال الفترة المختارة (الإيرادات + أوامر الدفع) فيما عدا الشيكات تحت التحصيل" if cat == "إشتراكات" else "المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند"), detail_source=f"rp_receipt:{cat}") for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
+    # «رسم تنمية موارد» و«رسم انضمام» بنفس مبالغ حساب الإيرادات والمصروفات، وتُخصم من «إشتراكات» حتى لا تتكرر
+    rp_fee_lines = [FinancialStatementLine(name=l.name if l.detail_source == "rev_dev_fee" else "رسم انضمام", amount=l.amount, details=l.details, detail_source=l.detail_source) for src in ("rev_dev_fee", "subscriptions_joinfee") for l in revenue_lines if l.detail_source == src]
+    rp_fees_total = round(sum(l.amount for l in rp_fee_lines), 2)
+    for cat, value in receipts_by_cat.items():
+        if cat == "إشتراكات":
+            receipts.append(FinancialStatementLine(name=cat, amount=round(value - rp_fees_total, 2), details="اشتراكات مرحلة أولى المحصّلة فعلياً في البنوك خلال الفترة المختارة (الإيرادات + أوامر الدفع) فيما عدا الشيكات تحت التحصيل", detail_source=f"rp_receipt:{cat}"))
+            receipts += rp_fee_lines
+        elif round(value, 2) != 0:
+            receipts.append(FinancialStatementLine(name=cat, amount=value, details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند", detail_source=f"rp_receipt:{cat}"))
     payments = [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
@@ -9541,6 +9549,11 @@ async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date:
                     continue
                 debit, credit = credit, 0
             rows.append({"entry_date": edate, "entry_number": entry.get("entry_number") or "", "description": f"{entry.get('description') or line.get('notes') or ''} — {line.get('account_name') or ''}", "debit": debit, "credit": credit})
+    if kind == "rp_receipt" and label == "إشتراكات":
+        for fee_name, fee_kw in (("رسم تنمية موارد", "رسم تنمية موارد"), ("رسم انضمام", "رسم انضمام")):
+            fee_amount = await subscription_category_amount(org_id, pf, pt, _ar_norm(fee_kw))
+            if round(fee_amount, 2) != 0:
+                rows.append({"entry_date": pt.isoformat(), "entry_number": "", "description": f"يُخصم: {fee_name} (ظاهر كبند مستقل)", "debit": 0, "credit": round(fee_amount, 2)})
     return _line_detail_result(f"{kind}:{label}", scope, rows)
 
 
