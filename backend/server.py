@@ -4154,7 +4154,8 @@ RP_RECEIPT_LABELS = {
     "إيرادات اشتراكات العضوية": "اشتراكات",
     "إيرادات فوائد ودائع": "فوائد الودائع",
     "عوائد ودائع مستحقة": "فوائد الودائع",
-    "إيرادات أوامر الدفع": "مقبوضات أخرى",
+    "الإيرادات": "إشتراكات",
+    "إيرادات أوامر الدفع": "إشتراكات",
     "دائنون متنوعون": "حسابات دائنة ومدينة",
 }
 
@@ -5012,7 +5013,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         dep_label = f"{bank_info['name']} - ودائع"
         receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {dep_label}", amount=round(opening_by_bank.pop(dep_label, 0), 2), details="أرصدة الودائع لأجل في البنك قبل بداية الفترة + قيود الرصيد الافتتاحي للودائع القائمة", detail_source=f"rp_opening:{dep_label}"))
     receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
-    receipts += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند", detail_source=f"rp_receipt:{cat}") for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
+    receipts += [FinancialStatementLine(name=cat, amount=value, details=("اشتراكات مرحلة أولى المحصّلة فعلياً في البنوك خلال الفترة المختارة (الإيرادات + أوامر الدفع) فيما عدا الشيكات تحت التحصيل" if cat == "إشتراكات" else "المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند"), detail_source=f"rp_receipt:{cat}") for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
     payments = [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
