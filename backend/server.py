@@ -4999,7 +4999,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         opening_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_from.year, month=period_from.month)
         opening_by_bank.pop(bank_info["name"], None)
         receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {bank_info['name']} - جاري", amount=round(opening_breakdown.book_balance, 2), details="رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لأول شهر في الفترة المختارة", detail_source=f"bank_recon_open:{bank_id}"))
-    receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value) for bank, value in opening_by_bank.items() if round(value, 2) != 0]
+    receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
     receipts += [FinancialStatementLine(name=cat, amount=value) for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
     payments = [FinancialStatementLine(name=cat, amount=value) for cat, value in payments_by_cat.items() if round(value, 2) != 0]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value) for bank, value in closing_by_bank.items() if round(value, 2) != 0]
@@ -9472,6 +9472,47 @@ async def accrued_deposit_interest_line_detail(org_id: str, to_date: Optional[st
     return _line_detail_result("accrued_deposit_interest", "cumulative_to", rows)
 
 
+async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], label: str):
+    """تفصيل بند «رصيد أول المدة - ...» غير الجاري (مثل الودائع لأجل) بنفس منطق حساب المقبوضات والمدفوعات."""
+    pf = _parse_date_opt(from_date)
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if not (pf and pt):
+        return _line_detail_result(f"rp_opening:{label}", "cumulative_before", rows)
+    entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lte": pt.isoformat()}}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
+    deposit_docs = await db.deposits.find(with_organization({}, org_id), {"_id": 0, "deposit_number": 1, "bank_id": 1, "bank_name": 1}).to_list(100000)
+    bank_docs = await db.banks.find(with_organization({}, org_id), {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    bank_name_by_id = {b.get("id"): b.get("name") for b in bank_docs}
+    deposit_bank_by_ref = {str(d.get("deposit_number")): (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id"))) for d in deposit_docs if d.get("deposit_number") is not None}
+
+    def is_bank(line: dict) -> bool:
+        code = str(line.get("account_code") or "")
+        name = str(line.get("account_name") or "")
+        return code.startswith("11") or code == "1250" or name in ["البنوك", "البنك"] or "ودائع لأجل" in name
+
+    for entry in entries:
+        if entry_credits_deposit_interest_revenue(entry):
+            continue
+        edate = str(entry.get("entry_date") or "")
+        lines = entry.get("lines", [])
+        contra = [ln for ln in lines if not is_bank(ln)]
+        is_opening_entry = bool(contra) and str(contra[0].get("account_name") or "") == "رصيد افتتاحي"
+        if edate >= pf.isoformat() and not is_opening_entry:
+            continue
+        dep_bank = deposit_bank_by_ref.get(str(entry.get("reference"))) if entry.get("reference") is not None else None
+        for line in lines:
+            if not is_bank(line):
+                continue
+            if "ودائع لأجل" in str(line.get("account_name") or ""):
+                name = f"{dep_bank} - ودائع" if dep_bank else "ودائع لأجل"
+            else:
+                name = str(line.get("account_name") or "البنك")
+            if name != label:
+                continue
+            rows.append({"entry_date": edate, "entry_number": entry.get("entry_number") or "", "description": entry.get("description") or line.get("notes") or "", "debit": round(float(line.get("debit") or 0), 2), "credit": round(float(line.get("credit") or 0), 2)})
+    return _line_detail_result(f"rp_opening:{label}", "cumulative_before", rows)
+
+
 async def bank_recon_line_detail(bank_id: str, to_date: Optional[str]):
     """تفصيل رصيد البنك «- جاري» = رصيد التسوية البنكية الدفتري المُرحّل قبل الشيكات لشهر نهاية الفترة."""
     pt = _parse_date_opt(to_date)
@@ -11576,6 +11617,8 @@ async def get_financial_statement_line_detail(
             return await accum_depreciation_line_detail(organization_id)
         if source in ("general_surplus", "carried_surplus"):
             return await surplus_line_detail(organization_id, from_date, to_date, source)
+        if source.startswith("rp_opening:"):
+            return await rp_opening_line_detail(organization_id, from_date, to_date, source.split(":", 1)[1])
         if source.startswith("bank_recon_open:"):
             return await bank_recon_line_detail(source.split(":", 1)[1], from_date)
         if source.startswith("bank_recon:"):
