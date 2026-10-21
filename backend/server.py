@@ -5029,8 +5029,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             receipts.append(FinancialStatementLine(name=cat, amount=value, details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند", detail_source=f"rp_receipt:{cat}"))
     # «مقبوضات اخري»: فوائد الودائع (من قائمة الدخل بدون المستحق غير المحصّل) + ايرادات اخري + حسابات دائنة ومدينة
     rp_int_line = next((l for l in revenue_lines if l.detail_source == "deposit_interest_combined"), None)
-    rp_accrued = next((l.amount for l in asset_lines if l.detail_source == "accrued_deposit_interest"), 0)
-    receipts.append(FinancialStatementLine(name="فوائد الودائع", amount=round((rp_int_line.amount if rp_int_line else 0) - rp_accrued, 2), details="فوائد الودائع من حساب الإيرادات والمصروفات خلال الفترة المختارة بدون الفوائد المستحقة غير المحصّلة", detail_source="rp_deposit_interest"))
+    receipts.append(FinancialStatementLine(name="فوائد الودائع", amount=round(rp_int_line.amount if rp_int_line else 0, 2), details="فوائد ودائع كل البنوك (كشف العوائد) + فوائد الحساب الجاري خلال الفترة المختارة", detail_source="rp_deposit_interest"))
     receipts.append(FinancialStatementLine(name="ايرادات اخري", amount=rp_rev_other_amount, details="نفس مبلغ «ايرادات اخري» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="rev_other"))
     receipts.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(receipts_by_cat.get("حسابات دائنة ومدينة", 0), 2), details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من الحسابات الدائنة والمدينة (تحسب تلقائياً)", detail_source="rp_receipt:حسابات دائنة ومدينة"))
     # «مصروفات ادارية» = مصروفات ادارية بقائمة الدخل − حـ/ صندوق الجزاءات (خلال الفترة)
@@ -9570,12 +9569,9 @@ async def bank_statement_close_line_detail(org_id: str, bank_id: str, to_date: O
 
 
 async def rp_deposit_interest_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
-    """تفصيل «فوائد الودائع» في المقبوضات = فوائد الودائع بقائمة الدخل ناقص المستحق غير المحصّل."""
+    """تفصيل «فوائد الودائع» في المقبوضات = فوائد ودائع كل البنوك (كشف العوائد) + فوائد الحساب الجاري."""
     combined = await deposit_interest_combined_line_detail(org_id, from_date, to_date)
     rows = [r for r in combined["rows"] if not str(r.get("description") or "").startswith("◇")]
-    accrued = await accrued_deposit_interest_line_detail(org_id, to_date)
-    for ar in accrued["rows"]:
-        rows.append({**ar, "description": f"يُخصم مستحق غير محصّل: {ar.get('description') or ''}"})
     total_credit = round(sum(float(r.get("credit") or 0) for r in rows), 2)
     total_debit = round(sum(float(r.get("debit") or 0) for r in rows), 2)
     return {"match_by": "source", "value": "rp_deposit_interest", "scope": "period", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_credit - total_debit, 2), "rows": rows}
