@@ -274,11 +274,14 @@ function ReceiptsPaymentsPrint({ report, prevReport, year, dateLabel, unionName,
   const paymentLines = report?.receipts_payments?.payments?.lines || [];
   const isOpening = (name) => String(name || "").startsWith("رصيد أول المدة");
   const isClosing = (name) => String(name || "").startsWith("رصيد آخر المدة") || String(name || "").startsWith("رصيد اخر المدة");
+  const OTHER_RECEIPT_SOURCES = new Set(["rp_deposit_interest", "rev_other", "rp_receipt:حسابات دائنة ومدينة"]);
+  const isOtherReceipt = (l) => OTHER_RECEIPT_SOURCES.has(l.detail_source);
   const stripBank = (rows) => rows.map((l) => ({ ...l, name: String(l.name || "").replace(/^رصيد (أول|اول|آخر|اخر) المدة\s*-\s*/, "") }));
 
   const receiptGroups = [
     { title: "رصيد أول المدة", rows: stripBank(receiptLines.filter((l) => isOpening(l.name))), detail: { matchBy: "name", scope: "cumulative_before", kind: "receipt_opening" } },
-    { title: "مقبوضات النشاط", rows: receiptLines.filter((l) => !isOpening(l.name)), detail: { matchBy: "name", scope: "period", kind: "receipt_activity" } },
+    { title: "مقبوضات النشاط", rows: receiptLines.filter((l) => !isOpening(l.name) && !isOtherReceipt(l)), detail: { matchBy: "name", scope: "period", kind: "receipt_activity" } },
+    { title: "مقبوضات اخري", rows: receiptLines.filter(isOtherReceipt), detail: { matchBy: "name", scope: "period", kind: "receipt_activity" } },
   ];
   const paymentGroups = [
     { title: "مصروفات النشاط", rows: paymentLines.filter((l) => !isClosing(l.name)), detail: { matchBy: "name", scope: "period", kind: "payment_activity" } },

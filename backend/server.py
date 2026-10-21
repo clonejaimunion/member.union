@@ -5015,13 +5015,24 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
     # «رسم تنمية موارد» و«رسم انضمام» بنفس مبالغ حساب الإيرادات والمصروفات، وتُخصم من «إشتراكات» حتى لا تتكرر
     rp_fee_lines = [FinancialStatementLine(name=l.name if l.detail_source == "rev_dev_fee" else "رسم انضمام", amount=l.amount, details=l.details, detail_source=l.detail_source) for src in ("rev_dev_fee", "subscriptions_joinfee") for l in revenue_lines if l.detail_source == src]
-    rp_fees_total = round(sum(l.amount for l in rp_fee_lines), 2)
+    rp_rev_other = next((l for l in revenue_lines if l.detail_source == "rev_other"), None)
+    rp_rev_other_amount = round(rp_rev_other.amount if rp_rev_other else 0, 2)
+    rp_fees_total = round(sum(l.amount for l in rp_fee_lines) + rp_rev_other_amount, 2)
+    rp_other_cats = {"إيرادات فوائد الحساب الجاري", "حسابات دائنة ومدينة"}
     for cat, value in receipts_by_cat.items():
+        if cat in rp_other_cats:
+            continue
         if cat == "إشتراكات":
             receipts.append(FinancialStatementLine(name=cat, amount=round(value - rp_fees_total, 2), details="اشتراكات مرحلة أولى المحصّلة فعلياً في البنوك خلال الفترة المختارة (الإيرادات + أوامر الدفع) فيما عدا الشيكات تحت التحصيل", detail_source=f"rp_receipt:{cat}"))
             receipts += rp_fee_lines
         elif round(value, 2) != 0:
             receipts.append(FinancialStatementLine(name=cat, amount=value, details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند", detail_source=f"rp_receipt:{cat}"))
+    # «مقبوضات اخري»: فوائد الودائع (من قائمة الدخل بدون المستحق غير المحصّل) + ايرادات اخري + حسابات دائنة ومدينة
+    rp_int_line = next((l for l in revenue_lines if l.detail_source == "deposit_interest_combined"), None)
+    rp_accrued = next((l.amount for l in asset_lines if l.detail_source == "accrued_deposit_interest"), 0)
+    receipts.append(FinancialStatementLine(name="فوائد الودائع", amount=round((rp_int_line.amount if rp_int_line else 0) - rp_accrued, 2), details="فوائد الودائع من حساب الإيرادات والمصروفات خلال الفترة المختارة بدون الفوائد المستحقة غير المحصّلة", detail_source="rp_deposit_interest"))
+    receipts.append(FinancialStatementLine(name="ايرادات اخري", amount=rp_rev_other_amount, details="نفس مبلغ «ايرادات اخري» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="rev_other"))
+    receipts.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(receipts_by_cat.get("حسابات دائنة ومدينة", 0), 2), details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من الحسابات الدائنة والمدينة (تحسب تلقائياً)", detail_source="rp_receipt:حسابات دائنة ومدينة"))
     payments = [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
@@ -9493,6 +9504,18 @@ async def accrued_deposit_interest_line_detail(org_id: str, to_date: Optional[st
     return _line_detail_result("accrued_deposit_interest", "cumulative_to", rows)
 
 
+async def rp_deposit_interest_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
+    """تفصيل «فوائد الودائع» في المقبوضات = فوائد الودائع بقائمة الدخل ناقص المستحق غير المحصّل."""
+    combined = await deposit_interest_combined_line_detail(org_id, from_date, to_date)
+    rows = [r for r in combined["rows"] if not str(r.get("description") or "").startswith("◇")]
+    accrued = await accrued_deposit_interest_line_detail(org_id, to_date)
+    for ar in accrued["rows"]:
+        rows.append({**ar, "description": f"يُخصم مستحق غير محصّل: {ar.get('description') or ''}"})
+    total_credit = round(sum(float(r.get("credit") or 0) for r in rows), 2)
+    total_debit = round(sum(float(r.get("debit") or 0) for r in rows), 2)
+    return {"match_by": "source", "value": "rp_deposit_interest", "scope": "period", "count": len(rows), "total_debit": total_debit, "total_credit": total_credit, "net": round(total_credit - total_debit, 2), "rows": rows}
+
+
 async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], label: str, kind: str = "rp_opening"):
     """تفصيل بنود حساب المقبوضات والمدفوعات بنفس منطق تصنيف القائمة (أول المدة/مقبوضات/مدفوعات/آخر المدة)."""
     pf = _parse_date_opt(from_date)
@@ -9550,7 +9573,7 @@ async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date:
                 debit, credit = credit, 0
             rows.append({"entry_date": edate, "entry_number": entry.get("entry_number") or "", "description": f"{entry.get('description') or line.get('notes') or ''} — {line.get('account_name') or ''}", "debit": debit, "credit": credit})
     if kind == "rp_receipt" and label == "إشتراكات":
-        for fee_name, fee_kw in (("رسم تنمية موارد", "رسم تنمية موارد"), ("رسم انضمام", "رسم انضمام")):
+        for fee_name, fee_kw in (("رسم تنمية موارد", "رسم تنمية موارد"), ("رسم انضمام", "رسم انضمام"), ("ايرادات اخري", "ايرادات اخرى")):
             fee_amount = await subscription_category_amount(org_id, pf, pt, _ar_norm(fee_kw))
             if round(fee_amount, 2) != 0:
                 rows.append({"entry_date": pt.isoformat(), "entry_number": "", "description": f"يُخصم: {fee_name} (ظاهر كبند مستقل)", "debit": 0, "credit": round(fee_amount, 2)})
@@ -11647,6 +11670,8 @@ async def get_financial_statement_line_detail(
     if source:
         if source == "deposit_interest":
             return await deposit_interest_line_detail(organization_id, from_date, to_date)
+        if source == "rp_deposit_interest":
+            return await rp_deposit_interest_line_detail(organization_id, from_date, to_date)
         if source == "deposit_interest_combined":
             return await deposit_interest_combined_line_detail(organization_id, from_date, to_date)
         if source == "accrued_deposit_interest":
