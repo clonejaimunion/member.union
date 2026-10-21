@@ -5044,9 +5044,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
     # رصيد آخر المدة: الجاري = رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة، والودائع = أصل الودائع النشطة في نهاية الفترة
     for bank_id, bank_info in BANKS.items():
-        closing_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_to.year, month=period_to.month)
         closing_by_bank.pop(bank_info["name"], None)
-        payments.append(FinancialStatementLine(name=f"رصيد آخر المدة - {bank_info['name']} - جاري", amount=round(closing_breakdown.book_balance, 2), details="رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة المختارة", detail_source=f"bank_recon:{bank_id}"))
+        closing_statement, _ = await bank_statement_closing_balance(organization_id, bank_id, period_to)
+        payments.append(FinancialStatementLine(name=f"رصيد آخر المدة - {bank_info['name']} - جاري", amount=closing_statement, details="رصيد كشف الحساب البنكي في نهاية آخر شهر في الفترة (من التسوية البنكية المحفوظة)", detail_source=f"bank_statement_close:{bank_id}"))
     closing_by_bank.pop("ودائع لأجل", None)
     for bank_id, bank_info in BANKS.items():
         closing_by_bank.pop(f"{bank_info['name']} - ودائع", None)
@@ -9547,6 +9547,28 @@ async def rp_admin_exclusion_rows(org_id: str, from_date: Optional[str], to_date
     return rows
 
 
+async def bank_statement_closing_balance(org_id: str, bank_id: str, period_to: date):
+    """رصيد كشف البنك في نهاية شهر نهاية الفترة من التسوية البنكية المحفوظة؛ بدونها = رصيد الدفتر بعد حركة الشهر."""
+    month_prefix = f"{period_to.year}-{period_to.month:02d}"
+    recs = await db.reconciliations.find(with_organization({"bank_id": bank_id, "balance_breakdown.period_to": {"$regex": f"^{month_prefix}"}}, org_id), {"_id": 0}).sort("updated_at", -1).to_list(1)
+    if recs:
+        return round(float(recs[0].get("bank_statement_balance") or 0), 2), recs[0]
+    breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_to.year, month=period_to.month)
+    return round(breakdown.book_balance + breakdown.period_movement, 2), None
+
+
+async def bank_statement_close_line_detail(org_id: str, bank_id: str, to_date: Optional[str]):
+    pt = _parse_date_opt(to_date)
+    rows = []
+    if pt:
+        amount, rec = await bank_statement_closing_balance(org_id, bank_id, pt)
+        if rec:
+            rows.append({"entry_date": str((rec.get("balance_breakdown") or {}).get("period_to") or ""), "entry_number": "", "description": f"رصيد كشف البنك — التسوية البنكية المحفوظة ({rec.get('period_label') or ''}) — رصيد الدفتر {rec.get('book_balance')} — {rec.get('status_text') or ''}", "debit": amount, "credit": 0})
+        else:
+            rows.append({"entry_date": pt.isoformat(), "entry_number": "", "description": "لا توجد تسوية بنكية محفوظة لهذا الشهر — تم استخدام رصيد الدفتر بعد حركة الشهر", "debit": amount, "credit": 0})
+    return _line_detail_result(f"bank_statement_close:{bank_id}", "cumulative_to", rows)
+
+
 async def rp_deposit_interest_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str]):
     """تفصيل «فوائد الودائع» في المقبوضات = فوائد الودائع بقائمة الدخل ناقص المستحق غير المحصّل."""
     combined = await deposit_interest_combined_line_detail(org_id, from_date, to_date)
@@ -11713,6 +11735,8 @@ async def get_financial_statement_line_detail(
     if source:
         if source == "deposit_interest":
             return await deposit_interest_line_detail(organization_id, from_date, to_date)
+        if source.startswith("bank_statement_close:"):
+            return await bank_statement_close_line_detail(organization_id, source.split(":", 1)[1], to_date)
         if source == "rp_payment_fixed_zero":
             return _line_detail_result(source, "period", [])
         if source == "rp_expense_admin":
