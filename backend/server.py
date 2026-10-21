@@ -4985,7 +4985,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             debit = round(float(line.get("debit") or 0), 2)
             credit = round(float(line.get("credit") or 0), 2)
             closing_by_bank[bank_name] = round(closing_by_bank.get(bank_name, 0) + debit - credit, 2)
-            if not in_period:
+            if not in_period or contra_name == "رصيد افتتاحي":
                 opening_by_bank[bank_name] = round(opening_by_bank.get(bank_name, 0) + debit - credit, 2)
             elif contra_lines:
                 if debit > 0:
@@ -4993,7 +4993,13 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
                 if credit > 0:
                     payments_by_cat[contra_name] = round(payments_by_cat.get(contra_name, 0) + credit, 2)
 
-    receipts = [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value) for bank, value in opening_by_bank.items() if round(value, 2) != 0]
+    # أرصدة أول المدة للحسابات الجارية = رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لأول شهر في الفترة
+    receipts = []
+    for bank_id, bank_info in BANKS.items():
+        opening_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_from.year, month=period_from.month)
+        opening_by_bank.pop(bank_info["name"], None)
+        receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {bank_info['name']} - جاري", amount=round(opening_breakdown.book_balance, 2), details="رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لأول شهر في الفترة المختارة", detail_source=f"bank_recon_open:{bank_id}"))
+    receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value) for bank, value in opening_by_bank.items() if round(value, 2) != 0]
     receipts += [FinancialStatementLine(name=cat, amount=value) for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
     payments = [FinancialStatementLine(name=cat, amount=value) for cat, value in payments_by_cat.items() if round(value, 2) != 0]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value) for bank, value in closing_by_bank.items() if round(value, 2) != 0]
@@ -11570,6 +11576,8 @@ async def get_financial_statement_line_detail(
             return await accum_depreciation_line_detail(organization_id)
         if source in ("general_surplus", "carried_surplus"):
             return await surplus_line_detail(organization_id, from_date, to_date, source)
+        if source.startswith("bank_recon_open:"):
+            return await bank_recon_line_detail(source.split(":", 1)[1], from_date)
         if source.startswith("bank_recon:"):
             return await bank_recon_line_detail(source.split(":", 1)[1], to_date)
         if source.startswith("bank_deposits:"):
