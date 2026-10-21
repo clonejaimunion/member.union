@@ -4947,6 +4947,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         if d.get("deposit_number") is not None and bname:
             deposit_bank_by_ref[str(d.get("deposit_number"))] = bname
 
+    deposit_bank_by_ref_static = {str(d.get("deposit_number")): BANKS[d.get("bank_id")]["name"] for d in deposit_docs if d.get("deposit_number") is not None and d.get("bank_id") in BANKS}
+
     rp_receipt_labels = {
         "إيرادات اشتراكات العضوية": "اشتراكات",
         "إيرادات فوائد ودائع": "فوائد الودائع",
@@ -4975,10 +4977,12 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         contra_lines = [ln for ln in lines if not _is_bank_line(ln)]
         contra_name = _rp_label(contra_lines[0]) if contra_lines else (entry.get("description") or "حركة نقدية")
         dep_bank = deposit_bank_by_ref.get(str(entry.get("reference"))) if entry.get("reference") is not None else None
+        open_dep_bank = dep_bank or deposit_bank_by_ref_static.get(str(entry.get("reference")))
         for line in lines:
             if not _is_bank_line(line):
                 continue
-            if "ودائع لأجل" in str(line.get("account_name") or ""):
+            is_deposit_line = "ودائع لأجل" in str(line.get("account_name") or "")
+            if is_deposit_line:
                 bank_name = f"{dep_bank} - ودائع" if dep_bank else "ودائع لأجل"
             else:
                 bank_name = str(line.get("account_name") or "البنك")
@@ -4986,7 +4990,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             credit = round(float(line.get("credit") or 0), 2)
             closing_by_bank[bank_name] = round(closing_by_bank.get(bank_name, 0) + debit - credit, 2)
             if not in_period or contra_name == "رصيد افتتاحي":
-                opening_by_bank[bank_name] = round(opening_by_bank.get(bank_name, 0) + debit - credit, 2)
+                open_name = (f"{open_dep_bank} - ودائع" if open_dep_bank else "ودائع لأجل") if is_deposit_line else bank_name
+                opening_by_bank[open_name] = round(opening_by_bank.get(open_name, 0) + debit - credit, 2)
             elif contra_lines:
                 if debit > 0:
                     receipts_by_cat[contra_name] = round(receipts_by_cat.get(contra_name, 0) + debit, 2)
@@ -4999,6 +5004,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         opening_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_from.year, month=period_from.month)
         opening_by_bank.pop(bank_info["name"], None)
         receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {bank_info['name']} - جاري", amount=round(opening_breakdown.book_balance, 2), details="رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لأول شهر في الفترة المختارة", detail_source=f"bank_recon_open:{bank_id}"))
+    for bank_info in BANKS.values():
+        dep_label = f"{bank_info['name']} - ودائع"
+        receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {dep_label}", amount=round(opening_by_bank.pop(dep_label, 0), 2), details="أرصدة الودائع لأجل في البنك قبل بداية الفترة + قيود الرصيد الافتتاحي للودائع القائمة", detail_source=f"rp_opening:{dep_label}"))
     receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
     receipts += [FinancialStatementLine(name=cat, amount=value) for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
     payments = [FinancialStatementLine(name=cat, amount=value) for cat, value in payments_by_cat.items() if round(value, 2) != 0]
@@ -9483,7 +9491,7 @@ async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date:
     deposit_docs = await db.deposits.find(with_organization({}, org_id), {"_id": 0, "deposit_number": 1, "bank_id": 1, "bank_name": 1}).to_list(100000)
     bank_docs = await db.banks.find(with_organization({}, org_id), {"_id": 0, "id": 1, "name": 1}).to_list(1000)
     bank_name_by_id = {b.get("id"): b.get("name") for b in bank_docs}
-    deposit_bank_by_ref = {str(d.get("deposit_number")): (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id"))) for d in deposit_docs if d.get("deposit_number") is not None}
+    deposit_bank_by_ref = {str(d.get("deposit_number")): (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id")) or (BANKS.get(d.get("bank_id")) or {}).get("name")) for d in deposit_docs if d.get("deposit_number") is not None}
 
     def is_bank(line: dict) -> bool:
         code = str(line.get("account_code") or "")
