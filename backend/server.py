@@ -4150,6 +4150,25 @@ def sum_manual_charge_items(document: Optional[dict]) -> float:
     return round(sum(float(item.get("total") if item.get("total") is not None else float(item.get("count") or 1) * float(item.get("amount") or 0)) for item in document.get("items", [])), 2)
 
 
+RP_RECEIPT_LABELS = {
+    "إيرادات اشتراكات العضوية": "اشتراكات",
+    "إيرادات فوائد ودائع": "فوائد الودائع",
+    "عوائد ودائع مستحقة": "فوائد الودائع",
+    "إيرادات أوامر الدفع": "مقبوضات أخرى",
+    "دائنون متنوعون": "حسابات دائنة ومدينة",
+}
+
+
+def rp_contra_label(cl: dict) -> str:
+    name = str(cl.get("account_name") or "")
+    notes = str(cl.get("notes") or "")
+    if name == "المصروفات":
+        return "إعانات" if "إعانات" in notes else "مصروفات إدارية"
+    if name == "المصروفات البنكية":
+        return "مصروفات بنكية"
+    return RP_RECEIPT_LABELS.get(name, name)
+
+
 async def calculate_bank_reconciliation_balance_breakdown(bank_id: str, period_label: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, as_of_date: Optional[date] = None) -> BankReconciliationBalanceBreakdown:
     await ensure_bank_async(bank_id)
     period_from, period_to = reconciliation_period_bounds(period_label, year, month, as_of_date)
@@ -4949,22 +4968,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
 
     deposit_bank_by_ref_static = {str(d.get("deposit_number")): BANKS[d.get("bank_id")]["name"] for d in deposit_docs if d.get("deposit_number") is not None and d.get("bank_id") in BANKS}
 
-    rp_receipt_labels = {
-        "إيرادات اشتراكات العضوية": "اشتراكات",
-        "إيرادات فوائد ودائع": "فوائد الودائع",
-        "عوائد ودائع مستحقة": "فوائد الودائع",
-        "إيرادات أوامر الدفع": "مقبوضات أخرى",
-        "دائنون متنوعون": "حسابات دائنة ومدينة",
-    }
-
-    def _rp_label(cl: dict) -> str:
-        name = str(cl.get("account_name") or "")
-        notes = str(cl.get("notes") or "")
-        if name == "المصروفات":
-            return "إعانات" if "إعانات" in notes else "مصروفات إدارية"
-        if name == "المصروفات البنكية":
-            return "مصروفات بنكية"
-        return rp_receipt_labels.get(name, name)
+    _rp_label = rp_contra_label
 
     opening_by_bank: Dict[str, float] = {}
     closing_by_bank: Dict[str, float] = {}
@@ -5008,9 +5012,9 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
         dep_label = f"{bank_info['name']} - ودائع"
         receipts.append(FinancialStatementLine(name=f"رصيد أول المدة - {dep_label}", amount=round(opening_by_bank.pop(dep_label, 0), 2), details="أرصدة الودائع لأجل في البنك قبل بداية الفترة + قيود الرصيد الافتتاحي للودائع القائمة", detail_source=f"rp_opening:{dep_label}"))
     receipts += [FinancialStatementLine(name=f"رصيد أول المدة - {bank}", amount=value, details="أرصدة الودائع/الحسابات قبل بداية الفترة + قيود الرصيد الافتتاحي", detail_source=f"rp_opening:{bank}") for bank, value in opening_by_bank.items() if round(value, 2) != 0]
-    receipts += [FinancialStatementLine(name=cat, amount=value) for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
-    payments = [FinancialStatementLine(name=cat, amount=value) for cat, value in payments_by_cat.items() if round(value, 2) != 0]
-    payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value) for bank, value in closing_by_bank.items() if round(value, 2) != 0]
+    receipts += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من هذا البند", detail_source=f"rp_receipt:{cat}") for cat, value in receipts_by_cat.items() if round(value, 2) != 0]
+    payments = [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0]
+    payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
     payments_total = round(sum(line.amount for line in payments), 2)
     errors = await build_accounting_errors(organization_id, balance_report, income_report, assets_total, liability_equity_total)
@@ -9480,18 +9484,20 @@ async def accrued_deposit_interest_line_detail(org_id: str, to_date: Optional[st
     return _line_detail_result("accrued_deposit_interest", "cumulative_to", rows)
 
 
-async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], label: str):
-    """تفصيل بند «رصيد أول المدة - ...» غير الجاري (مثل الودائع لأجل) بنفس منطق حساب المقبوضات والمدفوعات."""
+async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date: Optional[str], label: str, kind: str = "rp_opening"):
+    """تفصيل بنود حساب المقبوضات والمدفوعات بنفس منطق تصنيف القائمة (أول المدة/مقبوضات/مدفوعات/آخر المدة)."""
     pf = _parse_date_opt(from_date)
     pt = _parse_date_opt(to_date)
     rows = []
+    scope = {"rp_opening": "cumulative_before", "rp_closing": "cumulative_to"}.get(kind, "period")
     if not (pf and pt):
-        return _line_detail_result(f"rp_opening:{label}", "cumulative_before", rows)
+        return _line_detail_result(f"{kind}:{label}", scope, rows)
     entries = await db.journal_entries.find(with_organization({"status": "approved", "is_reversal": {"$ne": True}, "entry_date": {"$lte": pt.isoformat()}}, org_id), {"_id": 0}).sort("entry_date", 1).to_list(100000)
     deposit_docs = await db.deposits.find(with_organization({}, org_id), {"_id": 0, "deposit_number": 1, "bank_id": 1, "bank_name": 1}).to_list(100000)
     bank_docs = await db.banks.find(with_organization({}, org_id), {"_id": 0, "id": 1, "name": 1}).to_list(1000)
     bank_name_by_id = {b.get("id"): b.get("name") for b in bank_docs}
-    deposit_bank_by_ref = {str(d.get("deposit_number")): (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id")) or (BANKS.get(d.get("bank_id")) or {}).get("name")) for d in deposit_docs if d.get("deposit_number") is not None}
+    deposit_bank_by_ref = {str(d.get("deposit_number")): (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id"))) for d in deposit_docs if d.get("deposit_number") is not None and (d.get("bank_name") or bank_name_by_id.get(d.get("bank_id")))}
+    deposit_bank_by_ref_static = {str(d.get("deposit_number")): BANKS[d.get("bank_id")]["name"] for d in deposit_docs if d.get("deposit_number") is not None and d.get("bank_id") in BANKS}
 
     def is_bank(line: dict) -> bool:
         code = str(line.get("account_code") or "")
@@ -9504,10 +9510,16 @@ async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date:
         edate = str(entry.get("entry_date") or "")
         lines = entry.get("lines", [])
         contra = [ln for ln in lines if not is_bank(ln)]
-        is_opening_entry = bool(contra) and str(contra[0].get("account_name") or "") == "رصيد افتتاحي"
-        if edate >= pf.isoformat() and not is_opening_entry:
+        contra_name = rp_contra_label(contra[0]) if contra else (entry.get("description") or "حركة نقدية")
+        in_period = pf.isoformat() <= edate <= pt.isoformat()
+        is_opening = not in_period or contra_name == "رصيد افتتاحي"
+        if kind == "rp_opening" and not is_opening:
+            continue
+        if kind in ("rp_receipt", "rp_payment") and (is_opening or not contra or contra_name != label):
             continue
         dep_bank = deposit_bank_by_ref.get(str(entry.get("reference"))) if entry.get("reference") is not None else None
+        if kind == "rp_opening":
+            dep_bank = dep_bank or deposit_bank_by_ref_static.get(str(entry.get("reference")))
         for line in lines:
             if not is_bank(line):
                 continue
@@ -9515,10 +9527,20 @@ async def rp_opening_line_detail(org_id: str, from_date: Optional[str], to_date:
                 name = f"{dep_bank} - ودائع" if dep_bank else "ودائع لأجل"
             else:
                 name = str(line.get("account_name") or "البنك")
-            if name != label:
+            debit = round(float(line.get("debit") or 0), 2)
+            credit = round(float(line.get("credit") or 0), 2)
+            if kind in ("rp_opening", "rp_closing") and name != label:
                 continue
-            rows.append({"entry_date": edate, "entry_number": entry.get("entry_number") or "", "description": entry.get("description") or line.get("notes") or "", "debit": round(float(line.get("debit") or 0), 2), "credit": round(float(line.get("credit") or 0), 2)})
-    return _line_detail_result(f"rp_opening:{label}", "cumulative_before", rows)
+            if kind == "rp_receipt":
+                if debit <= 0:
+                    continue
+                credit = 0
+            if kind == "rp_payment":
+                if credit <= 0:
+                    continue
+                debit, credit = credit, 0
+            rows.append({"entry_date": edate, "entry_number": entry.get("entry_number") or "", "description": f"{entry.get('description') or line.get('notes') or ''} — {line.get('account_name') or ''}", "debit": debit, "credit": credit})
+    return _line_detail_result(f"{kind}:{label}", scope, rows)
 
 
 async def bank_recon_line_detail(bank_id: str, to_date: Optional[str]):
@@ -11625,8 +11647,9 @@ async def get_financial_statement_line_detail(
             return await accum_depreciation_line_detail(organization_id)
         if source in ("general_surplus", "carried_surplus"):
             return await surplus_line_detail(organization_id, from_date, to_date, source)
-        if source.startswith("rp_opening:"):
-            return await rp_opening_line_detail(organization_id, from_date, to_date, source.split(":", 1)[1])
+        if source.split(":", 1)[0] in ("rp_opening", "rp_receipt", "rp_payment", "rp_closing"):
+            kind, label = source.split(":", 1)
+            return await rp_opening_line_detail(organization_id, from_date, to_date, label, kind)
         if source.startswith("bank_recon_open:"):
             return await bank_recon_line_detail(source.split(":", 1)[1], from_date)
         if source.startswith("bank_recon:"):
