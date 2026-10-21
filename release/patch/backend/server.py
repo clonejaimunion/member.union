@@ -5033,11 +5033,11 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     receipts.append(FinancialStatementLine(name="فوائد الودائع", amount=round((rp_int_line.amount if rp_int_line else 0) - rp_accrued, 2), details="فوائد الودائع من حساب الإيرادات والمصروفات خلال الفترة المختارة بدون الفوائد المستحقة غير المحصّلة", detail_source="rp_deposit_interest"))
     receipts.append(FinancialStatementLine(name="ايرادات اخري", amount=rp_rev_other_amount, details="نفس مبلغ «ايرادات اخري» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="rev_other"))
     receipts.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(receipts_by_cat.get("حسابات دائنة ومدينة", 0), 2), details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من الحسابات الدائنة والمدينة (تحسب تلقائياً)", detail_source="rp_receipt:حسابات دائنة ومدينة"))
-    # «مصروفات ادارية» = مصروفات ادارية بقائمة الدخل − صندوق الجزاءات − شيكات دائنون متنوعون لم تقدم للصرف (خلال الفترة)
+    # «مصروفات ادارية» = مصروفات ادارية بقائمة الدخل − حـ/ صندوق الجزاءات (خلال الفترة)
     rp_admin_line = next((l for l in expense_lines if l.detail_source == "expense_admin"), None)
     rp_admin_exclusions = await rp_admin_exclusion_rows(organization_id, from_iso, to_iso)
     rp_admin_amount = round((rp_admin_line.amount if rp_admin_line else 0) - sum(r["credit"] for r in rp_admin_exclusions), 2)
-    payments = [FinancialStatementLine(name="مصروفات ادارية", amount=rp_admin_amount, details="مصروفات ادارية من حساب الإيرادات والمصروفات خلال الفترة المختارة مع عدم احتساب حـ/ صندوق الجزاءات وشيكات دائنون متنوعون لم تقدم للصرف", detail_source="rp_expense_admin")]
+    payments = [FinancialStatementLine(name="مصروفات ادارية", amount=rp_admin_amount, details="مصروفات ادارية من حساب الإيرادات والمصروفات خلال الفترة المختارة مع عدم احتساب حـ/ صندوق الجزاءات", detail_source="rp_expense_admin")]
     payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية")]
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
@@ -9510,7 +9510,7 @@ async def accrued_deposit_interest_line_detail(org_id: str, to_date: Optional[st
 
 
 async def rp_admin_exclusion_rows(org_id: str, from_date: Optional[str], to_date: Optional[str]) -> list:
-    """صفوف الخصم من «مصروفات ادارية» بالمقبوضات والمدفوعات: صندوق الجزاءات + الشيكات الصادرة المعلّقة خلال الفترة."""
+    """صفوف الخصم من «مصروفات ادارية» بالمقبوضات والمدفوعات: حـ/ صندوق الجزاءات خلال الفترة فقط."""
     if not (from_date and to_date):
         return []
     _, credit_rows = await aggregate_credit_accounts_for_period(org_id, to_date)
@@ -9519,7 +9519,7 @@ async def rp_admin_exclusion_rows(org_id: str, from_date: Optional[str], to_date
         desc = str(r.get("description") or "")
         if not (from_date <= str(r.get("entry_date") or "")[:10] <= to_date):
             continue
-        if not (desc.startswith("صندوق الجزاءات") or desc.startswith("شيك صادر معلّق")):
+        if not desc.startswith("صندوق الجزاءات"):
             continue
         amount = round(float(r.get("credit") or 0) - float(r.get("debit") or 0), 2)
         if amount:
