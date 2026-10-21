@@ -5040,6 +5040,15 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     payments = [FinancialStatementLine(name="مصروفات ادارية", amount=rp_admin_amount, details="مصروفات ادارية من حساب الإيرادات والمصروفات خلال الفترة المختارة مع عدم احتساب حـ/ صندوق الجزاءات", detail_source="rp_expense_admin")]
     payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية", "حسابات دائنة ومدينة")]
     payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
+    # رصيد آخر المدة: الجاري = رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة، والودائع = أصل الودائع النشطة في نهاية الفترة
+    for bank_id, bank_info in BANKS.items():
+        closing_breakdown = await calculate_bank_reconciliation_balance_breakdown(bank_id, year=period_to.year, month=period_to.month)
+        closing_by_bank.pop(bank_info["name"], None)
+        payments.append(FinancialStatementLine(name=f"رصيد آخر المدة - {bank_info['name']} - جاري", amount=round(closing_breakdown.book_balance, 2), details="رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة المختارة", detail_source=f"bank_recon:{bank_id}"))
+    closing_by_bank.pop("ودائع لأجل", None)
+    for bank_id, bank_info in BANKS.items():
+        closing_by_bank.pop(f"{bank_info['name']} - ودائع", None)
+        payments.append(FinancialStatementLine(name=f"رصيد آخر المدة - {bank_info['name']} - ودائع", amount=round(await active_deposit_principal_total(organization_id, period_to, bank_id), 2), details="إجمالي أصل الودائع النشطة في البنك في نهاية الفترة المختارة", detail_source=f"bank_deposits:{bank_id}"))
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
     payments_total = round(sum(line.amount for line in payments), 2)
