@@ -5038,8 +5038,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     rp_admin_exclusions = await rp_admin_exclusion_rows(organization_id, from_iso, to_iso)
     rp_admin_amount = round((rp_admin_line.amount if rp_admin_line else 0) - sum(r["credit"] for r in rp_admin_exclusions), 2)
     payments = [FinancialStatementLine(name="مصروفات ادارية", amount=rp_admin_amount, details="مصروفات ادارية من حساب الإيرادات والمصروفات خلال الفترة المختارة مع عدم احتساب حـ/ صندوق الجزاءات", detail_source="rp_expense_admin")]
-    payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
     payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية", "حسابات دائنة ومدينة")]
+    payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
     payments += [FinancialStatementLine(name=f"رصيد آخر المدة - {bank}", amount=value, details="رصيد الحساب في دفتر اليومية حتى نهاية الفترة المختارة", detail_source=f"rp_closing:{bank}") for bank, value in closing_by_bank.items() if round(value, 2) != 0]
     receipts_total = round(sum(line.amount for line in receipts), 2)
     payments_total = round(sum(line.amount for line in payments), 2)
