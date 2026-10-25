@@ -5031,7 +5031,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     rp_int_line = next((l for l in revenue_lines if l.detail_source == "deposit_interest_combined"), None)
     receipts.append(FinancialStatementLine(name="فوائد الودائع", amount=round(rp_int_line.amount if rp_int_line else 0, 2), details="فوائد ودائع كل البنوك (كشف العوائد) + فوائد الحساب الجاري خلال الفترة المختارة", detail_source="rp_deposit_interest"))
     receipts.append(FinancialStatementLine(name="ايرادات اخري", amount=rp_rev_other_amount, details="نفس مبلغ «ايرادات اخري» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="rev_other"))
-    receipts.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(receipts_by_cat.get("حسابات دائنة ومدينة", 0), 2), details="المبالغ المحصّلة في البنوك خلال الفترة المختارة من الحسابات الدائنة والمدينة (تحسب تلقائياً)", detail_source="rp_receipt:حسابات دائنة ومدينة"))
+    rp_cd_receipt_rows, rp_cd_payment_rows = await rp_credit_debit_rows(organization_id, period_from, period_to)
+    receipts.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(_rows_net(rp_cd_receipt_rows) + receipts_by_cat.get("حسابات دائنة ومدينة", 0), 2), details="شيكات صادرة لم تقدم للصرف في نهاية الفترة + خصومات محجوزة من المصروفات لم تُورَّد (تحسب تلقائياً)", detail_source="rp_cd_receipts"))
     # «مصروفات ادارية» = مصروفات ادارية بقائمة الدخل − حـ/ صندوق الجزاءات (خلال الفترة)
     rp_admin_line = next((l for l in expense_lines if l.detail_source == "expense_admin"), None)
     rp_admin_exclusions = await rp_admin_exclusion_rows(organization_id, from_iso, to_iso)
@@ -5040,7 +5041,7 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
     rp_subsidies_line = next((l for l in expense_lines if l.detail_source == "expense_subsidies"), None)
     payments.append(FinancialStatementLine(name="إعانات", amount=round(rp_subsidies_line.amount if rp_subsidies_line else 0, 2), details="نفس مبلغ «إعانات» في حساب الإيرادات والمصروفات خلال الفترة المختارة", detail_source="expense_subsidies"))
     payments += [FinancialStatementLine(name=cat, amount=value, details="المبالغ المدفوعة من البنوك خلال الفترة المختارة لهذا البند", detail_source=f"rp_payment:{cat}") for cat, value in payments_by_cat.items() if round(value, 2) != 0 and cat not in ("مصروفات بنكية", "مصروفات إدارية", "حسابات دائنة ومدينة", "إعانات")]
-    payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=0.0, details="بند ثابت صفر مؤقتاً لحين تحديد طريقة الحساب", detail_source="rp_payment_fixed_zero"))
+    payments.append(FinancialStatementLine(name="حسابات دائنة ومدينة", amount=round(_rows_net(rp_cd_payment_rows), 2), details="سلف العاملين المصروفة خلال الفترة ناقص أقساطها المخصومة من المرتبات (تحسب تلقائياً)", detail_source="rp_cd_payments"))
     # رصيد آخر المدة: الجاري = رصيد التسوية البنكية التلقائي قبل تسويات الشيكات لشهر نهاية الفترة، والودائع = أصل الودائع النشطة في نهاية الفترة
     for bank_id, bank_info in BANKS.items():
         closing_by_bank.pop(bank_info["name"], None)
@@ -9546,6 +9547,54 @@ async def rp_admin_exclusion_rows(org_id: str, from_date: Optional[str], to_date
     return rows
 
 
+def _rows_net(rows: list) -> float:
+    return round(sum(float(r.get("debit") or 0) - float(r.get("credit") or 0) for r in rows), 2)
+
+
+async def rp_credit_debit_rows(org_id: str, period_from: date, period_to: date):
+    """بندا «حسابات دائنة ومدينة» في المقبوضات والمدفوعات مع كل تفاصيلهما.
+    المقبوضات (دائنة): الشيكات الصادرة غير المقدمة للصرف في نهاية الفترة (من التسوية المحفوظة لشهر النهاية)
+    + الخصومات المحجوزة من المصروفات خلال الفترة − ما وُرِّد منها. المدفوعات (مدينة): سلف العاملين المصروفة − أقساطها المخصومة."""
+    receipt_rows, payment_rows = [], []
+    for bank_id, bank_info in BANKS.items():
+        _, rec = await bank_statement_closing_balance(org_id, bank_id, period_to)
+        if not rec:
+            continue
+        rec_date = str((rec.get("balance_breakdown") or {}).get("period_to") or "")
+        for kind, label in (("outstanding_checks", "شيك صادر لم يقدم للصرف"), ("prior_year_outstanding_checks", "شيك صادر من سنة سابقة لم يقدم للصرف")):
+            for chk in rec.get(kind) or []:
+                exp = await db.expenses.find_one(with_organization({"check_number": chk.get("check_number"), "bank_id": bank_id}, org_id), {"_id": 0, "expense_number": 1, "payee_name": 1, "gross_statement": 1, "issued_at": 1})
+                extra = f" — مصروف رقم {exp.get('expense_number')} بتاريخ {exp.get('issued_at')} — المستفيد: {exp.get('payee_name') or '-'} — البيان: {exp.get('gross_statement') or '-'}" if exp else " — من أرصدة السنة السابقة"
+                receipt_rows.append({"entry_date": str((exp or {}).get("issued_at") or rec_date), "entry_number": f"شيك {chk.get('check_number')}", "description": f"يُضاف: {label} — {bank_info['name']} (تسوية {rec.get('period_label') or ''}){extra}", "debit": round(float(chk.get("amount") or 0), 2), "credit": 0})
+    expenses = await db.expenses.find(with_organization({"issued_at": {"$gte": period_from.isoformat(), "$lte": period_to.isoformat() + "T23:59:59"}}, org_id), {"_id": 0}).sort("issued_at", 1).to_list(100000)
+    for exp in expenses:
+        if (exp.get("organization_scope") or "social_solidarity_project") != "social_solidarity_project" or exp.get("expense_category") == "deposit_link":
+            continue
+        statement = str(exp.get("gross_statement") or "")
+        if "إعان" in statement or "اعان" in statement:
+            continue
+        num = exp.get("expense_number") or ""
+        idate = str(exp.get("issued_at") or "")[:10]
+        payee = exp.get("payee_name") or "-"
+        net = round(float(exp.get("net_amount") if exp.get("net_amount") is not None else exp.get("gross_amount") or 0), 2)
+        if _expense_category_amount(exp) == 0 and net > 0:
+            if "سلف" in statement:
+                payment_rows.append({"entry_date": idate, "entry_number": f"مصروف {num}", "description": f"يُضاف: سلفة مصروفة — المستفيد: {payee} — البيان: {statement}", "debit": net, "credit": 0})
+            else:
+                receipt_rows.append({"entry_date": idate, "entry_number": f"مصروف {num}", "description": f"يُخصم: توريد خصومات محجوزة — الجهة: {payee} — البيان: {statement}", "debit": 0, "credit": net})
+            continue
+        for ded in exp.get("deductions") or []:
+            amount = round(float(ded.get("amount") or 0), 2)
+            ded_text = str(ded.get("statement") or ded.get("name") or "")
+            if not amount or "غياب" in ded_text or "جزاء" in ded_text:
+                continue
+            if "سلف" in ded_text:
+                payment_rows.append({"entry_date": idate, "entry_number": f"مصروف {num}", "description": f"يُخصم: قسط سلفة مخصوم ({ded_text}) — من: {payee} — البيان: {statement}", "debit": 0, "credit": amount})
+            else:
+                receipt_rows.append({"entry_date": idate, "entry_number": f"مصروف {num}", "description": f"يُضاف: خصم محجوز ({ded_text}) — من: {payee} — البيان: {statement}", "debit": amount, "credit": 0})
+    return receipt_rows, payment_rows
+
+
 async def bank_statement_closing_balance(org_id: str, bank_id: str, period_to: date):
     """رصيد كشف البنك في نهاية شهر نهاية الفترة من التسوية البنكية المحفوظة؛ بدونها = رصيد الدفتر بعد حركة الشهر."""
     month_prefix = f"{period_to.year}-{period_to.month:02d}"
@@ -11733,8 +11782,14 @@ async def get_financial_statement_line_detail(
             return await deposit_interest_line_detail(organization_id, from_date, to_date)
         if source.startswith("bank_statement_close:"):
             return await bank_statement_close_line_detail(organization_id, source.split(":", 1)[1], to_date)
-        if source == "rp_payment_fixed_zero":
-            return _line_detail_result(source, "period", [])
+        if source in ("rp_cd_receipts", "rp_cd_payments"):
+            pf, pt = _parse_date_opt(from_date), _parse_date_opt(to_date)
+            receipt_rows, payment_rows = await rp_credit_debit_rows(organization_id, pf, pt) if pf and pt else ([], [])
+            rows = receipt_rows if source == "rp_cd_receipts" else payment_rows
+            if source == "rp_cd_receipts":
+                bank_rows = await rp_opening_line_detail(organization_id, from_date, to_date, "حسابات دائنة ومدينة", "rp_receipt")
+                rows = rows + bank_rows["rows"]
+            return _line_detail_result(source, "period", rows)
         if source == "rp_expense_admin":
             detail = await expense_admin_line_detail(organization_id, from_date, to_date)
             rows = detail["rows"] + await rp_admin_exclusion_rows(organization_id, from_date, to_date)
