@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { usePrintOrientation, printWithOrientation } from "@/lib/printOrientation";
+import { injectPrintLogo } from "@/lib/printLogo";
 
 const sourceUrl = "https://www.banquemisr.ae/#tab-2";
 const emptyExternalData = { rows: [], status: "NO_DATA" };
@@ -40,6 +41,7 @@ const printRequest = (request, markPrinted, orientation = "portrait") => {
   const emptyRowsHtml = `<tr><td colspan="7">لا توجد بيانات خارجية</td></tr>`;
   printWindow.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>مطبوعة بنك مصر</title><style>@page{size:A4 ${orientation};margin:8mm}body{font-family:Tahoma,Arial,sans-serif;color:#111827;direction:rtl}h1,h2,h3,p{margin:0 0 8px}.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:10px 0}.box{border:1px solid #94a3b8;padding:8px;border-radius:6px}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #111827;padding:6px;text-align:right;font-size:11px;vertical-align:top}th{background:#0f172a;color:white}.stamp{font-size:10px;color:#475569;margin-top:10px}</style></head><body><h1>مطبوعة بنك مصر - تقرير خارجي مدمج</h1><p>طلب رقم: ${printable(request.id, "")}</p><p>مصدر البيانات: ${printable(external.source_url || sourceUrl, "")}</p><p>وقت جلب البيانات: ${printable(external.fetched_at, "")}</p><section class="meta"><div class="box"><h3>بيانات ما قبل الطباعة</h3><p>الفترة: ${printable(manual.period_from)} إلى ${printable(manual.period_to)}</p><p>ملاحظات البنك: ${printable(manual.bank_notes)}</p><p>أرقام الشيكات/التسويات: ${printable(manual.checks_or_settlements_numbers)}</p><p>تعديلات وصفية: ${printable(manual.descriptive_adjustments)}</p></div><div class="box"><h3>الاعتماد الداخلي</h3><p>الاسم: ${printable(manual.internal_approver_name)}</p><p>التوقيع/الكود: ${printable(manual.internal_signature)}</p><p>كود الاعتماد: ${printable(manual.approval_code)}</p><p>حالة الطلب: ${printable(statusLabels[request.status] || request.status)}</p></div></section><table><thead><tr><th>م</th><th>القسم</th><th>البند</th><th>العملة</th><th>شراء</th><th>بيع</th><th>الوصف</th></tr></thead><tbody>${rowsHtml || emptyRowsHtml}</tbody></table><p class="stamp">تم إنشاء التقرير من طبقة دمج مستقلة: External Data + Manual Inputs. لا يوجد أثر على القيود أو التسويات.</p></body></html>`);
   printWindow.document.close();
+  injectPrintLogo(printWindow);
   printWindow.focus();
   setTimeout(() => {
     printWindow.print();

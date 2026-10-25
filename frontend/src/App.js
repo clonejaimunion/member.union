@@ -176,6 +176,7 @@ function App() {
           <BrowserRouter>
             <PageTitleManager />
             <SessionSecurityManager />
+            <img src="/assets/union-logo.jpeg" alt="" className="print-corner-logo" data-testid="print-corner-logo" />
             <PrintOrganizationHeading />
             <Routes>
               <Route path="/login" element={<LoginPage />} />

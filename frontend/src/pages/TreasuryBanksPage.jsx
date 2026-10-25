@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 import { printNow } from "@/lib/printOrientation";
+import { injectPrintLogo } from "@/lib/printLogo";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const startOfYear = () => `${new Date().getFullYear()}-01-01`;
@@ -115,6 +116,7 @@ export default function TreasuryBanksPage() {
     }
     const title = `الخزينة والبنوك - ${selectedAccountName}`;
     printWindow.document.write(buildPrintableHtml(title, reportNode.outerHTML));
+    injectPrintLogo(printWindow);
     printWindow.document.close();
     printWindow.focus();
     if (printNowAfter) setTimeout(() => printWindow.print(), 250);

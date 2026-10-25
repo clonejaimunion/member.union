@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { bankPalette } from "@/lib/banks";
 import { formatCurrency, formatDate, formatNumber, formatRate } from "@/lib/format";
+import { injectPrintLogo } from "@/lib/printLogo";
 
 export default function ReportPage({ type }) {
   const { bankId } = useParams();
@@ -54,6 +55,7 @@ export default function ReportPage({ type }) {
     if (!printWindow) return;
     printWindow.document.write(buildOfficeHtml({ title: " ", selectors: [A4_SELECTOR], excel: false, orientation: "portrait" }));
     printWindow.document.close();
+    injectPrintLogo(printWindow);
     printWindow.focus();
     setTimeout(() => {
       printWindow.print();

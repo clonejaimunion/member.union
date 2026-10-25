@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { PrintOrientationToggle } from "@/components/PrintOrientationToggle";
 import { usePrintOrientation, printWithOrientation } from "@/lib/printOrientation";
+import { injectPrintLogo } from "@/lib/printLogo";
 
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
@@ -118,6 +119,7 @@ export const ExportReportButtons = ({ title, fileName, selectors, printSelectors
     }
     printWindow.document.write(buildOfficeHtml({ title: reportTitle, selectors: printSelectors, excel: false, orientation }));
     printWindow.document.close();
+    injectPrintLogo(printWindow);
     printWindow.focus();
     setTimeout(() => {
       printWindow.print();
