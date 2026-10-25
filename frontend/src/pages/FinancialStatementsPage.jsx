@@ -127,8 +127,8 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
       <Table data-testid={testId}>
         <TableHeader>
           <TableRow className="bg-white hover:bg-white">
-            <TableHead className="border border-slate-300 text-center font-extrabold text-slate-900">البيان</TableHead>
             <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">{year}</TableHead>
+            <TableHead className="border border-slate-300 text-center font-extrabold text-slate-900">البيان</TableHead>
             {showPrev && <TableHead className="w-32 border border-slate-300 text-center font-extrabold text-slate-900">مقارن {prevYear}</TableHead>}
           </TableRow>
         </TableHeader>
@@ -145,12 +145,12 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
                 rowIndex += 1;
                 return (
                   <TableRow key={`${line.code || ""}-${line.name}-${rowIndex}`} data-testid={`${testId}-row-${rowIndex}`}>
-                    <TableCell className="border border-slate-300 pr-6 font-bold" data-testid={`${testId}-row-${rowIndex}-name`}>{line.name}</TableCell>
                     <TableCell className="border border-slate-300 text-center font-extrabold" data-testid={`${testId}-row-${rowIndex}-amount`}>
                       {onAmountClick ? (
                         <button type="button" onClick={() => onAmountClick(group, line)} className="w-full cursor-pointer text-center font-extrabold text-slate-900 underline decoration-dotted decoration-slate-400 underline-offset-4 transition-colors hover:text-emerald-700 print:no-underline" data-testid={`${testId}-row-${rowIndex}-amount-button`}>{formatCurrency(Number(line.amount || 0))}</button>
                       ) : formatCurrency(Number(line.amount || 0))}
                     </TableCell>
+                    <TableCell className="border border-slate-300 pr-6 font-bold" data-testid={`${testId}-row-${rowIndex}-name`}>{line.name}</TableCell>
                     {showPrev && <TableCell className="border border-slate-300 text-center font-bold text-slate-600" data-testid={`${testId}-row-${rowIndex}-prev-amount`}>{formatCurrency(prevOf(line.name))}</TableCell>}
                   </TableRow>
                 );
@@ -158,8 +158,8 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
             </Fragment>
           ))}
           <TableRow className="bg-slate-200 font-extrabold hover:bg-slate-200" data-testid={`${testId}-total-row`}>
-            <TableCell className="border border-slate-300">الإجمالي</TableCell>
             <TableCell className="border border-slate-300 text-center" data-testid={`${testId}-current-total`}>{formatCurrency(total || 0)}</TableCell>
+            <TableCell className="border border-slate-300">الإجمالي</TableCell>
             {showPrev && <TableCell className="border border-slate-300 text-center text-slate-600" data-testid={`${testId}-prev-total`}>{formatCurrency(prevTotal || 0)}</TableCell>}
           </TableRow>
         </TableBody>
