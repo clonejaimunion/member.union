@@ -1,4 +1,4 @@
-export const PRINT_LOGO_PATH = "/assets/union-logo.jpeg";
+export const PRINT_LOGO_PATH = "/assets/union-logo-white.jpeg";
 
 const logoStyle = (sizeMm) => `html,body{position:relative}.union-print-logo{position:absolute;top:0;left:0;width:${sizeMm}mm;height:${sizeMm}mm;object-fit:contain;z-index:9999;print-color-adjust:exact;-webkit-print-color-adjust:exact}`;
 

@@ -77,7 +77,7 @@ html {
     width: 64px;
     height: 64px;
     margin: 0 auto 8px 0;
-    background: url("./assets/union-logo.jpeg") center / contain no-repeat;
+    background: url("./assets/union-logo-white.jpeg") center / contain no-repeat;
     pointer-events: none;
 }
 
