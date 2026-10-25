@@ -136,7 +136,7 @@ function GroupedSideTable({ sideTitle, groups, total, year, prevYear, showPrev, 
           {groups.map((group, gi) => (
             <Fragment key={`g-${gi}`}>
               <TableRow className="bg-slate-100 hover:bg-slate-100" data-testid={`${testId}-group-${gi}`}>
-                <TableCell colSpan={cols} className="border border-slate-300 text-center font-extrabold text-slate-800">{group.title}</TableCell>
+                <TableCell colSpan={cols} className="border border-slate-300 text-center font-extrabold text-slate-800">({group.title})</TableCell>
               </TableRow>
               {(group.rows || []).length === 0 && (
                 <TableRow><TableCell colSpan={cols} className="border border-slate-300 py-2 text-center text-sm font-bold text-slate-400">—</TableCell></TableRow>
