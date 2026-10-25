@@ -70,6 +70,17 @@ html {
     display: none;
 }
 
+[data-testid$="-report-section"]::before,
+[data-testid$="-export-section"]::before {
+    content: "";
+    display: block;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 8px 0;
+    background: url("./assets/union-logo.jpeg") center / contain no-repeat;
+    pointer-events: none;
+}
+
 @media print {
     @page {
         size: A4 portrait;
@@ -91,13 +102,18 @@ html {
         position: relative;
     }
 
+    [data-testid$="-report-section"]::before,
+    [data-testid$="-export-section"]::before {
+        display: none !important;
+    }
+
     .print-corner-logo {
         display: block !important;
         position: absolute;
         top: 0;
         left: 0;
-        width: 16mm;
-        height: 16mm;
+        width: 20mm;
+        height: 20mm;
         object-fit: contain;
         z-index: 9999;
         print-color-adjust: exact;
