@@ -112,8 +112,8 @@ html {
         position: absolute;
         top: 0;
         left: 0;
-        width: 20mm;
-        height: 20mm;
+        width: 38mm;
+        height: 38mm;
         object-fit: contain;
         z-index: 9999;
         print-color-adjust: exact;

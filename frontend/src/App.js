@@ -98,7 +98,7 @@ function PrintOrganizationHeading() {
   const { settings } = useAppSettings();
   if (!user?.organization_name) return null;
   return (
-    <div className="hidden print:block print:p-4 print:text-center print:font-bold" data-testid="print-organization-heading">
+    <div className="hidden print:flex print:min-h-[40mm] print:flex-col print:justify-center print:p-4 print:text-center print:font-bold" data-testid="print-organization-heading">
       <div>{user.organization_name}</div>
       <div>{settings.system_name}</div>
     </div>
