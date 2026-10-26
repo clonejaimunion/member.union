@@ -840,3 +840,5 @@
 - Balance sheet «نقدية وبنوك»: current accounts now = bank statement closing balance (bank_statement_closing_balance); all 3 banks (incl. البنك الزراعي) جاري + ودائع always shown even if zero, fixed order.
 - Global amount format: Eastern Arabic digits, no thousands separator, no currency, 2 decimals with "." (formatAmountPlain in lib/format.js; formatCurrency/formatNumber/formatEgpLabel use it).
 - PENDING APPROVAL: switching بنك التنمية جاري to statement balance raised assets by 41,209.03 (unpresented checks) and فائض مرحّل (plug) absorbed it (8,117,683.97 -> 8,158,893.00). Proposed: add unpresented checks to «حسابات دائنة» instead.
+- Inventory print reports (2026-06): GET /api/inventory/report (from_date,to_date,item_id) -> per-item opening/in/out/closing + movements with before/after balances. Frontend lib/inventoryPrint.js; buttons in InventoryPage filter box: «طباعة المنصرف خلال الفترة» (outs grouped per item with balance before/after + date) and «طباعة الرصيد خلال الفترة» (item summary + all movements). Uses page filters.
+- Pending decision: accrued deposit interest month (prev month vs period-end month) — user paused, step by step later.

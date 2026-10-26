@@ -11059,6 +11059,69 @@ async def list_inventory_movements(
     return [InventoryMovementResponse(**hydrate_inventory_movement(document)) for document in documents]
 
 
+@api_router.get("/inventory/report")
+async def inventory_period_report(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    item_id: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    item_query = with_organization({"id": item_id} if item_id else {})
+    items = await db.inventory_items.find(item_query, {"_id": 0}).sort("item_name", 1).to_list(5000)
+    movement_query = with_organization({"item_id": item_id} if item_id else {})
+    all_movements = await db.inventory_movements.find(movement_query, {"_id": 0}).to_list(50000)
+    all_movements.sort(key=_inventory_movement_sort_key)
+    from_iso = from_date.isoformat() if from_date else ""
+    to_iso = to_date.isoformat() if to_date else "9999-12-31"
+    by_item: dict = {}
+    for m in all_movements:
+        by_item.setdefault(m.get("item_id"), []).append(m)
+    result = []
+    for item in items:
+        opening_q = opening_v = 0.0
+        rows = []
+        for m in by_item.get(item["id"], []):
+            m_date = str(m.get("movement_date") or "")[:10]
+            if m_date > to_iso:
+                break
+            q_after = float(m.get("quantity_balance_after") or 0)
+            v_after = float(m.get("value_balance_after") or 0)
+            if m_date < from_iso:
+                opening_q, opening_v = q_after, v_after
+                continue
+            sign = 1 if m.get("movement_type") == "in" else -1
+            qty = float(m.get("quantity") or 0)
+            val = float(m.get("total_value") or 0)
+            rows.append({
+                "movement_date": m_date,
+                "movement_type": m.get("movement_type"),
+                "description": m.get("description") or "",
+                "reference": m.get("reference") or "",
+                "quantity": round(qty, 4),
+                "unit_cost": round(float(m.get("unit_cost") or 0), 4),
+                "total_value": round(val, 2),
+                "quantity_before": round(q_after - sign * qty, 4),
+                "value_before": round(v_after - sign * val, 2),
+                "quantity_after": round(q_after, 4),
+                "value_after": round(v_after, 2),
+            })
+        if not rows and opening_q == 0 and opening_v == 0:
+            continue
+        ins = [r for r in rows if r["movement_type"] == "in"]
+        outs = [r for r in rows if r["movement_type"] == "out"]
+        closing_q = rows[-1]["quantity_after"] if rows else opening_q
+        closing_v = rows[-1]["value_after"] if rows else opening_v
+        result.append({
+            "item_id": item["id"], "item_code": item.get("item_code"), "item_name": item.get("item_name"), "unit": item.get("unit") or "وحدة",
+            "opening_quantity": round(opening_q, 4), "opening_value": round(opening_v, 2),
+            "in_quantity": round(sum(r["quantity"] for r in ins), 4), "in_value": round(sum(r["total_value"] for r in ins), 2),
+            "out_quantity": round(sum(r["quantity"] for r in outs), 4), "out_value": round(sum(r["total_value"] for r in outs), 2),
+            "closing_quantity": round(closing_q, 4), "closing_value": round(closing_v, 2),
+            "movements": rows,
+        })
+    return {"from_date": from_iso or None, "to_date": to_date.isoformat() if to_date else None, "items": result}
+
+
 @api_router.post("/inventory/movements", response_model=InventoryMovementResponse)
 async def create_inventory_movement(payload: InventoryMovementCreate, current_user: dict = Depends(require_any_permission(["enter_deposits", "manage_expenses", "manage_revenues"]))):
     await sync_chart_accounts_for_organization(organization_id_or_default())
