@@ -4793,17 +4793,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             line_1300.detail_source = "accrued_deposit_interest"
             asset_lines.append(line_1300)
             continue
-        if code in bank_code_to_recon:
-            # رصيد البنك = رصيد التسوية البنكية قبل الشيكات للفترة المحددة
-            bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
-            bank_line.name = f"{row.account_name} - جاري"
-            bank_line.details = "رصيد التسوية البنكية الدفتري قبل تسويات الشيكات لشهر نهاية الفترة"
-            bank_line.detail_source = f"bank_recon:{bank_code_to_bid.get(code, '')}"
-            asset_lines.append(bank_line)
-            dep_amount = round(bank_code_to_deposits.get(code, 0.0), 2)
-            if dep_amount != 0:
-                bank_deposit_lines.append(FinancialStatementLine(code=code, name=f"{row.account_name} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة", detail_source=f"bank_deposits:{bank_code_to_bid.get(code, '')}"))
-            continue
+        if code in bank_code_to_bid:
+            continue  # بنود البنوك تُبنى أدناه بترتيب البنوك الثابت
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
             continue
@@ -4815,7 +4806,14 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             asset_lines.append(fa_line)
             continue
         asset_lines.append(financial_line_from_trial(row))
-    # بنود الودائع تظهر تحت بنود الجاري مباشرة ضمن «نقدية وبنوك»
+    # «نقدية وبنوك»: الجاري = رصيد كشف البنك آخر المدة، ثم الودائع؛ كل البنوك تظهر دائماً حتى لو صفر
+    bid_to_code = {bid: code for code, bid in bank_code_to_bid.items()}
+    for bid, bank_info in BANKS.items():
+        closing_statement, _ = await bank_statement_closing_balance(organization_id, bid, period_to)
+        asset_lines.append(FinancialStatementLine(code=bid_to_code.get(bid, "1100"), name=f"{bank_info['name']} - جاري", amount=round(closing_statement, 2), details="رصيد كشف الحساب البنكي في نهاية آخر شهر في الفترة (من التسوية البنكية المحفوظة)", detail_source=f"bank_statement_close:{bid}"))
+    for bid, bank_info in BANKS.items():
+        dep_amount = round(await active_deposit_principal_total(organization_id, period_to, bid), 2)
+        bank_deposit_lines.append(FinancialStatementLine(code=bid_to_code.get(bid, "1100"), name=f"{bank_info['name']} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة", detail_source=f"bank_deposits:{bid}"))
     asset_lines.extend(bank_deposit_lines)
     # بند «سلف العاملين» ضمن مجموعة «السلف»
     if employee_advances_value != 0:
@@ -11059,6 +11057,69 @@ async def list_inventory_movements(
             query["movement_date"]["$lte"] = to_date.isoformat()
     documents = await db.inventory_movements.find(query, {"_id": 0}).sort("movement_date", -1).to_list(5000)
     return [InventoryMovementResponse(**hydrate_inventory_movement(document)) for document in documents]
+
+
+@api_router.get("/inventory/report")
+async def inventory_period_report(
+    from_date: Optional[date] = Query(default=None),
+    to_date: Optional[date] = Query(default=None),
+    item_id: Optional[str] = Query(default=None),
+    _: dict = Depends(require_any_permission(["enter_deposits", "view_reports", "manage_expenses", "manage_revenues"])),
+):
+    item_query = with_organization({"id": item_id} if item_id else {})
+    items = await db.inventory_items.find(item_query, {"_id": 0}).sort("item_name", 1).to_list(5000)
+    movement_query = with_organization({"item_id": item_id} if item_id else {})
+    all_movements = await db.inventory_movements.find(movement_query, {"_id": 0}).to_list(50000)
+    all_movements.sort(key=_inventory_movement_sort_key)
+    from_iso = from_date.isoformat() if from_date else ""
+    to_iso = to_date.isoformat() if to_date else "9999-12-31"
+    by_item: dict = {}
+    for m in all_movements:
+        by_item.setdefault(m.get("item_id"), []).append(m)
+    result = []
+    for item in items:
+        opening_q = opening_v = 0.0
+        rows = []
+        for m in by_item.get(item["id"], []):
+            m_date = str(m.get("movement_date") or "")[:10]
+            if m_date > to_iso:
+                break
+            q_after = float(m.get("quantity_balance_after") or 0)
+            v_after = float(m.get("value_balance_after") or 0)
+            if m_date < from_iso:
+                opening_q, opening_v = q_after, v_after
+                continue
+            sign = 1 if m.get("movement_type") == "in" else -1
+            qty = float(m.get("quantity") or 0)
+            val = float(m.get("total_value") or 0)
+            rows.append({
+                "movement_date": m_date,
+                "movement_type": m.get("movement_type"),
+                "description": m.get("description") or "",
+                "reference": m.get("reference") or "",
+                "quantity": round(qty, 4),
+                "unit_cost": round(float(m.get("unit_cost") or 0), 4),
+                "total_value": round(val, 2),
+                "quantity_before": round(q_after - sign * qty, 4),
+                "value_before": round(v_after - sign * val, 2),
+                "quantity_after": round(q_after, 4),
+                "value_after": round(v_after, 2),
+            })
+        if not rows and opening_q == 0 and opening_v == 0:
+            continue
+        ins = [r for r in rows if r["movement_type"] == "in"]
+        outs = [r for r in rows if r["movement_type"] == "out"]
+        closing_q = rows[-1]["quantity_after"] if rows else opening_q
+        closing_v = rows[-1]["value_after"] if rows else opening_v
+        result.append({
+            "item_id": item["id"], "item_code": item.get("item_code"), "item_name": item.get("item_name"), "unit": item.get("unit") or "وحدة",
+            "opening_quantity": round(opening_q, 4), "opening_value": round(opening_v, 2),
+            "in_quantity": round(sum(r["quantity"] for r in ins), 4), "in_value": round(sum(r["total_value"] for r in ins), 2),
+            "out_quantity": round(sum(r["quantity"] for r in outs), 4), "out_value": round(sum(r["total_value"] for r in outs), 2),
+            "closing_quantity": round(closing_q, 4), "closing_value": round(closing_v, 2),
+            "movements": rows,
+        })
+    return {"from_date": from_iso or None, "to_date": to_date.isoformat() if to_date else None, "items": result}
 
 
 @api_router.post("/inventory/movements", response_model=InventoryMovementResponse)
