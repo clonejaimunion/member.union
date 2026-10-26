@@ -835,3 +835,8 @@
 - الحسابات الختامية: توسيط عناوين المجموعات وأسماء البنود داخل الجداول الستة (صف «الإجمالي» بدون تغيير).
 - الحسابات الختامية (GroupedSideTable، الجداول الستة): ترتيب الأعمدة من اليمين = [2026] [البيان] [مقارن السنة السابقة]، وكذلك صف الإجمالي.
 - الشعار: إزالة خلفية المربعات (شطرنج) المدمجة في الصورة وتحويلها لأبيض (union-logo-white.jpeg في public/assets و src/assets)؛ إخفاء الشعار من ورقة تقرير الأخطاء المحاسبية لتفادي التداخل.
+
+## 2026-06 Update
+- Balance sheet «نقدية وبنوك»: current accounts now = bank statement closing balance (bank_statement_closing_balance); all 3 banks (incl. البنك الزراعي) جاري + ودائع always shown even if zero, fixed order.
+- Global amount format: Eastern Arabic digits, no thousands separator, no currency, 2 decimals with "." (formatAmountPlain in lib/format.js; formatCurrency/formatNumber/formatEgpLabel use it).
+- PENDING APPROVAL: switching بنك التنمية جاري to statement balance raised assets by 41,209.03 (unpresented checks) and فائض مرحّل (plug) absorbed it (8,117,683.97 -> 8,158,893.00). Proposed: add unpresented checks to «حسابات دائنة» instead.

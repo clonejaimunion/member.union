@@ -11,7 +11,7 @@ import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { api } from "@/lib/api";
 import { CreditLine } from "@/components/CreditLine";
 import { moduleDefinitions } from "@/lib/modules";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatAmountPlain, formatCurrency, formatDate } from "@/lib/format";
 
 const permissionLabels = {
   enter_deposits: "إدخال ودائع",
@@ -1374,7 +1374,7 @@ export default function AdminPage() {
                   <option value="">— اختر —</option>
                   {roundingDeposits.map((deposit) => (
                     <option key={deposit.id} value={deposit.id} data-testid={`deposit-rounding-option-${deposit.deposit_number}`}>
-                      {deposit.deposit_number} — {deposit.bank_name} — {Number(deposit.amount).toLocaleString("ar-EG")} ج ({deposit.monthly_interest_rate}%) [{deposit.use_daily_rounding ? "تقريب مفعّل" : "تقريب ملغي"}]
+                      {deposit.deposit_number} — {deposit.bank_name} — {formatAmountPlain(deposit.amount)} ({deposit.monthly_interest_rate}%) [{deposit.use_daily_rounding ? "تقريب مفعّل" : "تقريب ملغي"}]
                     </option>
                   ))}
                 </select>

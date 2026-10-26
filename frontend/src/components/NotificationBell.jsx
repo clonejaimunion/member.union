@@ -1,3 +1,4 @@
+import { formatAmountPlain } from "@/lib/format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, BellRing, CheckCheck, ExternalLink, X } from "lucide-react";
@@ -22,7 +23,7 @@ const ensureServiceWorker = () => {
 
 const formatAmount = (value) => {
   const numeric = Number(value || 0);
-  return numeric.toLocaleString("ar-EG", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return formatAmountPlain(numeric);
 };
 
 const requestDesktopPermission = () => {
@@ -79,7 +80,7 @@ export const NotificationBell = () => {
       // Fallback: simple in-tab notification (less reliable but still useful).
       const days = Number(notification.days_remaining || 0);
       const title = days <= 7 ? "⚠️ استحقاق وديعة عاجل" : "تنبيه استحقاق وديعة";
-      const body = `وديعة ${notification.deposit_number} — ${notification.bank_name}\n${formatAmount(notification.amount)} جنيه\nتاريخ الاستحقاق: ${notification.maturity_date} — متبقي ${days} يوم`;
+      const body = `وديعة ${notification.deposit_number} — ${notification.bank_name}\n${formatAmount(notification.amount)}\nتاريخ الاستحقاق: ${notification.maturity_date} — متبقي ${days} يوم`;
       const toast = new Notification(title, { body, tag: `deposit-${notification.id}`, requireInteraction: true });
       toast.onclick = () => {
         window.focus();
@@ -208,7 +209,7 @@ export const NotificationBell = () => {
                         {label}
                       </p>
                       <p className="mt-1 text-sm font-bold text-slate-900" data-testid={`notification-bell-item-${notification.id}-deposit`}>وديعة {notification.deposit_number} — {notification.bank_name}</p>
-                      <p className="text-xs font-bold text-slate-600" data-testid={`notification-bell-item-${notification.id}-amount`}>{formatAmount(notification.amount)} جنيه</p>
+                      <p className="text-xs font-bold text-slate-600" data-testid={`notification-bell-item-${notification.id}-amount`}>{formatAmount(notification.amount)}</p>
                       <p className="mt-1 text-xs font-bold text-slate-500" data-testid={`notification-bell-item-${notification.id}-meta`}>تاريخ الاستحقاق: {notification.maturity_date} — متبقي {days} يوم</p>
                     </div>
                   </div>

@@ -1,3 +1,4 @@
+import { formatAmountPlain } from "@/lib/format";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, Home, LogOut, BarChart3, FileBarChart } from "lucide-react";
@@ -29,7 +30,7 @@ const REPORTS = [
 const formatAmount = (value) => {
   const num = Number(value || 0);
   if (Math.abs(num) < 0.005) return "-";
-  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatAmountPlain(num);
 };
 
 const AmountCell = ({ value, bold }) => (

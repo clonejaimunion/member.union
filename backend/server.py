@@ -4793,17 +4793,8 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             line_1300.detail_source = "accrued_deposit_interest"
             asset_lines.append(line_1300)
             continue
-        if code in bank_code_to_recon:
-            # رصيد البنك = رصيد التسوية البنكية قبل الشيكات للفترة المحددة
-            bank_line = financial_line_from_trial(row, amount=bank_code_to_recon[code])
-            bank_line.name = f"{row.account_name} - جاري"
-            bank_line.details = "رصيد التسوية البنكية الدفتري قبل تسويات الشيكات لشهر نهاية الفترة"
-            bank_line.detail_source = f"bank_recon:{bank_code_to_bid.get(code, '')}"
-            asset_lines.append(bank_line)
-            dep_amount = round(bank_code_to_deposits.get(code, 0.0), 2)
-            if dep_amount != 0:
-                bank_deposit_lines.append(FinancialStatementLine(code=code, name=f"{row.account_name} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة", detail_source=f"bank_deposits:{bank_code_to_bid.get(code, '')}"))
-            continue
+        if code in bank_code_to_bid:
+            continue  # بنود البنوك تُبنى أدناه بترتيب البنوك الثابت
         if is_bank_credit_asset_row(row):
             reclassified_bank_credit_lines.append(bank_credit_liability_line(row))
             continue
@@ -4815,7 +4806,14 @@ async def calculate_financial_statements_report(organization_id: str, from_date:
             asset_lines.append(fa_line)
             continue
         asset_lines.append(financial_line_from_trial(row))
-    # بنود الودائع تظهر تحت بنود الجاري مباشرة ضمن «نقدية وبنوك»
+    # «نقدية وبنوك»: الجاري = رصيد كشف البنك آخر المدة، ثم الودائع؛ كل البنوك تظهر دائماً حتى لو صفر
+    bid_to_code = {bid: code for code, bid in bank_code_to_bid.items()}
+    for bid, bank_info in BANKS.items():
+        closing_statement, _ = await bank_statement_closing_balance(organization_id, bid, period_to)
+        asset_lines.append(FinancialStatementLine(code=bid_to_code.get(bid, "1100"), name=f"{bank_info['name']} - جاري", amount=round(closing_statement, 2), details="رصيد كشف الحساب البنكي في نهاية آخر شهر في الفترة (من التسوية البنكية المحفوظة)", detail_source=f"bank_statement_close:{bid}"))
+    for bid, bank_info in BANKS.items():
+        dep_amount = round(await active_deposit_principal_total(organization_id, period_to, bid), 2)
+        bank_deposit_lines.append(FinancialStatementLine(code=bid_to_code.get(bid, "1100"), name=f"{bank_info['name']} - ودائع", amount=dep_amount, details="إجمالي أصل الودائع النشطة في البنك خلال الفترة المحددة", detail_source=f"bank_deposits:{bid}"))
     asset_lines.extend(bank_deposit_lines)
     # بند «سلف العاملين» ضمن مجموعة «السلف»
     if employee_advances_value != 0:

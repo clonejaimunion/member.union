@@ -1,17 +1,15 @@
-export const formatCurrency = (value) =>
-  new Intl.NumberFormat("ar-EG", {
-    style: "currency",
-    currency: "EGP",
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
+export const formatAmountPlain = (value) =>
+  toEasternArabicNumerals(Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }));
+
+export const formatCurrency = (value) => formatAmountPlain(value);
 
 export const formatNumber = (value) =>
-  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2 }).format(Number(value || 0));
+  toEasternArabicNumerals(Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2, useGrouping: false }));
 
 export const formatRate = (value) =>
   new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 6, useGrouping: false }).format(Number(value || 0));
 
-export const formatEgpLabel = (value) => `${formatNumber(value)} ج.م`;
+export const formatEgpLabel = (value) => formatAmountPlain(value);
 
 export const formatDate = (value) => {
   if (!value) return "—";

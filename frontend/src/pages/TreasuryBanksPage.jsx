@@ -54,7 +54,6 @@ function StatCard({ testId, title, value, tone, Icon }) {
         <div data-testid={`${testId}-text`}>
           <p className="text-xs font-extrabold opacity-75" data-testid={`${testId}-title`}>{title}</p>
           <p className="mt-3 text-2xl font-black leading-tight" data-testid={`${testId}-value`}>{formatCurrency(value)}</p>
-          <p className="mt-1 text-xs font-bold opacity-70" data-testid={`${testId}-currency`}>جنيه مصري</p>
         </div>
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/80 text-slate-950 shadow-sm" data-testid={`${testId}-icon`}><Icon className="h-6 w-6" /></div>
       </div>

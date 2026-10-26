@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { bankPalette, fallbackBanks } from "@/lib/banks";
-import { formatDateTime, sanitizeDayMonthInput, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
+import { formatAmountPlain, formatDateTime, sanitizeDayMonthInput, sanitizeDecimalInput, sanitizeDigitsInput } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppSettings } from "@/contexts/AppSettingsContext";
 import { BankLogo } from "@/components/BankLogo";
@@ -463,7 +463,7 @@ export default function BankReconciliationPage() {
     }
   };
 
-  const formatEgpText = (value) => `${new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(Number(value || 0))} جنيه مصري`;
+  const formatEgpText = (value) => formatAmountPlain(value);
 
   const formatCheckDate = (value) => {
     if (!value) return "—";
